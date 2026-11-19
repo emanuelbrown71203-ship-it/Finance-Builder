@@ -1,0 +1,302 @@
+@import "tailwindcss";
+@import "@fontsource-variable/bricolage-grotesque/standard.css";
+@import "@fontsource-variable/schibsted-grotesk/index.css";
+
+/*
+  Passbook's look comes from the paperwork of money: pale green safety paper,
+  blue-black ink, and the tints of carbonless copy forms (mint, pink, canary).
+  Dark mode is the carbon sheet itself.
+
+  Tints carry meaning and are used the same way everywhere:
+    mint   = money coming in
+    pink   = bills and money owed
+    canary = needs a look
+    sky    = put away (savings, investing)
+*/
+
+:root {
+  color-scheme: light;
+  --paper: #ecf1ec;
+  --sheet: #ffffff;
+  --sunk: #f4f7f4;
+  --ink: #16244d;
+  --ink-2: #47557c;
+  --ink-3: #5f6b88;
+  --line: #d3dcd5;
+  --line-soft: #e5ebe6;
+
+  --accent: #2746d9;
+  --accent-strong: #1c36b0;
+  --accent-text: #2746d9;
+  --on-accent: #ffffff;
+
+  --mint: #d3edde;
+  --mint-ink: #105a3a;
+  --pink: #f9d5dc;
+  --pink-ink: #8b2140;
+  --canary: #fbe9a0;
+  --canary-ink: #654a00;
+  --sky: #d9e2fc;
+  --sky-ink: #1c36b0;
+
+  --good: #15744a;
+  --warn: #9a5b00;
+  --bad: #be322b;
+
+  /* Chart series, validated for color-vision deficiency on --sheet. */
+  --series-1: #2746d9;
+  --series-2: #eb6834;
+  --series-3: #1baf7a;
+  --series-4: #eda100;
+  --series-5: #e87ba4;
+  --series-6: #008300;
+  --series-muted: #a9b3c9;
+  --grid: #e5ebe6;
+  --axis: #c3cdc6;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --paper: #0d1330;
+    --sheet: #1a2247;
+    --sunk: #151c3d;
+    --ink: #eef1fb;
+    --ink-2: #bcc5e0;
+    --ink-3: #96a1c4;
+    --line: #313b6e;
+    --line-soft: #262f5c;
+    --accent: #4963ee;
+    --accent-strong: #5f77f5;
+    --accent-text: #a3b4ff;
+    --on-accent: #ffffff;
+    --mint: #173f33;
+    --mint-ink: #93e2b9;
+    --pink: #4c2238;
+    --pink-ink: #ffb5c6;
+    --canary: #4a3d10;
+    --canary-ink: #f5d978;
+    --sky: #22306c;
+    --sky-ink: #b9c6ff;
+    --good: #58cf95;
+    --warn: #f1b445;
+    --bad: #ff8078;
+    --series-1: #5b7bf2;
+    --series-2: #d95926;
+    --series-3: #199e70;
+    --series-4: #c98500;
+    --series-5: #d55181;
+    --series-6: #0ca30c;
+    --series-muted: #5a6594;
+    --grid: #262f5c;
+    --axis: #3a4580;
+  }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --paper: #0d1330;
+  --sheet: #1a2247;
+  --sunk: #151c3d;
+  --ink: #eef1fb;
+  --ink-2: #bcc5e0;
+  --ink-3: #96a1c4;
+  --line: #313b6e;
+  --line-soft: #262f5c;
+  --accent: #4963ee;
+  --accent-strong: #5f77f5;
+  --accent-text: #a3b4ff;
+  --on-accent: #ffffff;
+  --mint: #173f33;
+  --mint-ink: #93e2b9;
+  --pink: #4c2238;
+  --pink-ink: #ffb5c6;
+  --canary: #4a3d10;
+  --canary-ink: #f5d978;
+  --sky: #22306c;
+  --sky-ink: #b9c6ff;
+  --good: #58cf95;
+  --warn: #f1b445;
+  --bad: #ff8078;
+  --series-1: #5b7bf2;
+  --series-2: #d95926;
+  --series-3: #199e70;
+  --series-4: #c98500;
+  --series-5: #d55181;
+  --series-6: #0ca30c;
+  --series-muted: #5a6594;
+  --grid: #262f5c;
+  --axis: #3a4580;
+}
+
+@theme inline {
+  --color-paper: var(--paper);
+  --color-sheet: var(--sheet);
+  --color-sunk: var(--sunk);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-ink-3: var(--ink-3);
+  --color-line: var(--line);
+  --color-line-soft: var(--line-soft);
+  --color-accent: var(--accent);
+  --color-accent-strong: var(--accent-strong);
+  --color-accent-text: var(--accent-text);
+  --color-on-accent: var(--on-accent);
+  --color-mint: var(--mint);
+  --color-mint-ink: var(--mint-ink);
+  --color-pink: var(--pink);
+  --color-pink-ink: var(--pink-ink);
+  --color-canary: var(--canary);
+  --color-canary-ink: var(--canary-ink);
+  --color-sky: var(--sky);
+  --color-sky-ink: var(--sky-ink);
+  --color-good: var(--good);
+  --color-warn: var(--warn);
+  --color-bad: var(--bad);
+
+  --font-sans: "Schibsted Grotesk Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Bricolage Grotesque Variable", "Schibsted Grotesk Variable", ui-sans-serif, system-ui, sans-serif;
+
+  /* Type scale, roughly a major third from a 15px base. */
+  --text-micro: 0.75rem;
+  --text-small: 0.8125rem;
+  --text-body: 0.9375rem;
+  --text-lead: 1.0625rem;
+  --text-title: 1.375rem;
+  --text-headline: 1.875rem;
+
+  --radius-sheet: 18px;
+  --radius-control: 10px;
+}
+
+html {
+  background: var(--paper);
+}
+
+body {
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: var(--text-body);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Headlines and figures: Bricolage, set slightly condensed so long sums stay compact. */
+.display {
+  font-family: var(--font-display);
+  font-stretch: 84%;
+  font-variation-settings: "opsz" 48;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  line-height: 1.05;
+}
+
+.figure {
+  font-family: var(--font-display);
+  font-stretch: 80%;
+  font-variation-settings: "opsz" 72;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  line-height: 1;
+}
+
+/* Columns of amounts line up digit for digit. */
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent-text);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+::selection {
+  background: var(--sky);
+  color: var(--ink);
+}
+
+/* A row that just arrived washes mint, then settles. */
+@keyframes arrive {
+  0% {
+    background-color: var(--mint);
+    transform: translateY(-6px);
+    opacity: 0;
+  }
+  18% {
+    transform: none;
+    opacity: 1;
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+.arrived {
+  animation: arrive 2.4s ease-out both;
+}
+
+@keyframes live-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--good) 45%, transparent);
+  }
+  60% {
+    box-shadow: 0 0 0 6px transparent;
+  }
+}
+.live-dot {
+  animation: live-pulse 2.2s ease-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .arrived,
+  .live-dot {
+    animation: none;
+  }
+}
+
+/*
+  The stub: a tear-off ticket. The seam between stub and body is a row of
+  perforations with a notch punched out at each end.
+*/
+.stub {
+  position: relative;
+  display: grid;
+  grid-template-columns: var(--stub-width, 3.5rem) 1fr;
+  border-radius: 10px;
+  background: var(--sunk);
+}
+.stub > .stub-tab {
+  border-radius: 10px 0 0 10px;
+  border-right: 2px dotted var(--stub-seam, var(--sheet));
+}
+.stub::before,
+.stub::after {
+  content: "";
+  position: absolute;
+  left: calc(var(--stub-width, 3.5rem) - 6px);
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--stub-seam, var(--sheet));
+}
+.stub::before {
+  top: -5px;
+}
+.stub::after {
+  bottom: -5px;
+}
+
+dialog::backdrop {
+  background: color-mix(in srgb, var(--ink) 45%, transparent);
+}
+:root[data-theme="dark"] dialog::backdrop {
+  background: rgb(4 7 22 / 0.7);
+}
+
+/* Hide number spinners; amounts are typed. */
+input[type="number"]::-webkit-inner-spin-button {
+  appearance: none;
+}
