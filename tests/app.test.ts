@@ -4,6 +4,7 @@ import { seedDemo } from "@/db/seed";
 import { DEMO_USER_ID } from "@/lib/config";
 import type { Ctx } from "@/server/auth";
 import { setBudget, setRecurringOverride, updateGoal, updateTransaction } from "@/server/mutations";
+import { loadRules } from "@/server/rules";
 import { getAccounts, getBudget, getGoals, getInvestments, getNetWorth, getOverview, getRecurring, getTransactions } from "@/server/queries";
 
 /** End-to-end over the real SQL: seed the sample household into PGlite, then read it back. */
@@ -100,6 +101,35 @@ describe("sample household", () => {
     expect(spent(after, "dining")).toBe(spent(before, "dining") + transactions[0].amount);
     expect(spent(after, "groceries")).toBe(spent(before, "groceries") - transactions[0].amount);
     expect(after.totalSpent).toBe(before.totalSpent);
+  });
+
+  it("remembers a category for a merchant, applies it everywhere, and Undo puts it all back", async () => {
+    const all = await getTransactions(ctx, { q: "chipotle", limit: 200, offset: 0 });
+    expect(all.total).toBeGreaterThan(5);
+    expect(all.transactions.every((t) => t.category === "dining")).toBe(true);
+    const one = all.transactions[0];
+
+    // Without "remember", only the one transaction moves.
+    let result = await updateTransaction(ctx, one.id, { category: "groceries" });
+    expect(result).toEqual({ moved: 0, undo: null });
+    await updateTransaction(ctx, one.id, { category: "dining" });
+
+    // With it, every Chipotle charge moves and a rule is saved for the future.
+    result = await updateTransaction(ctx, one.id, { category: "entertainment", remember: true });
+    expect(result.moved).toBe(all.total - 1);
+    expect(result.undo?.rule).toBeNull();
+    const after = await getTransactions(ctx, { q: "chipotle", limit: 200, offset: 0 });
+    expect(after.transactions.every((t) => t.category === "entertainment")).toBe(true);
+    expect((await loadRules(db, DEMO_USER_ID)).get("chipotle")).toBe("entertainment");
+    // Other merchants are untouched.
+    const others = await getTransactions(ctx, { q: "sweetgreen", limit: 5, offset: 0 });
+    expect(others.transactions.every((t) => t.category === "dining")).toBe(true);
+
+    // Undo: the rule goes away and every charge is back where it was.
+    await updateTransaction(ctx, one.id, { category: "dining", restore: result.undo! });
+    const restored = await getTransactions(ctx, { q: "chipotle", limit: 200, offset: 0 });
+    expect(restored.transactions.every((t) => t.category === "dining")).toBe(true);
+    expect((await loadRules(db, DEMO_USER_ID)).has("chipotle")).toBe(false);
   });
 
   it("saves budget limits, goal deposits and cancelled subscriptions", async () => {

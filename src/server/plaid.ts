@@ -7,7 +7,9 @@ import { accounts, balanceSnapshots, holdings, items, transactions } from "@/db/
 import { categoryFromPlaid } from "@/lib/categories";
 import { APP_NAME, DEFAULT_TIMEZONE, plaidConfig } from "@/lib/config";
 import { addDays, todayIn, type ISODate } from "@/lib/dates";
+import { merchantKey } from "@/lib/finance/recurring";
 import { decryptSecret, encryptSecret, sha256 } from "./crypto";
+import { loadRules } from "./rules";
 
 /**
  * Bank connections through Plaid.
@@ -244,13 +246,15 @@ async function syncTransactions(db: DB, item: typeof items.$inferSelect, accessT
     for (const r of rows) existing.set(r.plaidId!, { id: r.id, categoryLocked: r.categoryLocked });
   }
 
+  // Merchants the owner has given a fixed category beat the bank's guess.
+  const rules = await loadRules(db, item.userId);
   const inserts: (typeof transactions.$inferInsert)[] = [];
   // Rows whose Plaid id we’ve taken over, so the matching "removed" entry doesn’t delete them.
   const adopted = new Set<string>();
   for (const t of incoming) {
     const accountId = accountMap.get(t.account_id);
     if (!accountId) continue;
-    const category = categoryFromPlaid(t.personal_finance_category?.primary, t.personal_finance_category?.detailed);
+    const category = rules.get(merchantKey(t.merchant_name || t.name)) ?? categoryFromPlaid(t.personal_finance_category?.primary, t.personal_finance_category?.detailed);
     // When a pending charge posts, Plaid sends a new transaction that points at
     // the pending one. Updating that row keeps the person’s category and note.
     const match = existing.get(t.transaction_id) ?? (t.pending_transaction_id ? existing.get(t.pending_transaction_id) : undefined);

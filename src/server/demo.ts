@@ -4,6 +4,8 @@ import { todayIn, type ISODate } from "@/lib/dates";
 import type { DB } from "@/db";
 import { accounts, balanceSnapshots, items, transactions } from "@/db/schema";
 import { EVERYDAY, seedDemo } from "@/db/seed";
+import { merchantKey } from "@/lib/finance/recurring";
+import { loadRules } from "./rules";
 
 /**
  * Demo mode keeps one sample household fresh: seeded once per day, with a
@@ -56,7 +58,7 @@ async function simulatePurchase(db: DB, today: ISODate, now: Date): Promise<void
     name: merchant.name,
     rawName: merchant.name.toUpperCase(),
     amount,
-    category: merchant.category,
+    category: (await loadRules(db, DEMO_USER_ID)).get(merchantKey(merchant.name)) ?? merchant.category,
     pending: true,
     createdAt: now,
   });

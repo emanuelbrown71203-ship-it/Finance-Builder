@@ -1,17 +1,86 @@
-import { and, eq, sql } from "drizzle-orm";
-import { accounts, balanceSnapshots, budgets, goals, recurringOverrides, transactions } from "@/db/schema";
+import { and, eq, inArray, ne, sql } from "drizzle-orm";
+import { accounts, balanceSnapshots, budgets, categoryRules, goals, recurringOverrides, transactions } from "@/db/schema";
 import { isCategoryKey } from "@/lib/categories";
+import { merchantKey } from "@/lib/finance/recurring";
 import type { Ctx } from "./auth";
 import { HttpError } from "./http";
 
-export async function updateTransaction(ctx: Ctx, id: string, patch: { category?: string; note?: string | null }) {
+/** What a remembered change replaced, so Undo can put everything back exactly. */
+export type RememberUndo = { rule: string | null; others: { id: string; category: string }[] };
+
+const MAX_RULES = 500;
+
+/**
+ * Changes one transaction. With `remember`, the new category also becomes the
+ * rule for that merchant: every other charge from them moves too, and future
+ * ones land there on their own.
+ */
+export async function updateTransaction(
+  ctx: Ctx,
+  id: string,
+  patch: { category?: string; note?: string | null; remember?: boolean; restore?: RememberUndo },
+): Promise<{ moved: number; undo: RememberUndo | null }> {
   if (patch.category !== undefined && !isCategoryKey(patch.category)) throw new HttpError(400, "Unknown category.");
+  const [tx] = await ctx.db.select().from(transactions).where(and(eq(transactions.id, id), eq(transactions.userId, ctx.userId))).limit(1);
+  if (!tx) throw new HttpError(404, "Transaction not found.");
+
   const set: Partial<typeof transactions.$inferInsert> = {};
   if (patch.category !== undefined) Object.assign(set, { category: patch.category, categoryLocked: true });
   if (patch.note !== undefined) set.note = patch.note?.trim() || null;
-  if (Object.keys(set).length === 0) return;
-  const rows = await ctx.db.update(transactions).set(set).where(and(eq(transactions.id, id), eq(transactions.userId, ctx.userId))).returning({ id: transactions.id });
-  if (rows.length === 0) throw new HttpError(404, "Transaction not found.");
+  if (Object.keys(set).length > 0) await ctx.db.update(transactions).set(set).where(eq(transactions.id, tx.id));
+
+  const key = merchantKey(tx.name);
+
+  // Undo of a remembered change: put the rule and the other charges back as they were.
+  if (patch.restore) {
+    if (patch.restore.rule === null) await ctx.db.delete(categoryRules).where(and(eq(categoryRules.userId, ctx.userId), eq(categoryRules.merchantKey, key)));
+    else if (isCategoryKey(patch.restore.rule)) await saveRule(ctx, key, patch.restore.rule);
+    for (const other of patch.restore.others.slice(0, 5000)) {
+      if (!isCategoryKey(other.category)) continue;
+      await ctx.db.update(transactions).set({ category: other.category }).where(and(eq(transactions.id, other.id), eq(transactions.userId, ctx.userId)));
+    }
+    return { moved: 0, undo: null };
+  }
+
+  if (!patch.remember || patch.category === undefined || !key) return { moved: 0, undo: null };
+
+  const [existing] = await ctx.db.select().from(categoryRules).where(and(eq(categoryRules.userId, ctx.userId), eq(categoryRules.merchantKey, key))).limit(1);
+  await saveRule(ctx, key, patch.category);
+
+  // Move every other charge from the same merchant, remembering where each one was.
+  const candidates = await ctx.db
+    .select({ id: transactions.id, name: transactions.name, category: transactions.category })
+    .from(transactions)
+    .where(and(eq(transactions.userId, ctx.userId), ne(transactions.id, tx.id), ne(transactions.category, patch.category)));
+  const others = candidates.filter((t) => merchantKey(t.name) === key).map((t) => ({ id: t.id, category: t.category }));
+  for (let i = 0; i < others.length; i += 500) {
+    await ctx.db
+      .update(transactions)
+      .set({ category: patch.category })
+      .where(
+        and(
+          eq(transactions.userId, ctx.userId),
+          inArray(
+            transactions.id,
+            others.slice(i, i + 500).map((o) => o.id),
+          ),
+        ),
+      );
+  }
+  return { moved: others.length, undo: { rule: existing?.category ?? null, others } };
+}
+
+async function saveRule(ctx: Ctx, key: string, categoryKey: string) {
+  const [{ count }] = await ctx.db.select({ count: sql<number>`count(*)::int` }).from(categoryRules).where(eq(categoryRules.userId, ctx.userId));
+  if (count >= MAX_RULES) throw new HttpError(400, "You’ve reached the limit of remembered categories. Remove some in Settings first.");
+  await ctx.db
+    .insert(categoryRules)
+    .values({ id: crypto.randomUUID(), userId: ctx.userId, merchantKey: key, category: categoryKey })
+    .onConflictDoUpdate({ target: [categoryRules.userId, categoryRules.merchantKey], set: { category: categoryKey } });
+}
+
+export async function deleteRule(ctx: Ctx, id: string) {
+  await ctx.db.delete(categoryRules).where(and(eq(categoryRules.id, id), eq(categoryRules.userId, ctx.userId)));
 }
 
 export async function setRecurringOverride(ctx: Ctx, key: string, patch: { kind?: "bill" | "subscription" | "ignore"; cancelled?: boolean }) {

@@ -50,14 +50,21 @@ const FREQUENCIES: { frequency: Frequency; days: number; min: number; max: numbe
 const HABIT_CATEGORIES = new Set(["groceries", "dining", "shopping", "transport", "travel"]);
 const BILL_CATEGORIES = new Set(["housing", "utilities", "insurance", "loans"]);
 
-export function seriesKeyFor(name: string, amount: number): string {
-  const merchant = name
+/**
+ * A merchant's name boiled down so "CHIPOTLE #2041" and "Chipotle" count as
+ * the same place: lower case, no store numbers or punctuation.
+ */
+export function merchantKey(name: string): string {
+  return name
     .toLowerCase()
     .replace(/[0-9#*]+/g, " ")
     .replace(/[^a-z& ]+/g, " ")
     .replace(/\s+/g, " ")
     .trim();
-  return `${amount > 0 ? "in" : "out"}:${merchant}`;
+}
+
+export function seriesKeyFor(name: string, amount: number): string {
+  return `${amount > 0 ? "in" : "out"}:${merchantKey(name)}`;
 }
 
 function median(values: number[]): number {

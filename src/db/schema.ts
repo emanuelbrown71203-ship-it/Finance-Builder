@@ -26,6 +26,8 @@ export const sessions = pgTable(
     id: text("id").primaryKey(),
     userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    /** Updated as the session is used. A session left idle too long stops working. */
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true }).defaultNow().notNull(),
     createdAt: createdAt(),
   },
   (t) => [index("sessions_user_idx").on(t.userId)],
@@ -186,6 +188,116 @@ export const balanceSnapshots = pgTable(
   },
   (t) => [uniqueIndex("snapshots_account_date_idx").on(t.accountId, t.date), index("snapshots_user_date_idx").on(t.userId, t.date)],
 );
+
+/** "Always put this merchant in this category": set when the owner recategorizes with "remember" on. */
+export const categoryRules = pgTable(
+  "category_rules",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    /** The merchant, normalized the same way recurring charges are (see merchantKey). */
+    merchantKey: text("merchant_key").notNull(),
+    category: text("category").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex("category_rules_user_merchant_idx").on(t.userId, t.merchantKey)],
+);
+
+/** Per-debt choices for the payoff plan, when the bank doesn't report them or the owner knows better. */
+export const debtPlans = pgTable("debt_plans", {
+  accountId: text("account_id").primaryKey().references(() => accounts.id, { onDelete: "cascade" }),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  aprPercent: doublePrecision("apr_percent"),
+  monthlyPayment: cents("monthly_payment"),
+});
+
+/** One row of personal choices per person. */
+export const userSettings = pgTable("user_settings", {
+  userId: text("user_id").primaryKey().references(() => users.id, { onDelete: "cascade" }),
+  /** Extra put toward debt each month, on top of the regular payments. */
+  debtExtra: cents("debt_extra").notNull().default(0),
+  /** avalanche (highest interest first) | snowball (smallest balance first) */
+  debtStrategy: text("debt_strategy").notNull().default("avalanche"),
+});
+
+/** A passkey: Face ID, Touch ID or a security key registered for sign-in. Only the public half is stored. */
+export const passkeys = pgTable(
+  "passkeys",
+  {
+    /** The credential id, base64url. */
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    publicKey: text("public_key").notNull(),
+    counter: bigint("counter", { mode: "number" }).notNull().default(0),
+    transports: text("transports"),
+    name: text("name").notNull(),
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+    createdAt: createdAt(),
+  },
+  (t) => [index("passkeys_user_idx").on(t.userId)],
+);
+
+/** Short-lived one-time values for passkey sign-in and registration. */
+export const authChallenges = pgTable("auth_challenges", {
+  id: text("id").primaryKey(),
+  userId: text("user_id").references(() => users.id, { onDelete: "cascade" }),
+  challenge: text("challenge").notNull(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+});
+
+/** The private link that lets Claude read this person's money. Only a hash of the key is stored. */
+export const connectorTokens = pgTable("connector_tokens", {
+  userId: text("user_id").primaryKey().references(() => users.id, { onDelete: "cascade" }),
+  tokenHash: text("token_hash").notNull().unique(),
+  lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+  createdAt: createdAt(),
+});
+
+/** The connection to Tasks for Two, so bills there can be ticked off when the bank shows them paid. */
+export const taskLinks = pgTable("task_links", {
+  userId: text("user_id").primaryKey().references(() => users.id, { onDelete: "cascade" }),
+  /** The Tasks for Two connector link, encrypted like a bank token. */
+  urlEnc: text("url_enc").notNull(),
+  lastCheckedAt: timestamp("last_checked_at", { withTimezone: true }),
+  lastMessage: text("last_message"),
+  createdAt: createdAt(),
+});
+
+/** "This bill in Tasks for Two is this merchant at the bank", confirmed by the owner. */
+export const billLinks = pgTable(
+  "bill_links",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    tasksBillId: text("tasks_bill_id").notNull(),
+    tasksBillName: text("tasks_bill_name").notNull(),
+    merchantKey: text("merchant_key").notNull(),
+  },
+  (t) => [uniqueIndex("bill_links_user_bill_idx").on(t.userId, t.tasksBillId)],
+);
+
+/** Every payment Passbook has ticked off in Tasks for Two, so none is ever ticked twice. */
+export const billTicks = pgTable(
+  "bill_ticks",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    tasksBillId: text("tasks_bill_id").notNull(),
+    tasksBillName: text("tasks_bill_name").notNull(),
+    dueDate: text("due_date").notNull(),
+    transactionId: text("transaction_id").notNull(),
+    amount: cents("amount").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex("bill_ticks_bill_due_idx").on(t.userId, t.tasksBillId, t.dueDate), uniqueIndex("bill_ticks_tx_idx").on(t.userId, t.transactionId)],
+);
+
+/** Counts attempts (sign-in, connector calls) in a time window. Shared by every server instance. */
+export const rateLimits = pgTable("rate_limits", {
+  key: text("key").primaryKey(),
+  count: bigint("count", { mode: "number" }).notNull().default(0),
+  windowStart: timestamp("window_start", { withTimezone: true }).notNull(),
+});
 
 export type User = typeof users.$inferSelect;
 export type Item = typeof items.$inferSelect;
