@@ -2,6 +2,7 @@
 
 import { ChevronRight, Landmark, LogOut } from "lucide-react";
 import Link from "next/link";
+import { CelebrationsRow, ClaudeSection, PasskeySection, RulesSection, TasksSection } from "@/components/settings-sections";
 import { Button, Fold, PageHeader, Segmented, Sheet, SheetHeader } from "@/components/ui";
 import { useApi, useTheme, type ThemeChoice } from "@/components/use-api";
 import { APP_NAME, APP_VERSION } from "@/lib/config";
@@ -35,7 +36,13 @@ export default function SettingsPage() {
               { value: "dark", label: "Dark" },
             ]}
           />
+          <CelebrationsRow />
         </Sheet>
+
+        <PasskeySection demo={me?.demo ?? true} />
+        <ClaudeSection />
+        <TasksSection />
+        <RulesSection />
 
         <Sheet>
           <SheetHeader title="Your banks" />

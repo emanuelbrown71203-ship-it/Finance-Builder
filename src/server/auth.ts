@@ -55,7 +55,7 @@ function sessionCookie(token: string, maxAgeSeconds: number): string {
   return `${SESSION_COOKIE}=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAgeSeconds}${secure}`;
 }
 
-async function startSession(db: DB, userId: string): Promise<string> {
+export async function startSession(db: DB, userId: string): Promise<string> {
   const token = randomToken();
   const expiresAt = new Date(Date.now() + SESSION_DAYS * 86_400_000);
   await db.insert(sessions).values({ id: sha256(token), userId, expiresAt });

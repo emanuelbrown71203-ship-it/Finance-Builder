@@ -11,7 +11,10 @@ export class HttpError extends Error {
 }
 
 export function json(data: unknown, init?: ResponseInit): Response {
-  return Response.json(data, { ...init, headers: { "cache-control": "no-store", ...init?.headers } });
+  // Answers about someone's money are never stored by a browser or anything in between.
+  const headers = new Headers(init?.headers);
+  if (!headers.has("cache-control")) headers.set("cache-control", "no-store");
+  return Response.json(data, { ...init, headers });
 }
 
 /**

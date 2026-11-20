@@ -10,6 +10,7 @@ import { addDays, todayIn, type ISODate } from "@/lib/dates";
 import { merchantKey } from "@/lib/finance/recurring";
 import { decryptSecret, encryptSecret, sha256 } from "./crypto";
 import { loadRules } from "./rules";
+import { checkBills } from "./tasks-link";
 
 /**
  * Bank connections through Plaid.
@@ -143,6 +144,8 @@ export async function syncItem(db: DB, itemId: string, client: PlaidLike = plaid
     await snapshotBalances(db, item.userId, today);
     if (firstSync) await backfillSnapshots(db, item.userId, accountRows, today);
     await db.update(items).set({ cursor, status: "ok", error: null, lastSyncedAt: now }).where(eq(items.id, item.id));
+    // New payments may have settled bills kept in Tasks for Two.
+    await checkBills(db, item.userId).catch((error) => console.error("Tasks for Two check failed", error instanceof Error ? error.message : error));
   } catch (error) {
     const e = plaidError(error);
     const needsReauth = e.error_code === "ITEM_LOGIN_REQUIRED" || e.error_code === "PENDING_EXPIRATION";

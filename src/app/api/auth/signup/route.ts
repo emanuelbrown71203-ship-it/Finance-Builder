@@ -12,7 +12,7 @@ const Body = z.object({
 
 export const POST = publicRoute(async (request) => {
   if (isDemoMode()) throw new HttpError(400, "Accounts are off while the app is showing sample data.");
-  limit(request, "signup", 8, 10 * 60_000);
+  await limit(request, "signup", 8, 10 * 60_000);
   const parsed = Body.safeParse(await request.json().catch(() => null));
   if (!parsed.success) throw new HttpError(400, parsed.error.issues[0]?.message ?? "Check the form and try again.");
   const result = await signUp(parsed.data);
