@@ -40,6 +40,23 @@ for it to be remembered and used whenever an app is built.
 - Bills and subscriptions are worked out from transaction history each time; only the person's own
   choices ("I cancelled this") are stored.
 - Bank access tokens are stored encrypted. The app can read accounts and can never move money.
+- **The Claude connector is read-only.** Never add a tool to `src/server/connector.ts` that changes
+  anything without asking the owner first.
+- **The Tasks for Two link never runs on sample data**, only ticks bills the owner has linked to a
+  merchant, only on settled payments, and writes each tick down before sending it. It accepts only a
+  Tasks for Two connector address (`isTasksLink`). Keep all four of those true.
+
+## Security rules (the owner asked for this app to be "super secure")
+
+- Every user route goes through `withUser` (`src/server/http.ts`), and every query and change is
+  limited to `ctx.userId`. An id that comes from the request is never trusted on its own.
+- Writes must come from the app itself (`assertSameOrigin`). Don't add a route that changes
+  something on a GET.
+- Secrets (bank tokens, the Tasks link) go through `encryptSecret`; keys and session tokens are
+  stored only as hashes. Nothing secret goes in a log, an error message or the browser.
+- New sign-in or key-guessing surfaces get a rate limit (`src/server/rate-limit.ts`).
+- If a change touches sign-in, sessions, the connectors or the headers in `next.config.ts`, run the
+  security checks again and get an independent review before publishing.
 
 ## Checking your work
 

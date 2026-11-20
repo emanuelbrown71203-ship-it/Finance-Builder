@@ -55,8 +55,11 @@ If a rule here and an app's own existing look disagree, the app's existing look 
   button. The pull reloads the data and, if a newer version of the app is out, loads it. Switch the
   browser's own pull off so there is only one. A pull inside an open sheet or a text box does nothing.
 - Things press in slightly when tapped (`active:scale-[0.98]`).
-- Swipe a row left to remove it (Roux) and press-and-hold to drag (Tasks) are available patterns: use
-  them only where they save real effort, and always give another way to do the same thing.
+- Slide a row left for its most common action (remove it in Roux, change category in Passbook) and
+  press-and-hold to drag (Tasks) are available patterns: use them only where they save real effort,
+  and always give another way to do the same thing.
+- A small celebration (confetti and a card, a few seconds, tap to close) for the moments that earn
+  one: a goal reached, a list cleared. It can be switched off, and "reduce motion" hides the confetti.
 
 ## 6. Feedback
 
@@ -138,3 +141,17 @@ Ask before anything that changes or deletes real data.
 | Light / dark / automatic | `useTheme` in `src/components/use-api.ts`, Settings screen | all four |
 | Section colours | `--c-*` and `.sec-*` in `src/app/globals.css` | HOH Hub |
 | Sample-data mode | `src/server/demo.ts`, `src/db/seed.ts` | Roux, HOH Hub |
+| Slide a row left | `SwipeRow` in `src/components/transactions.tsx` | Roux |
+| Celebrations | `src/components/celebrate.tsx` | Tasks for Two |
+| On/off switch, copy-a-link field | `src/components/settings-sections.tsx` | Roux, Tasks for Two |
+| "Connect to Claude" private link | `src/server/connector.ts`, Settings | Tasks for Two |
+| Sign in with Face ID (passkey) | `src/server/passkeys.ts`, Settings, sign-in page | HOH Hub, Tasks for Two |
+| Weekly recap | `src/app/(app)/recap/page.tsx`, `src/components/recap.tsx` | Tasks for Two |
+
+## 13. Keeping it secure
+
+Every app that holds real data follows the same rules: sign-in is rate limited, sessions are private
+cookies that expire, every lookup is limited to the person signed in, anything secret is stored
+encrypted or as a hash, links that give access (like a Claude connector link) are shown once and can
+be switched off, and nothing that connects two apps runs on sample data. Passbook's CLAUDE.md lists
+them in detail.

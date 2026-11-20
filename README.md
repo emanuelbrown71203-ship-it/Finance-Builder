@@ -41,8 +41,30 @@ Passbook follows the same house style as the owner's other apps (written down in
 | Net worth | What you own minus what you owe over time, by account. Add things no bank reports (a car, a house) by hand. |
 | Savings | Savings balance, monthly saving history, and goals with a projected finish date. |
 | Investing | Total, trend, split by type, and holdings with gain or loss. |
+| Debt payoff | When the loans will be paid off at today's payments, and what a little extra each month changes. |
+| Weekly recap | Last week in money: spent against the week before, money in, bills paid, no-spend days. |
 | Accounts | Linked banks, their status, and linking or removing one. |
-| Settings | Light or dark, how to put it on your home screen, your account, version. |
+| Settings | Light or dark, Face ID sign-in, Connect to Claude, Tasks for Two, remembered categories, your account, version. |
+
+Smaller things that make it easier to live with:
+
+- **Remembered categories.** Move a charge to a category and every charge from that place follows, now
+  and in future. One Undo puts it all back.
+- **Slide a transaction left** to change its category in one tap.
+- **Subscription help.** A warning before a yearly charge renews, a note when a known service charges
+  for the first time, and where to go to cancel.
+- **A little celebration** when a savings goal is reached (it can be switched off).
+
+## Connections
+
+- **Sign in with Face ID** (a passkey). Set a device up in Settings, then sign in with your face or
+  fingerprint and no password.
+- **Ask Claude about your money.** Settings gives you a private link to add to Claude as a custom
+  connector. Claude can then answer questions from your real numbers. The link is read-only: nothing
+  can be changed through it. In sample-data mode there is a try-it link that reads the sample household.
+- **Tasks for Two bills tick themselves off.** Paste your Tasks for Two connector link into Settings
+  and say which merchant pays each bill. When the bank shows a settled payment to that merchant near
+  the due date, the bill is ticked off in Tasks for Two. It never runs on sample data.
 
 ## Going live with real bank data
 
@@ -109,13 +131,22 @@ Conventions worth knowing before changing things:
 
 ### Security
 
-- Bank access tokens are encrypted with AES-256-GCM before they touch the database.
-- Passwords are hashed with scrypt. Sessions are random tokens stored hashed, in an
-  HttpOnly, SameSite=Lax cookie (Secure in production).
-- Every query is scoped to the signed-in user. Writes are rejected when the request's
-  Origin isn't this app.
+- Bank access tokens, and the Tasks for Two link, are encrypted with AES-256-GCM before they touch
+  the database.
+- Passwords are hashed with scrypt; common ones and ones built from your name or email are refused.
+  Passkeys store only the public half of the key.
+- Sessions are random tokens stored hashed, in an HttpOnly, SameSite=Lax cookie (Secure and
+  `__Host-` prefixed in production). They end after 30 days, or 14 days unused, and you can sign
+  out of every device at once.
+- Every query is scoped to the signed-in user. A write is refused unless the browser says it came
+  from this app.
+- Sign-in attempts are rate limited per address and per account, in the database, so the limit
+  holds across server instances. Connector keys are limited the same way.
+- Every response carries a content security policy and the usual hardening headers.
 - Plaid webhooks are rejected unless their signature and body hash verify.
+- The Claude connector key is stored as a hash, shown once, and replaced or revoked from Settings.
 - Access to banks is read-only. The app has no ability to move money.
+- You can delete your account and everything kept for it from Settings.
 
 ## Commands
 
@@ -133,10 +164,14 @@ To run the tests against real Postgres instead of the in-memory database:
 
 ## Not built yet
 
-- Password reset and email verification (needs an email provider).
+- Password reset and email verification (needs an email provider). Face ID sign-in is the way
+  around a forgotten password for now.
+- Free-trial detection: a bank can't see a trial, only its first charge, which is flagged as
+  "might be new".
 - Bank sign-ins that redirect on phones (Plaid OAuth redirect). Desktop linking works without it.
 - Investment transaction history (holdings and balances are synced; individual trades are not).
-- Rules that auto-categorize by merchant, shared households, exports, and push notifications.
-- The sign-in rate limiter is per server instance; put a shared limiter in front before a public launch.
+- Shared households, exports, and push notifications.
+- The Tasks for Two link reuses that app's single Claude connector link, so the same link has to be
+  pasted in both places. A separate key for Passbook would need a small change in Tasks for Two.
 - The Plaid integration is covered by tests against simulated Plaid responses and has not yet
   been run against Plaid's servers, which needs keys.
