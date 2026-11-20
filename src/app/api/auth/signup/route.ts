@@ -3,7 +3,7 @@ import { isDemoMode, signupCode } from "@/lib/config";
 import { signUp } from "@/server/auth";
 import { sameSecret } from "@/server/crypto";
 import { HttpError, json, publicRoute } from "@/server/http";
-import { assertUnderLimit, limit, limitKey } from "@/server/rate-limit";
+import { limit, limitKey } from "@/server/rate-limit";
 
 const Body = z.object({
   name: z.string().trim().min(1, "Enter your name.").max(80),
@@ -24,14 +24,12 @@ export const POST = publicRoute(async (request) => {
   if (!parsed.success) throw new HttpError(400, parsed.error.issues[0]?.message ?? "Check the form and try again.");
   const expected = signupCode();
   if (!expected) throw new HttpError(403, "New accounts are closed.");
-  // Wrong codes are counted across every address together: after 30 in an hour no code is checked
-  // at all for a while, so the code can't be found by trying from many places.
-  await assertUnderLimit("signup-miss", "all", 30, 60 * 60_000);
+  // Every attempt, from every address together, is counted before the code is looked at, in one
+  // step, so a burst of guesses from many places can't all slip under the ceiling at once.
+  // (One address alone can make 48 an hour, so it takes more than one to close sign-up for a while.)
+  await limitKey("signup-attempt", "all", 60, 60 * 60_000);
   // Checked before anything else, so nothing about existing accounts is revealed without it.
-  if (!sameSecret(parsed.data.code, expected)) {
-    await limitKey("signup-miss", "all", 30, 60 * 60_000).catch(() => {});
-    throw new HttpError(403, "That invite code isn’t right.");
-  }
+  if (!sameSecret(parsed.data.code, expected)) throw new HttpError(403, "That invite code isn’t right.");
   const result = await signUp(parsed.data);
   if (!result.ok) throw new HttpError(result.error.includes("already exists") ? 409 : 400, result.error);
   return json({ ok: true }, { headers: { "set-cookie": result.cookie } });

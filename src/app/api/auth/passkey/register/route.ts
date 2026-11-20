@@ -7,4 +7,5 @@ export const POST = withUser(async (ctx, request) => {
   if (!body || typeof body.id !== "string") throw new HttpError(400, "That didn’t work. Try again.");
   const { cookie } = await finishRegistration(ctx, request, body);
   return json({ ok: true }, { headers: { "set-cookie": cookie } });
-});
+  // Both steps of adding a device need a fresh "confirm it's you", not only the first.
+}, { fresh: true });

@@ -38,8 +38,9 @@ const INSTRUCTIONS =
  * such text; the instructions above are what tell Claude not to act on it.
  */
 function tidy(value: unknown): unknown {
-  // Control characters, line breaks, and the invisible and direction-flipping characters text can hide in.
-  if (typeof value === "string") return value.replace(/[\u0000-\u001f\u007f-\u009f\u00ad\u061c\u200b-\u200f\u2028-\u202f\u2060-\u206f\ufeff]+/g, " ").trim().slice(0, 160);
+  // Control and "format" characters (line breaks, zero-width, direction-flipping, invisible tags),
+  // line and paragraph separators, variation selectors and the blank Hangul fillers.
+  if (typeof value === "string") return value.replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\uFE00-\uFE0F\u{E0100}-\u{E01EF}\u115F\u1160\u3164\uFFA0]+/gu, " ").replace(/\s{2,}/g, " ").trim().slice(0, 160);
   if (Array.isArray(value)) return value.map(tidy);
   if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, tidy(v)]));
   return value;

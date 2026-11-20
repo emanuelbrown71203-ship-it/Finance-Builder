@@ -61,10 +61,24 @@ export function databaseUrl(): string | null {
   if (!password) return raw;
   try {
     const url = new URL(raw);
-    if (!url.password) url.password = password;
+    // Encoded, so characters that mean something in an address (%, @, /, :) arrive as typed.
+    if (!url.password) url.password = encodeURIComponent(password);
     return url.href;
   } catch {
     return raw;
+  }
+}
+
+/**
+ * Whether the connection to the database must be encrypted. Always, unless
+ * the database is on this same machine (local development and tests).
+ */
+export function databaseNeedsTls(url: string): boolean {
+  try {
+    const host = new URL(url).hostname.replace(/^\[|\]$/g, "");
+    return !(host === "localhost" || host === "127.0.0.1" || host === "::1");
+  } catch {
+    return true;
   }
 }
 

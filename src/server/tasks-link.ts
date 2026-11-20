@@ -283,7 +283,9 @@ export async function checkBills(db: DB, userId: string, fetchImpl: Fetch = fetc
         .where(and(eq(billTicks.id, t.id), eq(billTicks.userId, userId), eq(billTicks.confirmed, false), or(isNull(billTicks.attemptedAt), lt(billTicks.attemptedAt, new Date(Date.now() - RETRY_AFTER_MS)))))
         .returning({ id: billTicks.id });
       if (claimed.length === 0) {
-        waiting.push(t.tasksBillName);
+        // Another check has it. If that one has finished meanwhile, there is nothing left to wait for.
+        const [now2] = await db.select({ confirmed: billTicks.confirmed }).from(billTicks).where(and(eq(billTicks.id, t.id), eq(billTicks.userId, userId))).limit(1);
+        if (now2 && !now2.confirmed) waiting.push(t.tasksBillName);
         continue;
       }
       await sendTick({ id: t.id, billId: t.tasksBillId, billName: t.tasksBillName, dueDate: t.dueDate, amount: t.amount });
@@ -314,6 +316,6 @@ export async function checkBills(db: DB, userId: string, fetchImpl: Fetch = fetc
     if (inserted.length === 0) continue;
     await sendTick({ id, billId: m.billId, billName: m.billName, dueDate: m.dueDate, amount: m.amount });
   }
-  const message = problems.length > 0 ? `Couldn’t tick ${problems.join(", ").slice(0, 200)}. It will try again next time.` : waiting.length > 0 && ticked === 0 ? `Still waiting to hear back about ${waiting.join(", ").slice(0, 200)}. It will check again in a couple of minutes.` : ticked > 0 ? `Ticked off ${ticked} ${ticked === 1 ? "bill" : "bills"}.` : "Nothing new to tick off.";
+  const message = problems.length > 0 ? `Couldn’t tick ${problems.join(", ").slice(0, 200)}. It will try again next time.` : waiting.length > 0 && ticked === 0 ? `Still waiting to hear back about ${waiting.join(", ").slice(0, 200)}. Check again in a couple of minutes.` : ticked > 0 ? `Ticked off ${ticked} ${ticked === 1 ? "bill" : "bills"}.` : "Nothing new to tick off.";
   return finish(ticked, message);
 }

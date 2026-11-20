@@ -63,6 +63,14 @@ export function passwordNeedsUpgrade(stored: string): boolean {
   return !parsed || parsed.cost.N < COST.N;
 }
 
+/** A stored secret that isn't in a format this app writes. It can never be opened, with any key. */
+export class SecretFormatError extends Error {
+  constructor() {
+    super("Unrecognized secret format.");
+    this.name = "SecretFormatError";
+  }
+}
+
 function encryptionKey(): Buffer {
   const raw = process.env.TOKEN_ENCRYPTION_KEY;
   if (!raw) throw new Error("TOKEN_ENCRYPTION_KEY is not set. Generate one with: openssl rand -base64 32");
@@ -90,10 +98,10 @@ export function encryptSecret(plain: string, owner: string): string {
 
 export function decryptSecret(stored: string, owner: string): string {
   const [version, ivText, tagText, body] = stored.split(".");
-  if (version !== "v2" || !ivText || !tagText || !body) throw new Error("Unrecognized secret format.");
+  if (version !== "v2" || !ivText || !tagText || !body) throw new SecretFormatError();
   const iv = Buffer.from(ivText, "base64url");
   const tag = Buffer.from(tagText, "base64url");
-  if (iv.length !== 12 || tag.length !== TAG_BYTES) throw new Error("Unrecognized secret format.");
+  if (iv.length !== 12 || tag.length !== TAG_BYTES) throw new SecretFormatError();
   const decipher = createDecipheriv("aes-256-gcm", encryptionKey(), iv, { authTagLength: TAG_BYTES });
   decipher.setAAD(Buffer.from(owner, "utf8"));
   decipher.setAuthTag(tag);

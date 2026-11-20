@@ -29,6 +29,7 @@ import { join } from "node:path";
 const SCHEMA = "passbook";
 const ROLE = "passbook_app";
 const fromIndex = process.argv.includes("--from") ? Number(process.argv[process.argv.indexOf("--from") + 1]) : 0;
+if (!Number.isInteger(fromIndex) || fromIndex < 0) throw new Error("--from needs a whole number: the first migration to include, e.g. --from 3");
 
 const dir = join(process.cwd(), "drizzle");
 const files = readdirSync(dir).filter((f) => /^\d{4}_.*\.sql$/.test(f)).sort();
@@ -69,6 +70,9 @@ for (const file of files) {
     if (!/^(CREATE TABLE|ALTER TABLE|CREATE (UNIQUE )?INDEX "[^"]+" ON|DROP TABLE|DROP INDEX) "passbook"\./.test(fixed)) {
       throw new Error(`${file}: don't know how to place this statement in the ${SCHEMA} schema:\n${statement.slice(0, 200)}`);
     }
+    // One statement per chunk, and nothing in it may point at a table outside our schema.
+    if (fixed.replace(/;\s*$/, "").includes(";")) throw new Error(`${file}: more than one statement in a chunk:\n${statement.slice(0, 200)}`);
+    if (/REFERENCES (?!"passbook"\.)/.test(fixed)) throw new Error(`${file}: a reference to a table outside the ${SCHEMA} schema:\n${statement.slice(0, 200)}`);
     out.push(fixed);
   }
 }

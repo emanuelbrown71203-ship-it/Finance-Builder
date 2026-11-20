@@ -37,15 +37,22 @@ function challengeCookie(id: string, maxAge: number): string {
   return `${CHALLENGE_COOKIE}=${id}; Path=/api/auth; HttpOnly; SameSite=Strict; Max-Age=${maxAge}${secure}`;
 }
 
-async function saveChallenge(db: DB, challenge: string, userId: string | null): Promise<string> {
+/**
+ * What a challenge was issued for. A challenge is only good for the thing it
+ * was issued for: one handed out to confirm it's you can't be used to add a
+ * new device, and one for signing in can't be used to confirm.
+ */
+type Purpose = "register" | "confirm" | "login";
+
+async function saveChallenge(db: DB, purpose: Purpose, challenge: string, userId: string | null): Promise<string> {
   const id = randomToken(24);
   await db.delete(authChallenges).where(lt(authChallenges.expiresAt, new Date()));
-  await db.insert(authChallenges).values({ id, userId, challenge, expiresAt: new Date(Date.now() + CHALLENGE_MINUTES * 60_000) });
+  await db.insert(authChallenges).values({ id, userId, challenge: `${purpose}:${challenge}`, expiresAt: new Date(Date.now() + CHALLENGE_MINUTES * 60_000) });
   return challengeCookie(id, CHALLENGE_MINUTES * 60);
 }
 
-/** Reads and uses up the one-time challenge for this browser. */
-async function takeChallenge(db: DB, request: Request): Promise<{ challenge: string; userId: string | null }> {
+/** Reads and uses up the one-time challenge for this browser. It must have been issued for this purpose. */
+async function takeChallenge(db: DB, request: Request, purpose: Purpose): Promise<{ challenge: string; userId: string | null }> {
   const id = (request.headers.get("cookie") ?? "")
     .split(";")
     .map((p) => p.trim().split("="))
@@ -53,7 +60,9 @@ async function takeChallenge(db: DB, request: Request): Promise<{ challenge: str
   if (!id) throw new HttpError(400, "That took too long. Try again.");
   const [row] = await db.delete(authChallenges).where(eq(authChallenges.id, id)).returning();
   if (!row || row.expiresAt < new Date()) throw new HttpError(400, "That took too long. Try again.");
-  return { challenge: row.challenge, userId: row.userId };
+  const prefix = `${purpose}:`;
+  if (!row.challenge.startsWith(prefix)) throw new HttpError(400, "That took too long. Try again.");
+  return { challenge: row.challenge.slice(prefix.length), userId: row.userId };
 }
 
 function deviceName(request: Request): string {
@@ -92,13 +101,15 @@ export async function registrationOptions(ctx: Ctx, request: Request) {
     // "required" means the device must check it's really you (face, fingerprint or PIN), not just be present.
     authenticatorSelection: { residentKey: "required", userVerification: "required" },
   });
-  return { options, cookie: await saveChallenge(ctx.db, options.challenge, ctx.userId) };
+  return { options, cookie: await saveChallenge(ctx.db, "register", options.challenge, ctx.userId) };
 }
 
 /** Step 2: check what the device made and store its public half. */
 export async function finishRegistration(ctx: Ctx, request: Request, response: RegistrationResponseJSON) {
-  const { challenge, userId } = await takeChallenge(ctx.db, request);
+  const { challenge, userId } = await takeChallenge(ctx.db, request, "register");
   if (userId !== ctx.userId) throw new HttpError(400, "That took too long. Try again.");
+  const held = await ctx.db.select({ id: passkeys.id }).from(passkeys).where(eq(passkeys.userId, ctx.userId));
+  if (held.length >= MAX_PASSKEYS) throw new HttpError(400, "You’ve reached the limit of saved devices. Remove one first.");
   const { rpID, origin } = site(request);
   const result = await verifyRegistrationResponse({ response, expectedChallenge: challenge, expectedOrigin: origin, expectedRPID: rpID, requireUserVerification: true }).catch(() => null);
   if (!result?.verified) throw new HttpError(400, "That didn’t work. Try again.");
@@ -126,7 +137,7 @@ export async function confirmOptions(ctx: Ctx, request: Request) {
     userVerification: "required",
     allowCredentials: own.map((p) => ({ id: p.id, transports: (p.transports?.split(",") ?? undefined) as never })),
   });
-  return { options, cookie: await saveChallenge(ctx.db, options.challenge, ctx.userId) };
+  return { options, cookie: await saveChallenge(ctx.db, "confirm", options.challenge, ctx.userId) };
 }
 
 /**
@@ -135,7 +146,7 @@ export async function confirmOptions(ctx: Ctx, request: Request) {
  * is signed in. On success this session is marked freshly checked.
  */
 export async function finishConfirm(ctx: Ctx, request: Request, response: AuthenticationResponseJSON): Promise<{ cookie: string }> {
-  const { challenge, userId } = await takeChallenge(ctx.db, request);
+  const { challenge, userId } = await takeChallenge(ctx.db, request, "confirm");
   const failed = new HttpError(401, "That didn’t confirm it’s you. Use your password instead.");
   if (userId !== ctx.userId) throw failed;
   const [key] = await ctx.db.select().from(passkeys).where(and(eq(passkeys.id, response.id), eq(passkeys.userId, ctx.userId))).limit(1);
@@ -159,13 +170,13 @@ export async function finishConfirm(ctx: Ctx, request: Request, response: Authen
 export async function loginOptions(request: Request) {
   const db = await getDb();
   const options = await generateAuthenticationOptions({ rpID: site(request).rpID, userVerification: "required" });
-  return { options, cookie: await saveChallenge(db, options.challenge, null) };
+  return { options, cookie: await saveChallenge(db, "login", options.challenge, null) };
 }
 
 /** Step 2: check the device's answer against the stored public half, then start a session. */
 export async function finishLogin(request: Request, response: AuthenticationResponseJSON): Promise<{ cookies: string[] }> {
   const db = await getDb();
-  const { challenge } = await takeChallenge(db, request);
+  const { challenge } = await takeChallenge(db, request, "login");
   const failed = new HttpError(401, "That passkey wasn’t recognized. Sign in with your password instead.");
   const [key] = await db.select().from(passkeys).where(eq(passkeys.id, response.id)).limit(1);
   if (!key) throw failed;

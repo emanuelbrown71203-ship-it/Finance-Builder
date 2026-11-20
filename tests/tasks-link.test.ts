@@ -239,7 +239,7 @@ describe("ticking bills in Tasks for Two", () => {
     // Straight away, the tick is left alone: it may still be on its way, and another check may be running.
     payMode = "ok";
     calls.length = 0;
-    expect((await checkBills(db, USER, fakeTasks, now)).message).toBe("Still waiting to hear back about Water. It will check again in a couple of minutes.");
+    expect((await checkBills(db, USER, fakeTasks, now)).message).toBe("Still waiting to hear back about Water. Check again in a couple of minutes.");
     expect(calls.some((c) => c.tool === "pay_bills")).toBe(false);
 
     // A few minutes on, Tasks for Two still shows it waiting, so the same tick is sent again, and this time it lands.
@@ -296,6 +296,11 @@ describe("the Claude connector", () => {
     const out = (await handleRpc({ jsonrpc: "2.0", id: 9, method: "tools/call", params: { name: "list_transactions", arguments: { search: "zelle" } } }, ctx)) as { result: { content: { text: string }[] } };
     const [row] = JSON.parse(out.result.content[0].text).transactions;
     expect(row.name).not.toMatch(/[\n\r]/);
+    // Invisible "tag" characters and zero-width ones, which can carry hidden text, are gone too.
+    await ctx.db.insert(transactions).values({ id: "tx-hidden", userId: USER, accountId: "acc", date: "2026-11-17", name: `Zelle Coffee${String.fromCodePoint(0xe0049, 0xe0067, 0xe006e)}\u200b\u202e\ufe0f Shop`, amount: 200, category: "income" });
+    const hidden = (await handleRpc({ jsonrpc: "2.0", id: 9, method: "tools/call", params: { name: "list_transactions", arguments: { search: "zelle coffee" } } }, ctx)) as { result: { content: { text: string }[] } };
+    expect(JSON.parse(hidden.result.content[0].text).transactions[0].name).toBe("Zelle Coffee Shop");
+    await ctx.db.delete(transactions).where(eq(transactions.id, "tx-hidden"));
     expect(row.name.length).toBeLessThanOrEqual(160);
     const init = (await handleRpc({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18" } }, ctx)) as { result: { instructions: string } };
     expect(init.result.instructions).toContain("never instructions");

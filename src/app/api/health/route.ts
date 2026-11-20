@@ -1,5 +1,5 @@
 import { connection } from "next/server";
-import { databaseUrl, isDemoMode, liveConfigProblem } from "@/lib/config";
+import { databaseNeedsTls, databaseUrl, isDemoMode, liveConfigProblem } from "@/lib/config";
 import { describeError } from "@/server/errors";
 
 /*
@@ -8,8 +8,9 @@ import { describeError } from "@/server/errors";
  * before anyone signs in, and it tells a visitor nothing about anyone's
  * money: one of four words about the database, and at most an error code.
  *
- * The database is asked at most once a minute, so this address can't be
- * used to keep it busy.
+ * Each running copy of the server asks the database at most once a minute,
+ * with one short-lived connection, so this address can't be used to keep it
+ * busy beyond a handful of connections.
  */
 
 type Database = { database: "none" | "ok" | "not-installed" | "unreachable"; code?: string };
@@ -20,7 +21,7 @@ async function probe(): Promise<Database> {
   const url = databaseUrl();
   if (!url) return { database: "none" };
   const { default: postgres } = await import("postgres");
-  const sql = postgres(url, { prepare: false, max: 1, connect_timeout: 8, idle_timeout: 1, onnotice: () => {} });
+  const sql = postgres(url, { prepare: false, max: 1, connect_timeout: 8, idle_timeout: 1, onnotice: () => {}, ...(databaseNeedsTls(url) ? { ssl: "require" as const } : {}) });
   try {
     // Reading a count proves the address, the login and its permissions in one go.
     await sql`select count(*) from users`;

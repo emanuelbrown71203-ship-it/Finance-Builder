@@ -8,7 +8,7 @@ import { categoryFromPlaid } from "@/lib/categories";
 import { APP_NAME, DEFAULT_TIMEZONE, plaidConfig } from "@/lib/config";
 import { addDays, todayIn, type ISODate } from "@/lib/dates";
 import { merchantKey } from "@/lib/finance/recurring";
-import { decryptSecret, encryptSecret, sha256 } from "./crypto";
+import { SecretFormatError, decryptSecret, encryptSecret, sha256 } from "./crypto";
 import { HttpError, describeError } from "./errors";
 import { loadRules } from "./rules";
 import { checkBills } from "./tasks-link";
@@ -135,11 +135,18 @@ async function revokeAtPlaid(item: typeof items.$inferSelect): Promise<void> {
   let accessToken: string;
   try {
     accessToken = decryptSecret(item.accessTokenEnc, bankOwner(item.userId));
-  } catch {
-    // A stored token that can't be opened can't be used for anything, switching the connection off
-    // included. Keeping it would only make this bank impossible to remove.
-    console.error(`A stored bank token could not be opened (item ${item.id}); it is being removed without telling Plaid.`);
-    return;
+  } catch (error) {
+    if (error instanceof SecretFormatError) {
+      // Not in a format this app writes: no key will ever open it, so it can't be used to switch the
+      // connection off. Keeping it would only make this bank impossible to remove.
+      console.error(`A stored bank token is unreadable (Plaid item ${item.plaidItemId ?? "unknown"}); removing it without telling Plaid.`);
+      return;
+    }
+    // It is in the right format but won't open. That usually means this site's encryption key is not
+    // the one it was sealed with, which can be put right. Throwing the token away now would leave
+    // the connection live at Plaid with no way to switch it off, so it is kept.
+    console.error(`A stored bank token would not open (Plaid item ${item.plaidItemId ?? "unknown"}): ${describeError(error)}`);
+    throw new HttpError(502, `Couldn’t disconnect ${item.institutionName}: its saved connection can’t be read right now, so nothing was removed here.`);
   }
   try {
     await call(() => plaidClient().itemRemove({ access_token: accessToken }));
@@ -166,7 +173,12 @@ export async function removeItem(db: DB, userId: string, itemId: string): Promis
  */
 export async function revokeAllForUser(db: DB, userId: string): Promise<void> {
   const rows = await db.select().from(items).where(eq(items.userId, userId));
-  for (const item of rows) await revokeAtPlaid(item);
+  for (const item of rows) {
+    await revokeAtPlaid(item);
+    // If a later bank can't be switched off and the person keeps their account after all, this one
+    // shows as needing to be linked again, which is the truth.
+    await db.update(items).set({ status: "needs_reauth", error: "This bank was disconnected. Link it again to keep it up to date." }).where(and(eq(items.id, item.id), eq(items.userId, userId)));
+  }
 }
 
 /* ---------- sync ---------- */

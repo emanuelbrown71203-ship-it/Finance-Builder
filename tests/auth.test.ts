@@ -12,13 +12,16 @@ import { POST as loginRoute } from "@/app/api/auth/login/route";
 import { POST as logoutAllRoute } from "@/app/api/auth/logout-all/route";
 import { POST as passkeyConfirmOptionsRoute } from "@/app/api/auth/passkey/confirm-options/route";
 import { POST as passkeyConfirmRoute } from "@/app/api/auth/passkey/confirm/route";
+import { POST as passkeyLoginOptionsRoute } from "@/app/api/auth/passkey/login-options/route";
+import { POST as passkeyRegisterOptionsRoute } from "@/app/api/auth/passkey/register-options/route";
+import { POST as passkeyRegisterRoute } from "@/app/api/auth/passkey/register/route";
 import { POST as passwordRoute } from "@/app/api/auth/password/route";
 import { POST as signupRoute } from "@/app/api/auth/signup/route";
 import { POST as connectorRoute } from "@/app/api/connector/route";
 import { DELETE as deleteAccountRoute, GET as meRoute } from "@/app/api/me/route";
 import { getDb, type DB } from "@/db";
 import { connectorTokens, items, passkeys, rateLimits, sessions, users } from "@/db/schema";
-import { databaseUrl, liveConfigProblem } from "@/lib/config";
+import { databaseNeedsTls, databaseUrl, liveConfigProblem } from "@/lib/config";
 import { contextForKey } from "@/server/connector";
 import { decryptSecret, encryptSecret, hashPassword, passwordNeedsUpgrade, sha256, verifyPassword } from "@/server/crypto";
 import { describeError } from "@/server/errors";
@@ -179,6 +182,39 @@ describe("confirm it’s you", () => {
     expect((await (await meRoute(req("/api/me", { method: "GET", cookie }), none)).json()).user.email).toBe(person.email);
     expect((await connectorRoute(req("/api/connector", { cookie }), none)).status).toBe(403);
     expect(await db.select().from(users).where(eq(users.id, "partner"))).toHaveLength(1);
+    await confirmRoute(req("/api/auth/confirm", { body: { password: person.password }, cookie }), none);
+  });
+
+  it("a challenge is only good for what it was issued for: a stale session can't turn a confirm into a new device", async () => {
+    const [me] = await db.select().from(users).where(eq(users.email, person.email));
+    const made = { id: "planted-key", rawId: "planted-key", type: "public-key", response: { clientDataJSON: "e30", attestationObject: "oA" }, clientExtensionResults: {} };
+    const count = async () => (await db.select().from(passkeys).where(eq(passkeys.userId, me.id))).length;
+    expect(await count()).toBe(1);
+
+    // Signed in eleven minutes ago. Asking to add a device is refused outright...
+    await age(11);
+    expect((await passkeyRegisterOptionsRoute(req("/api/auth/passkey/register-options", { cookie }), none)).status).toBe(403);
+    // ...so they ask for a "confirm it's you" challenge instead (anyone signed in may), and try to
+    // spend it on adding a device. The second step needs a fresh confirm of its own.
+    const confirmChallenge = cookieOf(await passkeyConfirmOptionsRoute(req("/api/auth/passkey/confirm-options", { cookie }), none));
+    const stale = await passkeyRegisterRoute(req("/api/auth/passkey/register", { cookie: `${cookie}; ${confirmChallenge}`, body: made }), none);
+    expect(stale.status).toBe(403);
+    expect(await stale.json()).toMatchObject({ reauth: true });
+
+    // Even freshly confirmed, a challenge issued for confirming, or for signing in, is not accepted for adding a device.
+    await confirmRoute(req("/api/auth/confirm", { body: { password: person.password }, cookie }), none);
+    for (const issue of [() => passkeyConfirmOptionsRoute(req("/api/auth/passkey/confirm-options", { cookie }), none), () => passkeyLoginOptionsRoute(req("/api/auth/passkey/login-options", { ip: freshIp() }))]) {
+      const challenge = cookieOf(await issue());
+      const response = await passkeyRegisterRoute(req("/api/auth/passkey/register", { cookie: `${cookie}; ${challenge}`, body: made }), none);
+      expect(response.status).toBe(400);
+    }
+    // And a challenge issued for adding a device can't be used to confirm.
+    const registerChallenge = cookieOf(await passkeyRegisterOptionsRoute(req("/api/auth/passkey/register-options", { cookie }), none));
+    await age(11);
+    expect((await passkeyConfirmRoute(req("/api/auth/passkey/confirm", { cookie: `${cookie}; ${registerChallenge}`, body: { id: "key-of-mine", rawId: "key-of-mine", type: "public-key", response: {}, clientExtensionResults: {} } }), none)).status).toBe(400);
+    expect((await connectorRoute(req("/api/connector", { cookie }), none)).status).toBe(403);
+
+    expect(await count()).toBe(1);
     await db.delete(passkeys).where(eq(passkeys.userId, me.id));
     await confirmRoute(req("/api/auth/confirm", { body: { password: person.password }, cookie }), none);
   });
@@ -195,6 +231,7 @@ describe("confirm it’s you", () => {
 
 describe("changing the password and signing out everywhere", () => {
   it("a new password signs out every other device and stops the old password working", async () => {
+    await db.delete(rateLimits); // the tests above used up this account's password-check allowance
     const other = cookieOf(await loginRoute(req("/api/auth/login", { body: { email: person.email, password: person.password }, ip: freshIp() })));
     expect((await meRoute(req("/api/me", { method: "GET", cookie: other }), none)).status).toBe(200);
 
@@ -222,7 +259,7 @@ describe("changing the password and signing out everywhere", () => {
 });
 
 describe("removing a bank", () => {
-  it("a bank whose stored token can no longer be opened can still be removed", async () => {
+  it("a bank whose stored token is unreadable can still be removed, but one that merely won't open is kept", async () => {
     const saved = { id: process.env.PLAID_CLIENT_ID, secret: process.env.PLAID_SECRET };
     Object.assign(process.env, { PLAID_CLIENT_ID: "test-client", PLAID_SECRET: "test-secret" });
     try {
@@ -232,9 +269,12 @@ describe("removing a bank", () => {
         { id: "item-wrong-owner", userId: "banked", institutionName: "First Bank", accessTokenEnc: encryptSecret("access-production-abc", "bank:someone-else") },
         { id: "item-old-format", userId: "banked", institutionName: "Second Bank", accessTokenEnc: "v1.aaaa.bbbb.cccc" },
       ]);
-      await removeItem(db, "banked", "item-wrong-owner");
+      // An old format no key will ever open: nothing to keep it for.
       await removeItem(db, "banked", "item-old-format");
-      expect(await db.select().from(items).where(eq(items.userId, "banked"))).toHaveLength(0);
+      // The right format but it won't open (a wrong key on this site, say). Throwing it away would leave
+      // the connection live at Plaid with no way to switch it off, so it stays and the person is told.
+      await expect(removeItem(db, "banked", "item-wrong-owner")).rejects.toThrow("can’t be read right now");
+      expect((await db.select().from(items).where(eq(items.userId, "banked"))).map((i) => i.id)).toEqual(["item-wrong-owner"]);
     } finally {
       for (const [key, value] of [["PLAID_CLIENT_ID", saved.id], ["PLAID_SECRET", saved.secret]] as const) {
         if (value === undefined) delete process.env[key];
@@ -245,11 +285,12 @@ describe("removing a bank", () => {
 });
 
 describe("rate limits", () => {
-  it("wrong invite codes are counted across every address together, and then no code is checked for a while", async () => {
+  it("invite-code attempts are counted across every address together, even when they all arrive at once", async () => {
     await db.delete(rateLimits);
-    let last = 0;
-    for (let i = 0; i < 31; i++) last = (await signupRoute(req("/api/auth/signup", { body: { name: "Mal", email: `mal${i}@example.com`, password: "correct horse battery", code: `guess-${i}` }, ip: freshIp() }))).status;
-    expect(last).toBe(429);
+    // 150 guesses at the same moment, each from a different address. Only 60 are even compared.
+    const burst = await Promise.all(Array.from({ length: 150 }, (_, i) => signupRoute(req("/api/auth/signup", { body: { name: "Mal", email: `mal${i}@example.com`, password: "correct horse battery", code: `guess-${i}` }, ip: freshIp() }))));
+    expect(burst.filter((r) => r.status === 403)).toHaveLength(60);
+    expect(burst.filter((r) => r.status === 429)).toHaveLength(90);
     // Even the right code waits now, so it can't be found by trying from many places.
     expect((await signupRoute(req("/api/auth/signup", { body: { name: "Mal", email: "mal@example.com", password: "correct horse battery", code: "walnut-harbor-42" }, ip: freshIp() }))).status).toBe(429);
     await db.delete(rateLimits);
@@ -342,6 +383,14 @@ describe("secrets", () => {
       process.env.DATABASE_PASSWORD = "p@ss/w:rd#1";
       expect(liveConfigProblem()).toBeNull();
       expect(decodeURIComponent(new URL(databaseUrl()!).password)).toBe("p@ss/w:rd#1");
+      for (const awkward of ["ab%41cd", "tr%2Fick", "p@ss%word", "100%sure"]) {
+        process.env.DATABASE_PASSWORD = awkward;
+        expect(decodeURIComponent(new URL(databaseUrl()!).password), awkward).toBe(awkward);
+      }
+      // Encrypted in transit unless the database is on this same machine.
+      expect(databaseNeedsTls("postgres://app.project@aws-0-us-east-1.pooler.example.com:6543/postgres")).toBe(true);
+      expect(databaseNeedsTls("postgres://app@127.0.0.1:5432/passbook")).toBe(false);
+      expect(databaseNeedsTls("not an address")).toBe(true);
       delete process.env.DATABASE_PASSWORD;
       process.env.DATABASE_URL = "postgres://app:secret@db.example:6543/postgres";
       expect(liveConfigProblem()).toBeNull();
