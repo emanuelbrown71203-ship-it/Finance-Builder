@@ -1,5 +1,5 @@
 import type { PgDatabase, PgQueryResultHKT } from "drizzle-orm/pg-core";
-import { databaseNeedsTls, databaseUrl, isDemoMode, liveConfigProblem } from "@/lib/config";
+import { databaseTls, databaseUrl, isDemoMode, liveConfigProblem } from "@/lib/config";
 import { MIGRATION_STATEMENTS } from "./embedded-migrations";
 import * as schema from "./schema";
 
@@ -24,7 +24,7 @@ async function connect(): Promise<DB> {
     const { drizzle } = await import("drizzle-orm/postgres-js");
     // prepare:false keeps us compatible with Supabase’s transaction pooler.
     // Encrypted in transit whatever the address says: the driver's own default is plain text.
-    const client = postgres(url, { prepare: false, max: 5, ...(databaseNeedsTls(url) ? { ssl: "require" as const } : {}) });
+    const client = postgres(url, { prepare: false, max: 5, ...databaseTls(url) });
     return drizzle(client, { schema }) as unknown as DB;
   }
 

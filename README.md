@@ -213,6 +213,11 @@ To run the tests against real Postgres instead of the in-memory database:
 - Password sign-in can still be slowed for everyone, the owner included, by a flood of wrong
   guesses at one email from many addresses (300 an hour is the ceiling). Face ID sign-in is
   not affected, so set it up. A "this device has signed in before" pass would close the gap.
+- Checking the database server's certificate. The connection is always encrypted, but the
+  server's identity is not verified unless the address says `sslmode=verify-full` and the
+  database's CA certificate is supplied. On Supabase that means adding their CA certificate.
+- A way to remove a bank whose saved connection can no longer be read at all (a lost encryption
+  key). Today it is kept on purpose, so a live connection is never orphaned at Plaid.
 - A stricter content security policy for scripts (hashes instead of `'unsafe-inline'`). The app
   has no place where outside text is turned into markup, so this is a second line of defence.
 - Free-trial detection: a bank can't see a trial, only its first charge, which is flagged as

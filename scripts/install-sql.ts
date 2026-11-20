@@ -29,6 +29,8 @@ import { join } from "node:path";
 const SCHEMA = "passbook";
 const ROLE = "passbook_app";
 const fromIndex = process.argv.includes("--from") ? Number(process.argv[process.argv.indexOf("--from") + 1]) : 0;
+const fromValue = process.argv.includes("--from") ? (process.argv[process.argv.indexOf("--from") + 1] ?? "") : "0";
+if (process.argv.some((a) => a.startsWith("--from=")) || !/^\d+$/.test(fromValue)) throw new Error("Write it as: --from 3 (a space, then the first migration to include)");
 if (!Number.isInteger(fromIndex) || fromIndex < 0) throw new Error("--from needs a whole number: the first migration to include, e.g. --from 3");
 
 const dir = join(process.cwd(), "drizzle");

@@ -1,5 +1,5 @@
 import { connection } from "next/server";
-import { databaseNeedsTls, databaseUrl, isDemoMode, liveConfigProblem } from "@/lib/config";
+import { databaseTls, databaseUrl, isDemoMode, liveConfigProblem } from "@/lib/config";
 import { describeError } from "@/server/errors";
 
 /*
@@ -21,7 +21,7 @@ async function probe(): Promise<Database> {
   const url = databaseUrl();
   if (!url) return { database: "none" };
   const { default: postgres } = await import("postgres");
-  const sql = postgres(url, { prepare: false, max: 1, connect_timeout: 8, idle_timeout: 1, onnotice: () => {}, ...(databaseNeedsTls(url) ? { ssl: "require" as const } : {}) });
+  const sql = postgres(url, { prepare: false, max: 1, connect_timeout: 8, idle_timeout: 1, onnotice: () => {}, ...databaseTls(url) });
   try {
     // Reading a count proves the address, the login and its permissions in one go.
     await sql`select count(*) from users`;

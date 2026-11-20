@@ -193,7 +193,7 @@ export async function finishLogin(request: Request, response: AuthenticationResp
   const [user] = await db.select({ id: users.id }).from(users).where(eq(users.id, key.userId)).limit(1);
   if (!user) throw failed;
   await db.update(passkeys).set({ counter: result.authenticationInfo.newCounter, lastUsedAt: new Date() }).where(eq(passkeys.id, key.id));
-  // Replaces whatever session this browser had, so "confirm with Face ID" leaves one session, not two.
+  // Replaces whatever session this browser had, so signing in again leaves one session, not two.
   await endSession(db, request);
   return { cookies: [await startSession(db, user.id), challengeCookie("", 0)] };
 }

@@ -21,7 +21,7 @@ import { POST as connectorRoute } from "@/app/api/connector/route";
 import { DELETE as deleteAccountRoute, GET as meRoute } from "@/app/api/me/route";
 import { getDb, type DB } from "@/db";
 import { connectorTokens, items, passkeys, rateLimits, sessions, users } from "@/db/schema";
-import { databaseNeedsTls, databaseUrl, liveConfigProblem } from "@/lib/config";
+import { databaseNeedsTls, databaseTls, databaseUrl, liveConfigProblem } from "@/lib/config";
 import { contextForKey } from "@/server/connector";
 import { decryptSecret, encryptSecret, hashPassword, passwordNeedsUpgrade, sha256, verifyPassword } from "@/server/crypto";
 import { describeError } from "@/server/errors";
@@ -391,6 +391,14 @@ describe("secrets", () => {
       expect(databaseNeedsTls("postgres://app.project@aws-0-us-east-1.pooler.example.com:6543/postgres")).toBe(true);
       expect(databaseNeedsTls("postgres://app@127.0.0.1:5432/passbook")).toBe(false);
       expect(databaseNeedsTls("not an address")).toBe(true);
+      // An address that hides its real host is never taken for a local one.
+      expect(databaseNeedsTls("postgres://u:p@localhost/db?host=db.example.com")).toBe(true);
+      expect(databaseNeedsTls("postgres://u:p@localhost#@db.example.com/db")).toBe(true);
+      // Encryption is forced, but an address that already asks for certificate checking is left in charge.
+      expect(databaseTls("postgres://u:p@db.example.com/db")).toEqual({ ssl: "require" });
+      expect(databaseTls("postgres://u:p@db.example.com/db?sslmode=disable")).toEqual({ ssl: "require" });
+      expect(databaseTls("postgres://u:p@db.example.com/db?sslmode=verify-full")).toEqual({});
+      expect(databaseTls("postgres://u:p@127.0.0.1/db")).toEqual({});
       delete process.env.DATABASE_PASSWORD;
       process.env.DATABASE_URL = "postgres://app:secret@db.example:6543/postgres";
       expect(liveConfigProblem()).toBeNull();

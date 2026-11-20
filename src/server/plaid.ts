@@ -177,7 +177,7 @@ export async function revokeAllForUser(db: DB, userId: string): Promise<void> {
     await revokeAtPlaid(item);
     // If a later bank can't be switched off and the person keeps their account after all, this one
     // shows as needing to be linked again, which is the truth.
-    await db.update(items).set({ status: "needs_reauth", error: "This bank was disconnected. Link it again to keep it up to date." }).where(and(eq(items.id, item.id), eq(items.userId, userId)));
+    await db.update(items).set({ status: "needs_reauth", error: "This bank was disconnected. Remove it and link it again to keep it up to date." }).where(and(eq(items.id, item.id), eq(items.userId, userId)));
   }
 }
 

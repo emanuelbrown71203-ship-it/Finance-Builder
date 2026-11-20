@@ -71,15 +71,35 @@ export function databaseUrl(): string | null {
 
 /**
  * Whether the connection to the database must be encrypted. Always, unless
- * the database is on this same machine (local development and tests).
+ * the database is plainly on this same machine (local development and tests).
+ * An address that names its host anywhere but the usual place is never
+ * treated as local.
  */
 export function databaseNeedsTls(url: string): boolean {
   try {
-    const host = new URL(url).hostname.replace(/^\[|\]$/g, "");
+    const parsed = new URL(url);
+    if (parsed.searchParams.has("host") || url.includes("#")) return true;
+    const host = parsed.hostname.replace(/^\[|\]$/g, "");
     return !(host === "localhost" || host === "127.0.0.1" || host === "::1");
   } catch {
     return true;
   }
+}
+
+/**
+ * The encryption setting to hand the database driver, or nothing to leave the
+ * address in charge. The driver's own default is plain text, so encryption is
+ * forced for anything not on this machine. An address that already asks for
+ * more (checking the server's certificate) is left alone, so this never
+ * weakens it.
+ */
+export function databaseTls(url: string): { ssl: "require" } | Record<string, never> {
+  if (!databaseNeedsTls(url)) return {};
+  try {
+    const params = new URL(url).searchParams;
+    if (["verify-full", "verify-ca"].includes(params.get("sslmode") ?? "") || params.has("sslrootcert")) return {};
+  } catch {}
+  return { ssl: "require" };
 }
 
 /** True when the database address has a password, in it or beside it. */
