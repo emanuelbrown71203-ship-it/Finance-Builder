@@ -1,5 +1,5 @@
 import type { PgDatabase, PgQueryResultHKT } from "drizzle-orm/pg-core";
-import { isDemoMode } from "@/lib/config";
+import { isDemoMode, liveConfigProblem } from "@/lib/config";
 import { MIGRATION_STATEMENTS } from "./embedded-migrations";
 import * as schema from "./schema";
 
@@ -15,6 +15,9 @@ export type DB = PgDatabase<PgQueryResultHKT, typeof schema>;
  * can never be written into a real database.
  */
 async function connect(): Promise<DB> {
+  // Real data never falls back to the in-memory database, where it would vanish on the next restart.
+  const problem = liveConfigProblem();
+  if (problem) throw new Error(problem);
   const url = process.env.DATABASE_URL;
   if (url && !isDemoMode()) {
     const { default: postgres } = await import("postgres");

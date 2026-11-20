@@ -8,6 +8,7 @@ import { APP_NAME } from "@/lib/config";
 import { diffDays } from "@/lib/dates";
 import type { Me, Overview } from "@/lib/types";
 import { Celebrations } from "./celebrate";
+import { ReauthHost } from "./reauth";
 import { PullToRefresh } from "./pull-to-refresh";
 import { ConfirmHost, Dialog, IconButton, Tag, Toaster, cx } from "./ui";
 import { send, useApi, useNow } from "./use-api";
@@ -207,6 +208,7 @@ export function Shell({ children }: { children: ReactNode }) {
       <Celebrations />
       <Toaster />
       <ConfirmHost />
+      <ReauthHost />
     </div>
   );
 }

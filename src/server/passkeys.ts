@@ -2,8 +2,8 @@ import { and, eq, lt } from "drizzle-orm";
 import { generateAuthenticationOptions, generateRegistrationOptions, verifyAuthenticationResponse, verifyRegistrationResponse, type AuthenticationResponseJSON, type RegistrationResponseJSON } from "@simplewebauthn/server";
 import { getDb, type DB } from "@/db";
 import { authChallenges, passkeys, users } from "@/db/schema";
-import { APP_NAME } from "@/lib/config";
-import { startSession, type Ctx } from "./auth";
+import { APP_NAME, isDemoMode, siteOrigin } from "@/lib/config";
+import { endSession, startSession, type Ctx } from "./auth";
 import { randomToken } from "./crypto";
 import { HttpError } from "./http";
 
@@ -18,14 +18,17 @@ const CHALLENGE_COOKIE = "passbook_challenge";
 const CHALLENGE_MINUTES = 5;
 const MAX_PASSKEYS = 10;
 
-/** The site this passkey belongs to. Uses APP_URL when set, otherwise the address the request came in on. */
+/**
+ * The site this passkey belongs to. With real data that is always the
+ * configured APP_URL. What the request says about its own address is only
+ * used for local development.
+ */
 function site(request: Request): { rpID: string; origin: string } {
-  if (process.env.APP_URL) {
-    const url = new URL(process.env.APP_URL);
-    return { rpID: url.hostname, origin: url.origin };
-  }
-  const host = request.headers.get("x-forwarded-host") ?? request.headers.get("host") ?? "localhost";
-  const proto = request.headers.get("x-forwarded-proto") ?? (host.startsWith("localhost") || host.startsWith("127.") ? "http" : "https");
+  const configured = siteOrigin();
+  if (configured) return { rpID: new URL(configured).hostname, origin: configured };
+  if (!isDemoMode() && process.env.NODE_ENV === "production") throw new HttpError(503, "This site isn’t fully set up yet.");
+  const host = request.headers.get("host") ?? "localhost";
+  const proto = host.startsWith("localhost") || host.startsWith("127.") ? "http" : "https";
   return { rpID: host.split(":")[0], origin: `${proto}://${host}` };
 }
 
@@ -86,7 +89,8 @@ export async function registrationOptions(ctx: Ctx, request: Request) {
     attestationType: "none",
     excludeCredentials: existing.map((p) => ({ id: p.id, transports: (p.transports?.split(",") ?? []) as never })),
     // A "discoverable" passkey: the device can offer it without the person typing an email first.
-    authenticatorSelection: { residentKey: "required", userVerification: "preferred" },
+    // "required" means the device must check it's really you (face, fingerprint or PIN), not just be present.
+    authenticatorSelection: { residentKey: "required", userVerification: "required" },
   });
   return { options, cookie: await saveChallenge(ctx.db, options.challenge, ctx.userId) };
 }
@@ -96,7 +100,7 @@ export async function finishRegistration(ctx: Ctx, request: Request, response: R
   const { challenge, userId } = await takeChallenge(ctx.db, request);
   if (userId !== ctx.userId) throw new HttpError(400, "That took too long. Try again.");
   const { rpID, origin } = site(request);
-  const result = await verifyRegistrationResponse({ response, expectedChallenge: challenge, expectedOrigin: origin, expectedRPID: rpID, requireUserVerification: false }).catch(() => null);
+  const result = await verifyRegistrationResponse({ response, expectedChallenge: challenge, expectedOrigin: origin, expectedRPID: rpID, requireUserVerification: true }).catch(() => null);
   if (!result?.verified) throw new HttpError(400, "That didn’t work. Try again.");
   const { credential } = result.registrationInfo;
   await ctx.db.insert(passkeys).values({
@@ -113,7 +117,7 @@ export async function finishRegistration(ctx: Ctx, request: Request, response: R
 /** Step 1 of signing in: a fresh challenge. No email is asked for. */
 export async function loginOptions(request: Request) {
   const db = await getDb();
-  const options = await generateAuthenticationOptions({ rpID: site(request).rpID, userVerification: "preferred" });
+  const options = await generateAuthenticationOptions({ rpID: site(request).rpID, userVerification: "required" });
   return { options, cookie: await saveChallenge(db, options.challenge, null) };
 }
 
@@ -130,12 +134,14 @@ export async function finishLogin(request: Request, response: AuthenticationResp
     expectedChallenge: challenge,
     expectedOrigin: origin,
     expectedRPID: rpID,
-    requireUserVerification: false,
+    requireUserVerification: true,
     credential: { id: key.id, publicKey: new Uint8Array(Buffer.from(key.publicKey, "base64url")), counter: key.counter, transports: (key.transports?.split(",") ?? undefined) as never },
   }).catch(() => null);
   if (!result?.verified) throw failed;
   const [user] = await db.select({ id: users.id }).from(users).where(eq(users.id, key.userId)).limit(1);
   if (!user) throw failed;
   await db.update(passkeys).set({ counter: result.authenticationInfo.newCounter, lastUsedAt: new Date() }).where(eq(passkeys.id, key.id));
+  // Replaces whatever session this browser had, so "confirm with Face ID" leaves one session, not two.
+  await endSession(db, request);
   return { cookies: [await startSession(db, user.id), challengeCookie("", 0)] };
 }

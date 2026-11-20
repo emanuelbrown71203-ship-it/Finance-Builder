@@ -168,7 +168,7 @@ export function ClaudeSection() {
             <p className="mb-3 rounded-2xl bg-canary px-3.5 py-2.5 text-small text-canary-ink">This try-it link reads the sample household. Your own private link comes with your account.</p>
           ) : (
             <p className="mb-3 rounded-2xl bg-canary px-3.5 py-2.5 text-small text-canary-ink">
-              This private link lets Claude see <span className="font-bold">your</span> accounts, so keep it to yourself. It’s shown this once: copy it now.
+              This private link lets Claude see <span className="font-bold">your</span> accounts. Treat it like a password: anyone who has it can read your money. It’s shown this once, so copy it now.
             </p>
           )}
           <ol className="list-decimal space-y-3 pl-5">
@@ -194,7 +194,7 @@ export function ClaudeSection() {
         <>
           <p className="flex items-start gap-2 rounded-2xl bg-mint px-3.5 py-3 text-mint-ink">
             <Check size={19} className="mt-0.5 shrink-0" />
-            <span suppressHydrationWarning>Claude is connected{data.lastUsedAt ? `, last used ${ago(data.lastUsedAt, now)}` : " (not used yet)"}. Nothing else to do here: just ask Claude in a chat.</span>
+            <span suppressHydrationWarning>Claude is connected{data.lastUsedAt ? `, last used ${ago(data.lastUsedAt, now)}` : " (not used yet)"}. Nothing else to do here: just ask Claude in a chat. The link switches itself off if it isn’t used for 90 days.</span>
           </p>
           <div className="mt-3 flex flex-wrap gap-2">
             <Button size="sm" onClick={renew} disabled={busy}>
@@ -259,7 +259,7 @@ export function TasksSection() {
       {error && !data ? (
         <ErrorNote message={error.message} onRetry={() => mutate()} />
       ) : !data ? null : !data.available ? (
-        <p className="text-ink-2">This switches on once your real bank is linked. Sample data never touches your real bills.</p>
+        <p className="text-ink-2">This switches on once your real bank is linked. Sample and practice data never touch your real bills.</p>
       ) : !data.connected ? (
         <form onSubmit={connect} className="flex flex-col gap-3">
           <ol className="list-decimal space-y-1 pl-5 text-ink-2">

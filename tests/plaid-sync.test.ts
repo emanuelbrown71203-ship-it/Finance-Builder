@@ -73,7 +73,7 @@ beforeAll(async () => {
   db = await getDb();
   await db.delete(users).where(eq(users.id, USER));
   await db.insert(users).values({ id: USER, email: "sync@example.com", name: "Riley" });
-  await db.insert(items).values({ id: ITEM, userId: USER, plaidItemId: "plaid-item-1", institutionName: "First Platypus Bank", accessTokenEnc: encryptSecret("access-sandbox-123") });
+  await db.insert(items).values({ id: ITEM, userId: USER, plaidItemId: "plaid-item-1", institutionName: "First Platypus Bank", accessTokenEnc: encryptSecret("access-sandbox-123", `bank:${USER}`) });
   ctx = { db, userId: USER, user: { id: USER, name: "Riley", email: "sync@example.com" }, today: "2026-11-19", demo: false };
 });
 
@@ -81,7 +81,7 @@ describe("bank sync", () => {
   it("stores the access token encrypted", async () => {
     const [item] = await db.select().from(items).where(eq(items.id, ITEM));
     expect(item.accessTokenEnc).not.toContain("access-sandbox-123");
-    expect(decryptSecret(item.accessTokenEnc!)).toBe("access-sandbox-123");
+    expect(decryptSecret(item.accessTokenEnc!, `bank:${USER}`)).toBe("access-sandbox-123");
   });
 
   it("first sync imports accounts, transactions, holdings and liabilities", async () => {

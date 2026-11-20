@@ -1,7 +1,9 @@
 "use client";
 
-import { ChevronRight, Landmark, LogOut } from "lucide-react";
+import { ChevronRight, KeyRound, Landmark, LogOut } from "lucide-react";
 import Link from "next/link";
+import { useState } from "react";
+import { ChangePasswordDialog } from "@/components/reauth";
 import { CelebrationsRow, ClaudeSection, PasskeySection, RulesSection, TasksSection } from "@/components/settings-sections";
 import { Button, Fold, PageHeader, Segmented, Sheet, SheetHeader, confirm, toast } from "@/components/ui";
 import { send, useApi, useTheme, type ThemeChoice } from "@/components/use-api";
@@ -11,6 +13,7 @@ import type { Me } from "@/lib/types";
 export default function SettingsPage() {
   const { data: me } = useApi<Me>("/api/me");
   const [theme, setTheme] = useTheme();
+  const [changingPassword, setChangingPassword] = useState(false);
 
   const signOut = async () => {
     await fetch("/api/auth/logout", { method: "POST" });
@@ -25,7 +28,7 @@ export default function SettingsPage() {
     window.location.assign("/login");
   };
   const signOutEverywhere = async () => {
-    if (!(await confirm({ title: "Sign out of every device?", body: "Every phone, tablet and computer signed in to your account, including this one, will need to sign in again.", confirmLabel: "Sign out everywhere" }))) return;
+    if (!(await confirm({ title: "Sign out of every device?", body: "Every phone, tablet and computer signed in to your account, including this one, will need to sign in again. The Claude link is switched off too.", confirmLabel: "Sign out everywhere" }))) return;
     await send("POST", "/api/auth/logout-all").then(leave, (e) => toast(e instanceof Error ? e.message : "Couldn’t do that. Try again.", { tone: "error" }));
   };
   const deleteAccount = async () => {
@@ -107,13 +110,23 @@ export default function SettingsPage() {
                   <dd className="truncate font-bold">{me?.user.email}</dd>
                 </div>
               </dl>
-              <Button className="mt-4 w-full" onClick={signOut}>
+              <Button className="mt-4 w-full" onClick={() => setChangingPassword(true)}>
+                <KeyRound size={17} /> Change password
+              </Button>
+              <Button className="mt-2 w-full" onClick={signOut}>
                 <LogOut size={17} /> Sign out
               </Button>
               <Button className="mt-2 w-full" onClick={signOutEverywhere}>
                 Sign out of every device
               </Button>
-              <p className="mt-2 text-small text-ink-3">Use this if a phone or computer was lost. You’re also signed out on any device you haven’t used for two weeks.</p>
+              <p className="mt-2 text-small text-ink-3">Use this if a phone or computer was lost. It also switches off the Claude link. You’re signed out on any device you haven’t used for two weeks.</p>
+              <ChangePasswordDialog
+                open={changingPassword}
+                onClose={(changed) => {
+                  setChangingPassword(false);
+                  if (changed) toast("Password changed. Other devices were signed out.");
+                }}
+              />
               <Fold title="Delete my account" className="mt-3 border-t border-line-soft">
                 <p className="text-small text-ink-2">This disconnects every bank and permanently deletes your account and everything Passbook keeps for you. Nothing changes at your banks.</p>
                 <Button className="mb-2 mt-3 w-full" variant="danger" onClick={deleteAccount}>

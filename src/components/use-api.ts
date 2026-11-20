@@ -7,9 +7,17 @@ export class ApiError extends Error {
   constructor(
     public status: number,
     message: string,
+    /** The server wants the person to confirm their password or Face ID first. */
+    public reauth = false,
   ) {
     super(message);
   }
+}
+
+/** Opens the "Confirm it's you" sheet. Set by the component that draws it. */
+let reauthHandler: (() => Promise<boolean>) | null = null;
+export function setReauthHandler(handler: () => Promise<boolean>) {
+  reauthHandler = handler;
 }
 
 const timeZone = typeof Intl !== "undefined" ? Intl.DateTimeFormat().resolvedOptions().timeZone : "";
@@ -26,7 +34,7 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
     throw new ApiError(401, "Sign in to continue.");
   }
   const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new ApiError(response.status, data.error ?? "Something went wrong. Try again.");
+  if (!response.ok) throw new ApiError(response.status, data.error ?? "Something went wrong. Try again.", data.reauth === true);
   return data as T;
 }
 
@@ -39,7 +47,13 @@ export function useApi<T>(url: string | null, options?: SWRConfiguration<T, ApiE
 
 /** Sends a change, then refreshes every screen’s data so numbers agree. */
 export async function send<T = { ok: true }>(method: "POST" | "PUT" | "PATCH" | "DELETE", url: string, body?: unknown): Promise<T> {
-  const result = await request<T>(url, { method, body: body === undefined ? undefined : JSON.stringify(body) });
+  const init = { method, body: body === undefined ? undefined : JSON.stringify(body) };
+  const result = await request<T>(url, init).catch(async (error: unknown) => {
+    // Some changes need a fresh "confirm it's you". Ask, then carry on with what the person was doing.
+    if (!(error instanceof ApiError) || !error.reauth || !reauthHandler) throw error;
+    if (!(await reauthHandler())) throw new ApiError(403, "Cancelled. Nothing was changed.");
+    return request<T>(url, init);
+  });
   await globalMutate((key) => typeof key === "string" && key.startsWith("/api/"));
   return result;
 }

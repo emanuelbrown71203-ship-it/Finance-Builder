@@ -12,6 +12,7 @@ export function AuthForm({ mode }: { mode: "login" | "signup" }) {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [code, setCode] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -30,7 +31,7 @@ export function AuthForm({ mode }: { mode: "login" | "signup" }) {
     setBusy(true);
     setError(null);
     try {
-      const response = await fetch(`/api/auth/${mode}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name, email, password }) });
+      const response = await fetch(`/api/auth/${mode}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(mode === "signup" ? { name, email, password, code } : { email, password }) });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) {
         setError(data.error ?? "Something went wrong. Try again.");
@@ -83,6 +84,11 @@ export function AuthForm({ mode }: { mode: "login" | "signup" }) {
       {!signup && <p className="mt-4 text-center text-small text-ink-3">or use your password</p>}
 
       <form onSubmit={submit} className={`${signup ? "mt-8" : "mt-4"} flex flex-col gap-4 rounded-sheet border border-line-soft bg-sheet p-6 shadow-card`}>
+        {signup && (
+          <Field label="Invite code" hint="Passbook is by invitation. The code came from whoever set it up.">
+            {(id) => <Input id={id} value={code} onChange={(e) => setCode(e.target.value)} autoComplete="off" autoCapitalize="none" autoCorrect="off" spellCheck={false} required maxLength={100} />}
+          </Field>
+        )}
         {signup && <Field label="First name">{(id) => <Input id={id} value={name} onChange={(e) => setName(e.target.value)} autoComplete="given-name" required maxLength={80} />}</Field>}
         <Field label="Email">{(id) => <Input id={id} type="email" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email" required />}</Field>
         <Field label="Password" hint={signup ? "At least 10 characters." : undefined}>

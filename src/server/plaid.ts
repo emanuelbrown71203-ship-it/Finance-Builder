@@ -9,6 +9,7 @@ import { APP_NAME, DEFAULT_TIMEZONE, plaidConfig } from "@/lib/config";
 import { addDays, todayIn, type ISODate } from "@/lib/dates";
 import { merchantKey } from "@/lib/finance/recurring";
 import { decryptSecret, encryptSecret, sha256 } from "./crypto";
+import { HttpError, describeError } from "./errors";
 import { loadRules } from "./rules";
 import { checkBills } from "./tasks-link";
 
@@ -37,11 +38,42 @@ export function plaidClient(): PlaidApi {
   return cached;
 }
 
-/** Plaid’s error body, without the request config (which holds our secret). */
-function plaidError(error: unknown): { error_code?: string; error_message?: string } {
-  const data = (error as { response?: { data?: { error_code?: string; error_message?: string } } })?.response?.data;
-  return data ?? { error_message: error instanceof Error ? error.message : String(error) };
+/**
+ * A failed Plaid call, reduced to what is safe to keep: Plaid's own error
+ * code and message and the HTTP status. The error the Plaid library throws
+ * also carries the request it sent, which holds our Plaid secret and the
+ * bank's access token, so that error is never passed on, stored or logged.
+ */
+export class PlaidFailure extends Error {
+  constructor(
+    public code: string | undefined,
+    public plaidMessage: string | undefined,
+    public status: number | undefined,
+  ) {
+    super(code ? `Plaid said ${code}` : "Plaid could not be reached");
+    this.name = "PlaidFailure";
+  }
 }
+
+/** Runs one Plaid call. Whatever goes wrong comes out as a PlaidFailure with nothing secret in it. */
+async function call<T>(run: () => Promise<T>): Promise<T> {
+  try {
+    return await run();
+  } catch (error) {
+    if (error instanceof PlaidFailure) throw error;
+    const response = (error as { response?: { status?: unknown; data?: { error_code?: unknown; error_message?: unknown } } } | null)?.response;
+    const text = (value: unknown) => (typeof value === "string" ? value.slice(0, 300) : undefined);
+    throw new PlaidFailure(text(response?.data?.error_code), text(response?.data?.error_message), typeof response?.status === "number" ? response.status : undefined);
+  }
+}
+
+/** Plaid’s code and message for a failure, when it was Plaid that failed. */
+function plaidError(error: unknown): { error_code?: string; error_message?: string } {
+  return error instanceof PlaidFailure ? { error_code: error.code, error_message: error.plaidMessage } : {};
+}
+
+/** The label a bank token is sealed with, so it only opens on its owner's rows. */
+const bankOwner = (userId: string) => `bank:${userId}`;
 
 export async function createLinkToken(db: DB, userId: string, itemId?: string): Promise<string> {
   const config = plaidConfig()!;
@@ -57,23 +89,30 @@ export async function createLinkToken(db: DB, userId: string, itemId?: string): 
   if (itemId) {
     // Update mode: the bank needs the person to sign in again.
     const [item] = await db.select().from(items).where(and(eq(items.id, itemId), eq(items.userId, userId))).limit(1);
-    if (!item?.accessTokenEnc) throw new Error("That connection can’t be repaired. Remove it and link again.");
-    const response = await plaidClient().linkTokenCreate({ ...base, access_token: decryptSecret(item.accessTokenEnc) });
+    if (!item?.accessTokenEnc) throw new HttpError(400, "That connection can’t be repaired. Remove it and link again.");
+    const accessToken = decryptSecret(item.accessTokenEnc, bankOwner(userId));
+    const response = await call(() => plaidClient().linkTokenCreate({ ...base, access_token: accessToken }));
     return response.data.link_token;
   }
 
-  const response = await plaidClient().linkTokenCreate({
-    ...base,
-    products: [Products.Transactions],
-    // Pulled in when the bank offers them, without blocking banks that don’t.
-    required_if_supported_products: [Products.Investments, Products.Liabilities],
-    transactions: { days_requested: 730 },
-  });
+  const response = await call(() =>
+    plaidClient().linkTokenCreate({
+      ...base,
+      products: [Products.Transactions],
+      // Pulled in when the bank offers them, without blocking banks that don’t.
+      required_if_supported_products: [Products.Investments, Products.Liabilities],
+      transactions: { days_requested: 730 },
+    }),
+  );
   return response.data.link_token;
 }
 
 export async function exchangePublicToken(db: DB, userId: string, publicToken: string, institution: { id?: string | null; name?: string | null }): Promise<string> {
-  const exchange = await plaidClient().itemPublicTokenExchange({ public_token: publicToken });
+  const exchange = await call(() => plaidClient().itemPublicTokenExchange({ public_token: publicToken })).catch((error: unknown) => {
+    // A token Plaid refuses (expired, already used, made up) is the request's fault, not ours.
+    if (error instanceof PlaidFailure && error.status && error.status < 500) throw new HttpError(400, "That bank link didn’t finish. Try linking again.");
+    throw error;
+  });
   const id = crypto.randomUUID();
   await db.insert(items).values({
     id,
@@ -81,7 +120,7 @@ export async function exchangePublicToken(db: DB, userId: string, publicToken: s
     plaidItemId: exchange.data.item_id,
     institutionId: institution.id ?? null,
     institutionName: institution.name || "Linked account",
-    accessTokenEnc: encryptSecret(exchange.data.access_token),
+    accessTokenEnc: encryptSecret(exchange.data.access_token, bankOwner(userId)),
   });
   return id;
 }
@@ -90,13 +129,20 @@ export async function removeItem(db: DB, userId: string, itemId: string): Promis
   const [item] = await db.select().from(items).where(and(eq(items.id, itemId), eq(items.userId, userId))).limit(1);
   if (!item) return;
   if (item.accessTokenEnc && plaidConfig()) {
+    const accessToken = decryptSecret(item.accessTokenEnc, bankOwner(userId));
     try {
-      await plaidClient().itemRemove({ access_token: decryptSecret(item.accessTokenEnc) });
+      await call(() => plaidClient().itemRemove({ access_token: accessToken }));
     } catch (error) {
-      console.error("Plaid itemRemove failed", plaidError(error));
+      const code = plaidError(error).error_code;
+      // Already gone at Plaid: nothing left to switch off. Anything else, the connection may still be
+      // live there, so our copy of its token is kept: it is the only way to switch it off later.
+      if (code !== "ITEM_NOT_FOUND" && code !== "INVALID_ACCESS_TOKEN") {
+        console.error("Plaid itemRemove failed:", describeError(error));
+        throw new HttpError(502, `Couldn’t disconnect ${item.institutionName} just now, so nothing was removed. Try again in a minute.`);
+      }
     }
   }
-  await db.delete(items).where(eq(items.id, item.id));
+  await db.delete(items).where(and(eq(items.id, item.id), eq(items.userId, userId)));
 }
 
 /* ---------- sync ---------- */
@@ -131,7 +177,7 @@ function assetClassFor(securityType: string | null | undefined): string {
 export async function syncItem(db: DB, itemId: string, client: PlaidLike = plaidClient(), now: Date = new Date()): Promise<void> {
   const [item] = await db.select().from(items).where(eq(items.id, itemId)).limit(1);
   if (!item?.accessTokenEnc) return;
-  const accessToken = decryptSecret(item.accessTokenEnc);
+  const accessToken = decryptSecret(item.accessTokenEnc, bankOwner(item.userId));
   const today = todayIn(DEFAULT_TIMEZONE, now);
   const firstSync = item.cursor === null;
 
@@ -140,21 +186,24 @@ export async function syncItem(db: DB, itemId: string, client: PlaidLike = plaid
     const cursor = await syncTransactions(db, item, accessToken, accountMap, client, now);
     const accountRows = await db.select().from(accounts).where(eq(accounts.itemId, item.id));
     if (accountRows.some((a) => a.type === "investment")) await syncHoldings(db, item.userId, accessToken, accountMap, client);
-    if (accountRows.some((a) => a.type === "credit" || a.type === "loan")) await syncLiabilities(db, accessToken, client);
+    if (accountRows.some((a) => a.type === "credit" || a.type === "loan")) await syncLiabilities(db, item.id, accessToken, client);
     await snapshotBalances(db, item.userId, today);
     if (firstSync) await backfillSnapshots(db, item.userId, accountRows, today);
     await db.update(items).set({ cursor, status: "ok", error: null, lastSyncedAt: now }).where(eq(items.id, item.id));
     // New payments may have settled bills kept in Tasks for Two.
-    await checkBills(db, item.userId).catch((error) => console.error("Tasks for Two check failed", error instanceof Error ? error.message : error));
+    await checkBills(db, item.userId).catch((error) => console.error("Tasks for Two check failed:", describeError(error)));
   } catch (error) {
     const e = plaidError(error);
     const needsReauth = e.error_code === "ITEM_LOGIN_REQUIRED" || e.error_code === "PENDING_EXPIRATION";
     await db
       .update(items)
-      .set({ status: needsReauth ? "needs_reauth" : "error", error: e.error_message ?? "Sync failed." })
+      // Only Plaid's own wording is shown to the person. Anything else (a network or database
+      // failure) gets a plain line, so nothing internal ends up on the Accounts screen.
+      .set({ status: needsReauth ? "needs_reauth" : "error", error: (e.error_code && e.error_message) || "Couldn’t sync just now. It will try again." })
       .where(eq(items.id, item.id));
+    // A failure with no Plaid code is ours or the network's: pass it on. It is already free of secrets.
     if (!e.error_code) throw error;
-    console.error("Plaid sync failed", e);
+    console.error("Plaid sync failed:", e.error_code);
   }
 }
 
@@ -165,7 +214,7 @@ export async function syncAllForUser(db: DB, userId: string): Promise<void> {
 
 /** Upserts the item’s accounts and returns plaid_account_id → our account id. */
 async function syncAccounts(db: DB, item: typeof items.$inferSelect, accessToken: string, client: PlaidLike): Promise<Map<string, string>> {
-  const response = await client.accountsGet({ access_token: accessToken });
+  const response = await call(() => client.accountsGet({ access_token: accessToken }));
   const existing = await db.select({ id: accounts.id, plaidAccountId: accounts.plaidAccountId }).from(accounts).where(eq(accounts.itemId, item.id));
   const map = new Map(existing.map((a) => [a.plaidAccountId!, a.id]));
 
@@ -224,7 +273,8 @@ async function syncTransactions(db: DB, item: typeof items.$inferSelect, accessT
       removed = [];
       cursor = startCursor;
       for (let hasMore = true; hasMore; ) {
-        const page = await client.transactionsSync({ access_token: accessToken, cursor, count: 500 });
+        const pageCursor = cursor;
+        const page = await call(() => client.transactionsSync({ access_token: accessToken, cursor: pageCursor, count: 500 }));
         added.push(...page.data.added);
         modified.push(...page.data.modified);
         removed.push(...page.data.removed.map((r) => r.transaction_id));
@@ -245,7 +295,7 @@ async function syncTransactions(db: DB, item: typeof items.$inferSelect, accessT
     const rows = await db
       .select({ id: transactions.id, plaidId: transactions.plaidTransactionId, categoryLocked: transactions.categoryLocked })
       .from(transactions)
-      .where(inArray(transactions.plaidTransactionId, lookupIds.slice(i, i + 500)));
+      .where(and(eq(transactions.userId, item.userId), inArray(transactions.plaidTransactionId, lookupIds.slice(i, i + 500))));
     for (const r of rows) existing.set(r.plaidId!, { id: r.id, categoryLocked: r.categoryLocked });
   }
 
@@ -266,7 +316,7 @@ async function syncTransactions(db: DB, item: typeof items.$inferSelect, accessT
       await db
         .update(transactions)
         .set({ ...txValues(t), accountId, plaidTransactionId: t.transaction_id, ...(match.categoryLocked ? {} : { category }) })
-        .where(eq(transactions.id, match.id));
+        .where(and(eq(transactions.id, match.id), eq(transactions.userId, item.userId)));
     } else {
       inserts.push({ id: crypto.randomUUID(), userId: item.userId, accountId, plaidTransactionId: t.transaction_id, category, createdAt: now, ...txValues(t) });
       existing.set(t.transaction_id, { id: inserts[inserts.length - 1].id, categoryLocked: false });
@@ -284,7 +334,7 @@ async function syncTransactions(db: DB, item: typeof items.$inferSelect, accessT
 async function syncHoldings(db: DB, userId: string, accessToken: string, accountMap: Map<string, string>, client: PlaidLike): Promise<void> {
   let data;
   try {
-    data = (await client.investmentsHoldingsGet({ access_token: accessToken })).data;
+    data = (await call(() => client.investmentsHoldingsGet({ access_token: accessToken }))).data;
   } catch (error) {
     // Not every institution or Plaid plan supports investments; cash data still syncs.
     const code = plaidError(error).error_code;
@@ -312,14 +362,14 @@ async function syncHoldings(db: DB, userId: string, accessToken: string, account
   }
   const accountIds = [...new Set(data.accounts.map((a) => accountMap.get(a.account_id)).filter((id): id is string => Boolean(id)))];
   if (accountIds.length === 0) return;
-  await db.delete(holdings).where(inArray(holdings.accountId, accountIds));
+  await db.delete(holdings).where(and(eq(holdings.userId, userId), inArray(holdings.accountId, accountIds)));
   for (let i = 0; i < rows.length; i += 400) await db.insert(holdings).values(rows.slice(i, i + 400));
 }
 
-async function syncLiabilities(db: DB, accessToken: string, client: PlaidLike): Promise<void> {
+async function syncLiabilities(db: DB, itemId: string, accessToken: string, client: PlaidLike): Promise<void> {
   let liabilities;
   try {
-    liabilities = (await client.liabilitiesGet({ access_token: accessToken })).data.liabilities;
+    liabilities = (await call(() => client.liabilitiesGet({ access_token: accessToken }))).data.liabilities;
   } catch (error) {
     const code = plaidError(error).error_code;
     if (code && code !== "ITEM_LOGIN_REQUIRED") return;
@@ -337,7 +387,7 @@ async function syncLiabilities(db: DB, accessToken: string, client: PlaidLike): 
   ];
   for (const u of updates) {
     if (!u.plaidAccountId) continue;
-    await db.update(accounts).set({ nextPaymentDueDate: u.due, minimumPayment: u.minimum, aprPercent: u.apr }).where(eq(accounts.plaidAccountId, u.plaidAccountId));
+    await db.update(accounts).set({ nextPaymentDueDate: u.due, minimumPayment: u.minimum, aprPercent: u.apr }).where(and(eq(accounts.itemId, itemId), eq(accounts.plaidAccountId, u.plaidAccountId)));
   }
 }
 
@@ -387,23 +437,41 @@ async function backfillSnapshots(db: DB, userId: string, accountRows: (typeof ac
 
 /* ---------- webhooks ---------- */
 
-const keyCache = new Map<string, JWK>();
+/** Plaid's signing keys, remembered for a day at most. `null` is a key id Plaid didn't recognise, remembered briefly. */
+const keyCache = new Map<string, { jwk: JWK | null; until: number }>();
+const KEY_TTL = 24 * 3_600_000;
+const MISS_TTL = 5 * 60_000;
+const MAX_KEYS = 100;
+
+async function signingKey(kid: string): Promise<JWK | null> {
+  const hit = keyCache.get(kid);
+  if (hit && hit.until > Date.now()) return hit.jwk;
+  let jwk: JWK | null = null;
+  try {
+    const response = await call(() => plaidClient().webhookVerificationKeyGet({ key_id: kid }));
+    const key = response.data.key as unknown as JWK & { expired_at?: number | null };
+    // A key Plaid has retired is no longer trusted.
+    if (!key.expired_at) jwk = key;
+  } catch (error) {
+    // Plaid being unreachable is not the same as the key being unknown: don't remember that.
+    if (!(error instanceof PlaidFailure) || !error.code) throw error;
+  }
+  if (keyCache.size >= MAX_KEYS) keyCache.clear();
+  keyCache.set(kid, { jwk, until: Date.now() + (jwk ? KEY_TTL : MISS_TTL) });
+  return jwk;
+}
 
 /**
  * Confirms a webhook really came from Plaid.
  * https://plaid.com/docs/api/webhooks/webhook-verification/
  */
 export async function verifyWebhook(rawBody: string, signedJwt: string | null): Promise<boolean> {
-  if (!signedJwt) return false;
+  if (!signedJwt || signedJwt.length > 4000) return false;
   try {
     const header = decodeProtectedHeader(signedJwt);
-    if (header.alg !== "ES256" || !header.kid) return false;
-    let jwk = keyCache.get(header.kid);
-    if (!jwk) {
-      const response = await plaidClient().webhookVerificationKeyGet({ key_id: header.kid });
-      jwk = response.data.key as unknown as JWK;
-      keyCache.set(header.kid, jwk);
-    }
+    if (header.alg !== "ES256" || !header.kid || header.kid.length > 200) return false;
+    const jwk = await signingKey(header.kid);
+    if (!jwk) return false;
     const { payload } = await jwtVerify(signedJwt, await importJWK(jwk, "ES256"), { algorithms: ["ES256"], maxTokenAge: "5 min" });
     const claimed = Buffer.from(String(payload.request_body_sha256 ?? ""), "hex");
     const actual = Buffer.from(sha256(rawBody), "hex");

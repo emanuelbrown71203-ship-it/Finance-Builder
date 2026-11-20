@@ -42,9 +42,10 @@ for it to be remembered and used whenever an app is built.
 - Bank access tokens are stored encrypted. The app can read accounts and can never move money.
 - **The Claude connector is read-only.** Never add a tool to `src/server/connector.ts` that changes
   anything without asking the owner first.
-- **The Tasks for Two link never runs on sample data**, only ticks bills the owner has linked to a
-  merchant, only on settled payments, and writes each tick down before sending it. It accepts only a
-  Tasks for Two connector address (`isTasksLink`). Keep all four of those true.
+- **The Tasks for Two link never runs on sample data or Plaid’s practice banks**, only ticks bills
+  the owner has linked to a merchant, only on settled payments, and writes each tick down before
+  sending it. It accepts only a connector address on the one Tasks for Two server in
+  `TASKS_FOR_TWO_HOST` (`isTasksLink`). Keep all four of those true.
 
 ## Security rules (the owner asked for this app to be "super secure")
 
@@ -52,15 +53,26 @@ for it to be remembered and used whenever an app is built.
   limited to `ctx.userId`. An id that comes from the request is never trusted on its own.
 - Writes must come from the app itself (`assertSameOrigin`). Don't add a route that changes
   something on a GET.
-- Secrets (bank tokens, the Tasks link) go through `encryptSecret`; keys and session tokens are
-  stored only as hashes. Nothing secret goes in a log, an error message or the browser.
-- New sign-in or key-guessing surfaces get a rate limit (`src/server/rate-limit.ts`).
+- Secrets (bank tokens, the Tasks link) go through `encryptSecret(value, owner)`; keys and session
+  tokens are stored only as hashes. Nothing secret goes in a log, an error message or the browser.
+- **Never `console.error(error)`.** Log `describeError(error)` (`src/server/errors.ts`). A raw Plaid
+  error carries the Plaid secret and a bank token; a raw database error carries the query's values.
+  Every Plaid call goes through `call()` in `src/server/plaid.ts`, which strips them.
+- New sign-in or key-guessing surfaces get a rate limit (`src/server/rate-limit.ts`). Dates inside
+  hand-written `sql` are bound with `sql.param(date, column)`: the in-memory database accepts a bare
+  Date, real Postgres does not.
+- Anything that adds a way into the account (a passkey, a connector key) or destroys it uses
+  `withUser(handler, { fresh: true })`, which asks the person to confirm it’s them.
+- New accounts need the invite code (`SIGNUP_CODE`). Don’t reopen sign-up.
+- With real data the site’s address is `APP_URL` and nothing else: never read it from a request header.
 - If a change touches sign-in, sessions, the connectors or the headers in `next.config.ts`, run the
   security checks again and get an independent review before publishing.
 
 ## Checking your work
 
-1. `npm run check` (types, lint, tests). `npm run build` before deploying.
+1. `npm run check` (types, lint, tests). `npm run build` before deploying. The tests also run
+   against real Postgres, and must before a change to sign-in or to hand-written SQL goes live:
+   `DEMO_MODE=0 DATABASE_URL=postgres://… npm test` (a throwaway local Postgres is fine).
 2. `npm run dev`, then screenshot every changed screen with Playwright at iPhone size in light and dark,
    and look at them. Check for sideways scrolling.
 3. Touch features (pull to refresh, sheets) can be driven in Playwright with a phone device and

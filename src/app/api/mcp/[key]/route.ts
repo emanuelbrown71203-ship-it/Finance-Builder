@@ -1,6 +1,7 @@
 import { contextForKey, handleRpc } from "@/server/connector";
+import { describeError } from "@/server/errors";
 import { HttpError } from "@/server/http";
-import { limit, limitKey } from "@/server/rate-limit";
+import { assertUnderLimit, clientAddress, limit, limitKey } from "@/server/rate-limit";
 
 /**
  * The Claude connector endpoint: POST …/api/mcp/<key>. The key in the address
@@ -14,9 +15,11 @@ export async function POST(request: Request, route: { params: Promise<{ key: str
   try {
     // Wrong keys are limited per address so the key can't be guessed by trying many.
     await limit(request, "mcp-address", 300, 60_000);
+    // After ten wrong keys from one address, nothing from it is looked up for ten minutes, right key or not.
+    await assertUnderLimit("mcp-miss", clientAddress(request), 10, 10 * 60_000);
     const ctx = await contextForKey(key);
     if (!ctx) {
-      await limit(request, "mcp-miss", 10, 10 * 60_000);
+      await limit(request, "mcp-miss", 10, 10 * 60_000).catch(() => {});
       return answer({ error: "This connector link was switched off. Make a new one in Passbook, Settings, Connect to Claude." }, 404);
     }
     await limitKey("mcp-key", ctx.userId, 120, 60_000);
@@ -37,7 +40,7 @@ export async function POST(request: Request, route: { params: Promise<{ key: str
     return out === null ? new Response(null, { status: 202 }) : answer(out);
   } catch (error) {
     if (error instanceof HttpError) return answer({ error: error.message }, error.status);
-    console.error(error);
+    console.error(describeError(error));
     return answer({ error: "Something went wrong on our side. Try again." }, 500);
   }
 }

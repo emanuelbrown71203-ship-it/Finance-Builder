@@ -71,20 +71,36 @@ Smaller things that make it easier to live with:
 Demo mode ends when Plaid keys are present. You need three things:
 
 1. **A Postgres database.** Any Postgres works; Supabase is the intended home. Put its
-   connection string in `DATABASE_URL`, then create the tables: `npm run db:migrate`.
+   connection string in `DATABASE_URL`, then create the tables: `npm run db:migrate`
+   (or, in a database shared with other apps, see "Sharing a database" below).
 2. **Plaid keys.** Sign up at https://dashboard.plaid.com, copy the client ID and the
    Sandbox secret into `PLAID_CLIENT_ID` and `PLAID_SECRET`, and leave `PLAID_ENV=sandbox`.
    Sandbox uses practice banks (username `user_good`, password `pass_good`) and is free.
    Real banks need Plaid's Production approval, then `PLAID_ENV=production` with the
    production secret.
 3. **An encryption key and the app's address.** `TOKEN_ENCRYPTION_KEY` (generate with
-   `openssl rand -base64 32`) and `APP_URL` (where the app is hosted, so Plaid can reach
-   `/api/plaid/webhook`).
+   `openssl rand -base64 32`) and `APP_URL` (where the app is hosted: sign-in, passkeys and
+   the same-site check are tied to it, and Plaid calls `/api/plaid/webhook` on it).
+4. **An invite code.** `SIGNUP_CODE`: new accounts need it. With none set, sign-up is closed.
+
+A deployed site with Plaid keys refuses to answer until the database, the address and the
+encryption key are all in place, so real data can never land in the in-memory database.
 
 `.env.example` lists every variable with notes. Copy it to `.env.local`.
 
-Once live, people create an account, link a bank through Plaid Link, and the first sync pulls
-up to two years of transactions plus balances, holdings and card or loan details.
+Once live, people create an account with the invite code, link a bank through Plaid Link, and
+the first sync pulls up to two years of transactions plus balances, holdings and card or loan
+details.
+
+### Sharing a database with other apps
+
+Passbook can live inside a Supabase project that other apps use, walled off from them.
+`npx tsx scripts/install-sql.ts` prints the SQL: every table goes in its own `passbook`
+schema (never `public`, which Supabase serves to browsers), the app signs in as its own
+`passbook_app` role that can read and write those tables and nothing else, and row level
+security is on for every table. Create the role first (`create role passbook_app login
+password '…'`), run the SQL as the database owner, and point `DATABASE_URL` at the pooler as
+`passbook_app.<project ref>`. For later schema changes: `npx tsx scripts/install-sql.ts --from <n>`.
 
 ### How "real time" works
 
@@ -132,19 +148,31 @@ Conventions worth knowing before changing things:
 ### Security
 
 - Bank access tokens, and the Tasks for Two link, are encrypted with AES-256-GCM before they touch
-  the database.
-- Passwords are hashed with scrypt; common ones and ones built from your name or email are refused.
-  Passkeys store only the public half of the key.
+  the database, each sealed to its owner so a copied value can't be opened on someone else's row.
+- Passwords are hashed with scrypt at OWASP's recommended strength; common ones and ones built
+  from your name or email are refused. Passkeys store only the public half of the key and
+  always check it's you (face, fingerprint or PIN).
+- New accounts are by invite code only.
 - Sessions are random tokens stored hashed, in an HttpOnly, SameSite=Lax cookie (Secure and
-  `__Host-` prefixed in production). They end after 30 days, or 14 days unused, and you can sign
-  out of every device at once.
-- Every query is scoped to the signed-in user. A write is refused unless the browser says it came
-  from this app.
+  `__Host-` prefixed in production). They end after 30 days, or 14 days unused. You can change
+  your password (which signs out every other device) or sign out of every device at once
+  (which also switches off the Claude link).
+- **Confirm it's you.** Adding a Face ID device, making a Claude link or deleting the account
+  asks for the password or Face ID again unless you signed in within the last ten minutes.
+- Every query is scoped to the signed-in user. A write is refused unless it came from this app's
+  own address (`APP_URL`), scheme included.
 - Sign-in attempts are rate limited per address and per account, in the database, so the limit
-  holds across server instances. Connector keys are limited the same way.
+  holds across server instances, without letting a stranger lock you out of your own account.
+  Connector keys are limited the same way.
 - Every response carries a content security policy and the usual hardening headers.
-- Plaid webhooks are rejected unless their signature and body hash verify.
-- The Claude connector key is stored as a hash, shown once, and replaced or revoked from Settings.
+- Plaid webhooks are rejected unless their signature and body hash verify against a current
+  Plaid key.
+- Nothing secret is logged: errors are reduced to a kind, a code and a place before they are
+  written down (`describeError`), because the raw ones carry keys, tokens and query values.
+- The Claude connector key is stored as a hash, shown once, replaced or revoked from Settings,
+  and switches itself off after 90 days unused. Text from banks is flattened before Claude sees it.
+- The Tasks for Two link only talks to the one server it was set up with, and only runs on real
+  banks (not sample data, not Plaid's practice banks).
 - Access to banks is read-only. The app has no ability to move money.
 - You can delete your account and everything kept for it from Settings.
 
@@ -157,6 +185,7 @@ Conventions worth knowing before changing things:
 | `npm test` | Tests only (in-memory database) |
 | `npm run db:generate` | After editing `src/db/schema.ts`: write a migration and refresh the embedded copy the demo uses |
 | `npm run db:migrate` | Apply migrations to `DATABASE_URL` |
+| `npx tsx scripts/install-sql.ts` | Print the SQL to install Passbook in its own walled-off schema of a shared database |
 | `npm run build` | Production build |
 
 To run the tests against real Postgres instead of the in-memory database:
@@ -165,7 +194,9 @@ To run the tests against real Postgres instead of the in-memory database:
 ## Not built yet
 
 - Password reset and email verification (needs an email provider). Face ID sign-in is the way
-  around a forgotten password for now.
+  around a forgotten password for now. (Changing a password you know is in Settings.)
+- A stricter content security policy for scripts (hashes instead of `'unsafe-inline'`). The app
+  has no place where outside text is turned into markup, so this is a second line of defence.
 - Free-trial detection: a bank can't see a trial, only its first charge, which is flagged as
   "might be new".
 - Bank sign-ins that redirect on phones (Plaid OAuth redirect). Desktop linking works without it.

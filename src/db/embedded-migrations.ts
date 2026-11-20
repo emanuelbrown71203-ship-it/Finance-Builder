@@ -61,5 +61,8 @@ export const MIGRATION_STATEMENTS: string[] = [
   "CREATE UNIQUE INDEX \"bill_ticks_bill_due_idx\" ON \"bill_ticks\" USING btree (\"user_id\",\"tasks_bill_id\",\"due_date\");",
   "CREATE UNIQUE INDEX \"bill_ticks_tx_idx\" ON \"bill_ticks\" USING btree (\"user_id\",\"transaction_id\");",
   "CREATE UNIQUE INDEX \"category_rules_user_merchant_idx\" ON \"category_rules\" USING btree (\"user_id\",\"merchant_key\");",
-  "CREATE INDEX \"passkeys_user_idx\" ON \"passkeys\" USING btree (\"user_id\");"
+  "CREATE INDEX \"passkeys_user_idx\" ON \"passkeys\" USING btree (\"user_id\");",
+  "ALTER TABLE \"bill_ticks\" ADD COLUMN \"paid_on\" text;",
+  "ALTER TABLE \"bill_ticks\" ADD COLUMN \"confirmed\" boolean DEFAULT true NOT NULL;",
+  "ALTER TABLE \"sessions\" ADD COLUMN \"auth_at\" timestamp with time zone DEFAULT now() NOT NULL;"
 ];

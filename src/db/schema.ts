@@ -28,6 +28,8 @@ export const sessions = pgTable(
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
     /** Updated as the session is used. A session left idle too long stops working. */
     lastSeenAt: timestamp("last_seen_at", { withTimezone: true }).defaultNow().notNull(),
+    /** When this person last proved who they are (password or passkey). Sensitive changes need it to be recent. */
+    authAt: timestamp("auth_at", { withTimezone: true }).defaultNow().notNull(),
     createdAt: createdAt(),
   },
   (t) => [index("sessions_user_idx").on(t.userId)],
@@ -287,6 +289,10 @@ export const billTicks = pgTable(
     dueDate: text("due_date").notNull(),
     transactionId: text("transaction_id").notNull(),
     amount: cents("amount").notNull(),
+    /** The day the bank says the payment went out, so the same payment is recognised even if the bank is linked again. */
+    paidOn: text("paid_on"),
+    /** False from the moment the tick is written down until Tasks for Two confirms it. */
+    confirmed: boolean("confirmed").notNull().default(true),
     createdAt: createdAt(),
   },
   (t) => [uniqueIndex("bill_ticks_bill_due_idx").on(t.userId, t.tasksBillId, t.dueDate), uniqueIndex("bill_ticks_tx_idx").on(t.userId, t.transactionId)],
