@@ -2,6 +2,7 @@
 
 import { Plus } from "lucide-react";
 import { useState } from "react";
+import { celebrate } from "@/components/celebrate";
 import { Columns } from "@/components/charts";
 import { Button, Dialog, EmptyState, ErrorNote, Field, Input, MoneyInput, PageHeader, Sheet, Skeleton, Tag, confirm, toast } from "@/components/ui";
 import { send, useApi } from "@/components/use-api";
@@ -50,6 +51,8 @@ function GoalForm({ mode, onClose }: { mode: Exclude<Mode, { kind: "closed" }>; 
       if (cents === null || cents <= 0) return setError("Enter an amount, like 100.");
       return void run(async () => {
         await send("PATCH", `/api/goals/${mode.goal.id}`, { add: cents });
+        // The deposit that takes a goal over the line gets a celebration.
+        if (mode.goal.saved < mode.goal.target && mode.goal.saved + cents >= mode.goal.target) celebrate("You did it!", `“${mode.goal.name}” is fully funded: ${dollars(mode.goal.target)} saved.`);
         toast(`Added ${dollars(cents)} to ${mode.goal.name}`, { action: { label: "Undo", run: () => send("PATCH", `/api/goals/${mode.goal.id}`, { add: -cents }) } });
       });
     }

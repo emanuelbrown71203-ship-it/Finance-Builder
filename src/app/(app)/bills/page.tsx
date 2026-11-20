@@ -1,5 +1,6 @@
 "use client";
 
+import { ExternalLink } from "lucide-react";
 import { useState } from "react";
 import { BillRow } from "@/components/bills";
 import { CategoryIcon } from "@/components/category-icon";
@@ -7,6 +8,7 @@ import { Button, Dialog, EmptyState, ErrorNote, Fold, PageHeader, Sheet, SheetHe
 import { send, useApi } from "@/components/use-api";
 import { diffDays, formatDistance, formatMedium, formatShort } from "@/lib/dates";
 import { FREQUENCY_LABEL } from "@/lib/finance/recurring";
+import type { CancelHelp } from "@/lib/finance/subscriptions";
 import { dollars, dollarsExact } from "@/lib/money";
 import type { RecurringPayload, RecurringView } from "@/lib/types";
 
@@ -20,7 +22,7 @@ function Stat({ label, value, note, tone }: { label: string; value: string; note
   );
 }
 
-function SeriesRow({ series, onOpen }: { series: RecurringView; onOpen: () => void }) {
+function SeriesRow({ series, today, onOpen }: { series: RecurringView; today: string; onOpen: () => void }) {
   const change = series.priceChange;
   return (
     <li>
@@ -30,6 +32,8 @@ function SeriesRow({ series, onOpen }: { series: RecurringView; onOpen: () => vo
           <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
             <span className="truncate font-bold">{series.name}</span>
             {change && <Tag tone="canary">{change.to < change.from ? `Went up ${dollarsExact(change.from - change.to)}` : `Went down ${dollarsExact(change.to - change.from)}`}</Tag>}
+            {series.renewsSoon && <Tag tone="canary">Renews {formatDistance(series.nextDate, today)}</Tag>}
+            {series.startedRecently && !series.renewsSoon && <Tag tone="sky">New since {formatShort(series.firstDate)}</Tag>}
             {series.cancelled && <Tag>Marked cancelled</Tag>}
           </span>
           <span className="block truncate text-small text-ink-3">
@@ -43,6 +47,22 @@ function SeriesRow({ series, onOpen }: { series: RecurringView; onOpen: () => vo
         </span>
       </button>
     </li>
+  );
+}
+
+/** Where to go to cancel. The link opens the company's own site in a new tab. */
+function CancelHelpBox({ name, help }: { name: string; help: CancelHelp }) {
+  return (
+    <div className="rounded-2xl bg-sunk px-4 py-3">
+      <h3 className="font-bold">Want to cancel {name}?</h3>
+      <p className="mt-1 text-small text-ink-2">{help.how}</p>
+      {help.url && (
+        <a href={help.url} target="_blank" rel="noopener noreferrer" className="mt-2 inline-flex min-h-11 items-center gap-1.5 font-bold text-accent-text">
+          {help.label} <ExternalLink size={15} />
+        </a>
+      )}
+      <p className="mt-1 text-small text-ink-3">Once it’s done, come back and tap “I cancelled this” so it stops counting.</p>
+    </div>
   );
 }
 
@@ -102,6 +122,8 @@ function SeriesDialog({ series, onClose }: { series: RecurringView | null; onClo
             </ul>
           </div>
 
+          {series.kind === "subscription" && !series.cancelled && <CancelHelpBox name={series.name} help={series.help} />}
+
           {error && <ErrorNote message={error} />}
 
           {series.kind !== "income" && (
@@ -148,6 +170,7 @@ export default function BillsPage() {
   const income = data.series.filter((s) => s.kind === "income" && s.active);
   const stopped = data.series.filter((s) => s.kind !== "income" && !s.active);
   const next30 = data.upcoming.filter((u) => diffDays(u.date, data.today) <= 30);
+  const renewing = data.series.filter((s) => s.renewsSoon);
   const raised = data.series.filter((s) => s.active && s.priceChange && s.priceChange.to < s.priceChange.from);
 
   const list = (title: string, hint: string, rows: RecurringView[], empty: string) => (
@@ -156,7 +179,7 @@ export default function BillsPage() {
       {rows.length > 0 ? (
         <ul>
           {rows.map((s) => (
-            <SeriesRow key={s.key} series={s} onOpen={() => setOpenKey(s.key)} />
+            <SeriesRow key={s.key} series={s} today={data.today} onOpen={() => setOpenKey(s.key)} />
           ))}
         </ul>
       ) : (
@@ -174,6 +197,19 @@ export default function BillsPage() {
         <Stat label="Subscriptions a month" value={dollars(data.monthlySubscriptions)} note={`${dollars(data.monthlySubscriptions * 12)} a year across ${subscriptions.length}`} tone="bg-sky text-sky-ink" />
         <Stat label="Due in the next 30 days" value={dollars(next30.reduce((s, u) => s - u.amount, 0))} note={next30[0] ? `Next: ${next30[0].name}, ${formatDistance(next30[0].date, data.today)}` : "Nothing scheduled"} tone="border border-line-soft bg-sheet" />
       </div>
+
+      {renewing.length > 0 && (
+        <div className="mb-4 rounded-sheet bg-canary px-5 py-4 text-canary-ink">
+          <p className="font-bold">{renewing.length === 1 ? `${renewing[0].name} renews ${formatDistance(renewing[0].nextDate, data.today)}` : `${renewing.length} yearly charges are coming up`}</p>
+          <ul className="mt-1 text-small">
+            {renewing.map((s) => (
+              <li key={s.key}>
+                {s.name}: {dollarsExact(Math.abs(s.amount))} on {formatShort(s.nextDate)}. Cancel before then if you don’t want another {s.frequency === "yearly" ? "year" : "three months"}.
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {raised.length > 0 && (
         <div className="mb-5 rounded-sheet bg-canary px-5 py-4 text-canary-ink">
@@ -219,6 +255,27 @@ export default function BillsPage() {
         <div className="grid grid-cols-1 gap-5">
           {list("Bills", "Rent, utilities, insurance and loans.", bills, "No bills found yet")}
           {list("Subscriptions", "Memberships and services that renew on their own.", subscriptions, "No subscriptions found yet")}
+          {data.possible.length > 0 && (
+            <Sheet>
+              <SheetHeader title="Might be new" hint="A first charge from a service that usually renews. If you started a free trial, this is it turning into a paid plan." />
+              <ul className="flex flex-col gap-2">
+                {data.possible.map((p) => (
+                  <li key={p.name} className="rounded-2xl border border-line-soft p-3">
+                    <div className="flex items-baseline justify-between gap-3">
+                      <span className="font-bold">{p.name}</span>
+                      <span className="tabular font-bold">{dollarsExact(-p.amount)}</span>
+                    </div>
+                    <p className="text-small text-ink-3">First charged {formatShort(p.date)}</p>
+                    {p.help.url && (
+                      <a href={p.help.url} target="_blank" rel="noopener noreferrer" className="mt-1 inline-flex min-h-11 items-center gap-1.5 text-small font-bold text-accent-text">
+                        Don’t want it? {p.help.label} <ExternalLink size={14} />
+                      </a>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </Sheet>
+          )}
           {income.length > 0 && list("Regular income", "Deposits that arrive on a schedule.", income, "")}
           {stopped.length > 0 && list("No longer charging", "These used to repeat and have stopped, or you marked them cancelled.", stopped, "")}
         </div>

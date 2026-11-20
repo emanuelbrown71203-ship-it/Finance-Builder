@@ -3,9 +3,9 @@ import { getDb, type DB } from "@/db";
 import { seedDemo } from "@/db/seed";
 import { DEMO_USER_ID } from "@/lib/config";
 import type { Ctx } from "@/server/auth";
-import { setBudget, setRecurringOverride, updateGoal, updateTransaction } from "@/server/mutations";
+import { setBudget, setDebtPlan, setDebtSettings, setRecurringOverride, updateGoal, updateTransaction } from "@/server/mutations";
 import { loadRules } from "@/server/rules";
-import { getAccounts, getBudget, getGoals, getInvestments, getNetWorth, getOverview, getRecurring, getTransactions } from "@/server/queries";
+import { getAccounts, getBudget, getDebt, getGoals, getInvestments, getNetWorth, getOverview, getRecap, getRecurring, getTransactions } from "@/server/queries";
 
 /** End-to-end over the real SQL: seed the sample household into PGlite, then read it back. */
 const today = "2026-11-19";
@@ -56,11 +56,14 @@ describe("sample household", () => {
   });
 
   it("lists what needs a look on Home, each with somewhere to go", async () => {
+    // A limit that is certainly passed, so the test doesn't depend on how the sample month happens to go.
+    await setBudget(ctx, "groceries", 100);
     const { attention } = await getOverview(ctx);
-    // The seeded household has a bill due within two days, a price increase and categories over their limits.
+    await setBudget(ctx, "groceries", 65000);
     expect(attention.map((a) => a.kind)).toEqual(expect.arrayContaining(["due", "price", "budget"]));
     expect(attention.find((a) => a.kind === "price")).toMatchObject({ title: "Netflix raised its price", href: "/bills" });
     expect(attention.find((a) => a.kind === "due")?.title).toMatch(/is due (today|tomorrow|in 2 days)$/);
+    expect(attention.find((a) => a.kind === "budget")).toMatchObject({ title: "Groceries is over its limit", href: "/budget" });
     expect(attention.every((a) => a.href.startsWith("/") && a.detail.length > 0)).toBe(true);
     // Most urgent first: what's due comes before budget warnings.
     expect(attention.findIndex((a) => a.kind === "due")).toBeLessThan(attention.findIndex((a) => a.kind === "budget"));
@@ -130,6 +133,56 @@ describe("sample household", () => {
     const restored = await getTransactions(ctx, { q: "chipotle", limit: 200, offset: 0 });
     expect(restored.transactions.every((t) => t.category === "dining")).toBe(true);
     expect((await loadRules(db, DEMO_USER_ID)).has("chipotle")).toBe(false);
+  });
+
+  it("warns about a yearly renewal and spots a brand-new subscription", async () => {
+    const r = await getRecurring(ctx);
+    const dropbox = r.series.find((s) => s.name === "Dropbox")!;
+    expect(dropbox).toMatchObject({ frequency: "yearly", renewsSoon: true, nextDate: "2026-12-07" });
+    expect(dropbox.help.label).toBe("Open Dropbox");
+    // Amazon Prime is yearly too, but months away: no warning.
+    expect(r.series.find((s) => s.name === "Amazon Prime")?.renewsSoon).toBe(false);
+    expect(r.possible.map((p) => p.name)).toEqual(["Disney+"]);
+    const { attention } = await getOverview(ctx);
+    expect(attention.find((a) => a.kind === "renewal")?.title).toBe("Dropbox renews in 18 days");
+    expect(attention.find((a) => a.kind === "new")?.title).toBe("Disney+ looks like a new subscription");
+  });
+
+  it("builds a debt payoff plan from the loans, leaving out a card that is paid as it goes", async () => {
+    const d = await getDebt(ctx);
+    const byName = Object.fromEntries(d.debts.map((x) => [x.name, x]));
+    expect(byName["Cashback Visa"]).toMatchObject({ paidInFull: true, order: null });
+    // The loan payments were found in the transaction history.
+    expect(byName["Auto Loan"]).toMatchObject({ payment: 31840, paymentSource: "history", aprPercent: 5.9, order: 1 });
+    expect(byName["Student Loan"]).toMatchObject({ payment: 24000, aprPercent: 4.5, order: 2 });
+    expect(d.plan.debtFreeMonth).toBe(d.base.debtFreeMonth);
+    expect(d.plan.months).toBeGreaterThan(48);
+
+    await setDebtSettings(ctx, { extra: 20000 });
+    const faster = await getDebt(ctx);
+    expect(faster.extra).toBe(20000);
+    expect(faster.plan.months!).toBeLessThan(faster.base.months!);
+    expect(faster.plan.totalInterest).toBeLessThan(faster.base.totalInterest);
+
+    // The owner can correct a payment; it then counts as theirs.
+    await setDebtPlan(ctx, byName["Student Loan"].id, { monthlyPayment: 40000 });
+    expect((await getDebt(ctx)).debts.find((x) => x.name === "Student Loan")).toMatchObject({ payment: 40000, paymentSource: "yours" });
+    await setDebtSettings(ctx, { extra: 0 });
+  });
+
+  it("recaps last week, Monday to Sunday", async () => {
+    const r = await getRecap(ctx, 0);
+    // Today is Thursday Nov 19, so last week ran Nov 9 to Nov 15.
+    expect(r).toMatchObject({ from: "2026-11-09", to: "2026-11-15" });
+    expect(r.spent).toBeGreaterThan(0);
+    expect(r.income).toBe(284632);
+    expect(r.topCategories.length).toBeLessThanOrEqual(3);
+    expect(r.topCategories.reduce((s, c) => s + c.spent, 0)).toBeLessThanOrEqual(r.spent);
+    expect(r.noSpendDays).toBeGreaterThanOrEqual(0);
+    expect(r.noSpendDays).toBeLessThanOrEqual(7);
+    expect(r.biggest!.amount).toBeLessThan(0);
+    expect(r.netWorthChange).not.toBeNull();
+    expect((await getRecap(ctx, 1)).to).toBe("2026-11-08");
   });
 
   it("saves budget limits, goal deposits and cancelled subscriptions", async () => {

@@ -1,13 +1,19 @@
 import { and, asc, desc, eq, gte, ilike, inArray, lte, ne, or, sql } from "drizzle-orm";
-import { accounts, balanceSnapshots, budgets, goals, holdings, items, recurringOverrides, transactions, type Account } from "@/db/schema";
+import { accounts, balanceSnapshots, budgets, debtPlans, goals, holdings, items, recurringOverrides, transactions, userSettings, type Account } from "@/db/schema";
 import { category } from "@/lib/categories";
-import { addDays, addMonths, addMonthsToMonth, diffDays, eachDay, formatDistance, monthEnd, monthOf, monthStart, type ISODate } from "@/lib/dates";
+import { addDays, addMonths, addMonthsToMonth, diffDays, eachDay, formatDistance, formatShort, monthEnd, monthOf, monthStart, weekday, type ISODate } from "@/lib/dates";
 import { dollars, dollarsExact } from "@/lib/money";
 import { buildMonthPlan, spendingByCategory } from "@/lib/finance/plan";
-import { detectRecurring, monthlyEquivalent, upcomingBetween, type RecurringKind } from "@/lib/finance/recurring";
+import { payoffPlan, payoffOrder, type Debt, type Strategy } from "@/lib/finance/payoff";
+import { detectRecurring, monthlyEquivalent, seriesKeyFor, upcomingBetween, type RecurringKind } from "@/lib/finance/recurring";
+import { cancelHelp, isKnownSubscription } from "@/lib/finance/subscriptions";
 import type {
   AccountView,
   AttentionItem,
+  DebtPayload,
+  DebtView,
+  PossibleSubscription,
+  RecapPayload,
   AccountsPayload,
   BudgetPayload,
   BudgetRow,
@@ -150,11 +156,12 @@ async function analysisRows(ctx: Ctx, from: ISODate) {
 
 /* ---------- recurring ---------- */
 
-type RecurringBundle = { series: RecurringView[]; history: Awaited<ReturnType<typeof analysisRows>>; accounts: AccountView[] };
+type RecurringBundle = { series: RecurringView[]; history: Awaited<ReturnType<typeof analysisRows>>; accounts: AccountView[]; possible: PossibleSubscription[] };
 
 async function loadRecurring(ctx: Ctx): Promise<RecurringBundle> {
   const [history, overrides, accountList] = await Promise.all([
-    analysisRows(ctx, addMonths(ctx.today, -14)),
+    // Two years back, so a charge that only comes once a year is seen twice.
+    analysisRows(ctx, addMonths(ctx.today, -26)),
     ctx.db.select().from(recurringOverrides).where(eq(recurringOverrides.userId, ctx.userId)),
     listAccounts(ctx),
   ]);
@@ -162,22 +169,38 @@ async function loadRecurring(ctx: Ctx): Promise<RecurringBundle> {
   const accountName = new Map(accountList.map((a) => [a.id, a.name]));
 
   const series: RecurringView[] = [];
-  for (const s of detectRecurring(history, ctx.today)) {
+  const detected = detectRecurring(history, ctx.today);
+  for (const s of detected) {
     const o = overrideByKey.get(s.key);
     if (o?.kind === "ignore") continue;
     const kind = s.kind === "income" ? "income" : ((o?.kind as RecurringKind | undefined) ?? s.kind);
     const cancelled = o?.cancelled ?? false;
+    const active = s.active && !cancelled;
+    const untilNext = diffDays(s.nextDate, ctx.today);
     series.push({
       ...s,
       kind,
       // A cancelled series stops counting toward what’s coming up.
-      active: s.active && !cancelled,
+      active,
       cancelled,
       accountName: accountName.get(s.accountId) ?? "",
       monthly: Math.abs(monthlyEquivalent(s)),
+      help: cancelHelp(s.name),
+      renewsSoon: active && kind !== "income" && (s.frequency === "yearly" || s.frequency === "quarterly") && untilNext >= 0 && untilNext <= 30,
+      startedRecently: active && kind === "subscription" && diffDays(ctx.today, s.firstDate) <= 100,
     });
   }
-  return { series, history, accounts: accountList };
+
+  // A recent charge from a well-known subscription service that hasn't repeated yet.
+  const known = new Set(detected.map((s) => s.key));
+  const possible = new Map<string, PossibleSubscription>();
+  for (const t of history) {
+    if (t.amount >= 0 || diffDays(ctx.today, t.date) > 40 || !isKnownSubscription(t.name)) continue;
+    const key = seriesKeyFor(t.name, t.amount);
+    if (known.has(key) || overrideByKey.get(key)?.kind === "ignore") continue;
+    possible.set(key, { name: t.name, amount: t.amount, date: t.date, help: cancelHelp(t.name) });
+  }
+  return { series, history, accounts: accountList, possible: [...possible.values()] };
 }
 
 function upcomingBills(bundle: RecurringBundle, today: ISODate, days: number): UpcomingBill[] {
@@ -207,6 +230,7 @@ export async function getRecurring(ctx: Ctx): Promise<RecurringPayload> {
     upcoming: upcomingBills(bundle, ctx.today, 45),
     monthlyBills: live.filter((s) => s.kind === "bill").reduce((sum, s) => sum + s.monthly, 0),
     monthlySubscriptions: live.filter((s) => s.kind === "subscription").reduce((sum, s) => sum + s.monthly, 0),
+    possible: bundle.possible,
   };
 }
 
@@ -432,6 +456,14 @@ export async function getOverview(ctx: Ctx): Promise<Overview> {
       attention.push({ kind: "price", title: `${s.name} raised its price`, detail: `${dollarsExact(-s.priceChange.from)} to ${dollarsExact(-s.priceChange.to)}, ${dollars((s.priceChange.from - s.priceChange.to) * 12)} more a year`, href: "/bills" });
     }
   }
+  for (const s of bundle.series) {
+    if (s.renewsSoon) {
+      attention.push({ kind: "renewal", title: `${s.name} renews ${formatDistance(s.nextDate, ctx.today)}`, detail: `${dollarsExact(-s.amount)}, ${s.frequency === "yearly" ? "once a year" : "every 3 months"}. Cancel before then if you don’t want it.`, href: "/bills" });
+    }
+  }
+  for (const p of bundle.possible) {
+    attention.push({ kind: "new", title: `${p.name} looks like a new subscription`, detail: `${dollarsExact(-p.amount)} on ${formatShort(p.date)}`, href: "/bills" });
+  }
   for (const row of rows) {
     if (row.limit !== null && row.spent > row.limit) {
       attention.push({ kind: "budget", title: `${category(row.category).label} is over its limit`, detail: `${dollars(row.spent)} spent of ${dollars(row.limit)}`, href: "/budget" });
@@ -460,5 +492,125 @@ export async function getOverview(ctx: Ctx): Promise<Overview> {
       series: invest.series.map((p) => ({ date: p.date, value: p.net })),
     },
     sync,
+  };
+}
+
+/* ---------- debt payoff ---------- */
+
+export async function getDebt(ctx: Ctx): Promise<DebtPayload> {
+  const [bundle, plans, [settings]] = await Promise.all([
+    loadRecurring(ctx),
+    ctx.db.select().from(debtPlans).where(eq(debtPlans.userId, ctx.userId)),
+    ctx.db.select().from(userSettings).where(eq(userSettings.userId, ctx.userId)).limit(1),
+  ]);
+  const planFor = new Map(plans.map((p) => [p.accountId, p]));
+  const owed = bundle.accounts.filter((a) => (a.type === "credit" || a.type === "loan") && a.balance < 0);
+  const strategy: Strategy = settings?.debtStrategy === "snowball" ? "snowball" : "avalanche";
+  const extra = settings?.debtExtra ?? 0;
+
+  // For cards: have the payments over the last 90 days kept up with the spending?
+  const cardIds = owed.filter((a) => a.type === "credit").map((a) => a.id);
+  const cardFlow = new Map<string, { paid: number; spent: number }>();
+  if (cardIds.length > 0) {
+    const rows = await ctx.db
+      .select({ accountId: transactions.accountId, paid: sql<number>`coalesce(sum(case when ${transactions.amount} > 0 then ${transactions.amount} else 0 end), 0)::float8`, spent: sql<number>`coalesce(sum(case when ${transactions.amount} < 0 then -${transactions.amount} else 0 end), 0)::float8` })
+      .from(transactions)
+      .where(and(eq(transactions.userId, ctx.userId), inArray(transactions.accountId, cardIds), gte(transactions.date, addDays(ctx.today, -90))))
+      .groupBy(transactions.accountId);
+    for (const r of rows) cardFlow.set(r.accountId, { paid: Number(r.paid), spent: Number(r.spent) });
+  }
+
+  const views: DebtView[] = owed.map((a) => {
+    const own = planFor.get(a.id);
+    // A loan's regular payment usually shows up as a repeating charge named after it.
+    const series = bundle.series.find((s) => s.active && s.kind !== "income" && s.category === "loans" && s.name.toLowerCase().includes(a.name.toLowerCase()));
+    const payment = own?.monthlyPayment ?? (series ? Math.abs(monthlyEquivalent(series)) : a.minimumPayment);
+    const flow = cardFlow.get(a.id);
+    return {
+      id: a.id,
+      name: a.name,
+      institutionName: a.institutionName,
+      type: a.type,
+      balance: -a.balance,
+      aprPercent: own?.aprPercent ?? a.aprPercent,
+      payment,
+      paymentSource: own?.monthlyPayment != null ? "yours" : series ? "history" : a.minimumPayment != null ? "bank" : null,
+      paidInFull: a.type === "credit" && own?.monthlyPayment == null && !!flow && flow.spent > 0 && flow.paid >= flow.spent * 0.85,
+      paidOffMonth: null,
+      interest: 0,
+      order: null,
+    };
+  });
+
+  const inPlan: Debt[] = views.filter((d) => !d.paidInFull && d.aprPercent !== null && d.payment !== null && d.payment > 0).map((d) => ({ id: d.id, name: d.name, balance: d.balance, aprPercent: d.aprPercent!, payment: d.payment! }));
+  const month = monthOf(ctx.today);
+  const base = payoffPlan(inPlan, 0, strategy, month);
+  const plan = payoffPlan(inPlan, extra, strategy, month);
+  const order = payoffOrder(inPlan, strategy).map((d) => d.id);
+  for (const d of views) {
+    const result = plan.perDebt.find((p) => p.id === d.id);
+    if (!result) continue;
+    d.paidOffMonth = result.paidOffMonth;
+    d.interest = result.interest;
+    d.order = order.indexOf(d.id) + 1;
+  }
+  const slim = (p: typeof plan) => ({ months: p.months, debtFreeMonth: p.debtFreeMonth, totalInterest: p.totalInterest, balances: p.balances });
+  return {
+    today: ctx.today,
+    totalOwed: views.reduce((s, d) => s + d.balance, 0),
+    extra,
+    strategy,
+    debts: views.sort((a, b) => (a.order ?? 99) - (b.order ?? 99) || b.balance - a.balance),
+    base: slim(base),
+    plan: slim(plan),
+    needsDetails: views.filter((d) => !d.paidInFull && d.order === null).length,
+  };
+}
+
+/* ---------- weekly recap ---------- */
+
+/** Looks back on the last full week, Monday to Sunday. `weeksBack` 0 is the most recent one. */
+export async function getRecap(ctx: Ctx, weeksBack = 0): Promise<RecapPayload> {
+  // Monday of the current week, then step back.
+  const daysSinceMonday = (weekday(ctx.today) + 6) % 7;
+  const from = addDays(ctx.today, -daysSinceMonday - 7 * (weeksBack + 1));
+  const to = addDays(from, 6);
+  const beforeFrom = addDays(from, -7);
+
+  const [rows, bundle, worth, savings] = await Promise.all([
+    ctx.db
+      .select({ id: transactions.id, date: transactions.date, name: transactions.name, amount: transactions.amount, category: transactions.category, accountId: transactions.accountId })
+      .from(transactions)
+      .where(and(eq(transactions.userId, ctx.userId), gte(transactions.date, beforeFrom), lte(transactions.date, to))),
+    loadRecurring(ctx),
+    balanceSeries(ctx, addDays(from, -1)),
+    listAccounts(ctx),
+  ]);
+  const real = rows.filter((t) => t.category !== "transfer");
+  const week = real.filter((t) => t.date >= from);
+  const before = real.filter((t) => t.date < from);
+  const spending = (list: typeof real) => spendingByCategory(list).reduce((s, c) => s + c.spent, 0);
+  const out = week.filter((t) => t.amount < 0 && t.category !== "income");
+  const biggest = [...out].sort((a, b) => a.amount - b.amount)[0];
+  const billIds = new Set(bundle.series.filter((s) => s.kind !== "income").flatMap((s) => s.history.map((h) => h.id)));
+  const bills = out.filter((t) => billIds.has(t.id));
+  const spendDays = new Set(out.filter((t) => !billIds.has(t.id)).map((t) => t.date));
+  const savingsIds = new Set(savings.filter((a) => a.type === "depository" && a.subtype !== "checking").map((a) => a.id));
+  const start = worth.series.find((p) => p.date === addDays(from, -1));
+  const end = worth.series.find((p) => p.date === to);
+
+  return {
+    from,
+    to,
+    spent: spending(week),
+    spentBefore: spending(before),
+    income: week.filter((t) => t.category === "income").reduce((s, t) => s + t.amount, 0),
+    count: out.length,
+    noSpendDays: 7 - spendDays.size,
+    topCategories: spendingByCategory(week).slice(0, 3),
+    biggest: biggest ? { name: biggest.name, amount: biggest.amount, date: biggest.date } : null,
+    billsPaid: { count: bills.length, total: bills.reduce((s, t) => s - t.amount, 0) },
+    savedToGoals: rows.filter((t) => t.date >= from && savingsIds.has(t.accountId)).reduce((s, t) => s + t.amount, 0),
+    netWorthChange: start && end ? end.net - start.net : null,
   };
 }

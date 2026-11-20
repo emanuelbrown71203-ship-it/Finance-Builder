@@ -1,12 +1,13 @@
 "use client";
 
-import { ArrowDownRight, ArrowUpRight, CalendarClock, ChevronRight, CircleCheck, Landmark, PieChart, PiggyBank, Scale, Tag as TagIcon, TrendingUp, type LucideIcon } from "lucide-react";
+import { ArrowDownRight, ArrowUpRight, CalendarClock, ChevronRight, CircleCheck, Landmark, PieChart, PiggyBank, RefreshCcw, Scale, Sparkles, Tag as TagIcon, TrendingUp, type LucideIcon } from "lucide-react";
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { BillRow } from "@/components/bills";
 import { Runway } from "@/components/charts";
 import { LinkBankButton } from "@/components/link-bank";
 import { LiveStatus } from "@/components/shell";
+import { RecapCard } from "@/components/recap";
 import { TxList } from "@/components/transactions";
 import { EmptyState, ErrorNote, Fold, PageHeader, Sheet, SheetHeader, Skeleton, Tag, cx } from "@/components/ui";
 import { LIVE_INTERVAL, useApi, useNow } from "@/components/use-api";
@@ -135,6 +136,8 @@ const ATTENTION: Record<AttentionItem["kind"], { icon: LucideIcon; tone: string 
   due: { icon: CalendarClock, tone: "bg-pink text-pink-ink" },
   price: { icon: TagIcon, tone: "bg-canary text-canary-ink" },
   budget: { icon: PieChart, tone: "bg-pink text-pink-ink" },
+  renewal: { icon: RefreshCcw, tone: "bg-canary text-canary-ink" },
+  new: { icon: Sparkles, tone: "bg-sky text-sky-ink" },
 };
 
 function NeedsALook({ items }: { items: AttentionItem[] }) {
@@ -233,6 +236,8 @@ export default function HomePage() {
           <span className="font-bold text-ink">Sample data.</span> Nothing here is real. Link a bank in Accounts to see your own.
         </p>
       )}
+
+      <RecapCard today={data.today} />
 
       <div className="flex flex-col gap-4 xl:grid xl:grid-cols-[1.3fr_1fr] xl:items-start xl:gap-5">
         <div className="contents xl:flex xl:flex-col xl:gap-5">

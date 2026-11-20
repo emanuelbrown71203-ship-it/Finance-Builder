@@ -152,6 +152,11 @@ export async function seedDemo(db: DB, today: ISODate, now: Date = new Date()): 
   const isPayday = (date: ISODate) => weekday(date) === 5 && Math.abs(diffDays(date, payAnchor)) % 14 === 0;
 
   const primeDay = addDays(start, 9);
+  // A once-a-year charge whose next renewal is 18 days away, to show the renewal warning.
+  const dropboxDay = addDays(today, 18 - 365);
+  post(A.card, addDays(dropboxDay, -365), "Dropbox", cents(-119.88), "other");
+  // A first charge from a streaming service nine days ago: a new sign-up, or a free trial that ended.
+  const disneyDay = addDays(today, -9);
   let sideIncomeDay = 14;
   let statement = 0;
 
@@ -207,6 +212,8 @@ export async function seedDemo(db: DB, today: ISODate, now: Date = new Date()): 
     if (dom === 27) post(A.card, date, "Spotify", cents(-11.99), "entertainment");
     if (diffDays(date, start) % 28 === 20) post(A.card, date, "The New York Times", cents(-17), "entertainment");
     if (date === primeDay || date === addDays(primeDay, 365)) post(A.card, date, "Amazon Prime", cents(-139), "shopping");
+    if (date === dropboxDay) post(A.card, date, "Dropbox", cents(-119.88), "other");
+    if (date === disneyDay) post(A.card, date, "Disney+", cents(-13.99), "entertainment");
 
     // One-off larger purchases that make the year look lived in
     if (mi === -9 && dom === 11) post(A.card, date, "Alaska Airlines", cents(-384.2), "travel");

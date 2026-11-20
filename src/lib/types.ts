@@ -1,6 +1,7 @@
 import type { ISODate } from "./dates";
 import type { MonthPlan } from "./finance/plan";
 import type { RecurringSeries } from "./finance/recurring";
+import type { CancelHelp } from "./finance/subscriptions";
 
 /** Shapes the API returns. Shared by route handlers and pages. */
 
@@ -58,7 +59,16 @@ export type RecurringView = RecurringSeries & {
   /** Cost per month, positive cents, whatever the schedule. */
   monthly: number;
   cancelled: boolean;
+  /** Where to go to manage or cancel it. */
+  help: CancelHelp;
+  /** A yearly or quarterly charge coming within 30 days: easy to forget, worth a warning. */
+  renewsSoon: boolean;
+  /** It first charged within about the last three months. */
+  startedRecently: boolean;
 };
+
+/** A charge from a known subscription service that hasn't repeated yet: probably a new sign-up or a trial that converted. */
+export type PossibleSubscription = { name: string; amount: number; date: ISODate; help: CancelHelp };
 
 export type UpcomingBill = {
   key: string;
@@ -73,7 +83,7 @@ export type UpcomingBill = {
 export type NetWorthPoint = { date: ISODate; assets: number; debts: number; net: number };
 
 /** Something on Home that wants the person's attention, with where to go to deal with it. */
-export type AttentionItem = { kind: "bank" | "due" | "price" | "budget"; title: string; detail: string; href: string };
+export type AttentionItem = { kind: "bank" | "due" | "price" | "budget" | "renewal" | "new"; title: string; detail: string; href: string };
 
 export type Overview = {
   today: ISODate;
@@ -120,6 +130,55 @@ export type RecurringPayload = {
   upcoming: UpcomingBill[];
   monthlyBills: number;
   monthlySubscriptions: number;
+  possible: PossibleSubscription[];
+};
+
+export type DebtView = {
+  id: string;
+  name: string;
+  institutionName: string;
+  type: string;
+  balance: number;
+  aprPercent: number | null;
+  payment: number | null;
+  /** Where the payment figure came from, so the screen can say so. */
+  paymentSource: "yours" | "bank" | "history" | null;
+  /** A card that is paid off as it goes isn't costing interest, so it is left out of the plan. */
+  paidInFull: boolean;
+  paidOffMonth: string | null;
+  interest: number;
+  /** Position in the order extra money is aimed (1 = first). Null when not in the plan. */
+  order: number | null;
+};
+
+export type DebtPayload = {
+  today: ISODate;
+  totalOwed: number;
+  extra: number;
+  strategy: "avalanche" | "snowball";
+  debts: DebtView[];
+  /** At the regular payments only. */
+  base: { months: number | null; debtFreeMonth: string | null; totalInterest: number; balances: number[] };
+  /** With the extra each month. */
+  plan: { months: number | null; debtFreeMonth: string | null; totalInterest: number; balances: number[] };
+  /** Debts left out because the interest rate or payment isn't known yet. */
+  needsDetails: number;
+};
+
+export type RecapPayload = {
+  /** Monday to Sunday of the week being looked back on. */
+  from: ISODate;
+  to: ISODate;
+  spent: number;
+  spentBefore: number;
+  income: number;
+  count: number;
+  noSpendDays: number;
+  topCategories: { category: string; spent: number }[];
+  biggest: { name: string; amount: number; date: ISODate } | null;
+  billsPaid: { count: number; total: number };
+  savedToGoals: number;
+  netWorthChange: number | null;
 };
 
 export type NetWorthPayload = {

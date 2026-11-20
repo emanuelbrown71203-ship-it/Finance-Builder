@@ -36,6 +36,9 @@ export type RecurringSeries = {
   /** Set when the latest charge differs from a previously steady price. */
   priceChange: { from: number; to: number } | null;
   history: { id: string; date: ISODate; amount: number }[];
+  /** The first charge we have on record, and how many there have been. */
+  firstDate: ISODate;
+  count: number;
 };
 
 const FREQUENCIES: { frequency: Frequency; days: number; min: number; max: number; minCount: number }[] = [
@@ -144,6 +147,8 @@ export function detectRecurring(transactions: TxLike[], today: ISODate): Recurri
       active,
       priceChange,
       history: txs.slice(-12).map((t) => ({ id: t.id, date: t.date, amount: t.amount })),
+      firstDate: txs[0].date,
+      count: txs.length,
     });
   }
 

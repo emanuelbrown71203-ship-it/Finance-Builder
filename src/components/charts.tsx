@@ -76,7 +76,11 @@ export function LegendKey({ color, label, shape = "line", dashed }: { color: str
 
 export type TrendPoint = { date: ISODate; value: number; detail?: { label: string; value: number }[] };
 
-export function TrendChart({ points, label, height = 230 }: { points: TrendPoint[]; label: string; height?: number }) {
+/**
+ * `compare` draws a second, quieter dashed line over the same dates (for
+ * "what would happen otherwise"), with a legend naming both.
+ */
+export function TrendChart({ points, label, height = 230, compare, formatDate = formatMedium }: { points: TrendPoint[]; label: string; height?: number; compare?: { values: number[]; label: string; mainLabel: string }; formatDate?: (date: ISODate) => string }) {
   const [ref, width] = useWidth<HTMLDivElement>();
   const [active, setActive] = useState<number | null>(null);
   const gradient = useId();
@@ -85,7 +89,7 @@ export function TrendChart({ points, label, height = 230 }: { points: TrendPoint
   const plotH = height - m.top - m.bottom;
 
   const scale = useMemo(() => {
-    const values = points.map((p) => p.value);
+    const values = [...points.map((p) => p.value), ...(compare?.values ?? [])];
     const lo = Math.min(...values);
     const hi = Math.max(...values);
     const pad = (hi - lo || Math.abs(hi) || 100) * 0.12;
@@ -93,7 +97,7 @@ export function TrendChart({ points, label, height = 230 }: { points: TrendPoint
     const min = lo >= 0 ? Math.max(0, lo - pad) : lo - pad;
     const max = hi + pad;
     return { min, max, ticks: niceTicks(min, max) };
-  }, [points]);
+  }, [points, compare]);
 
   if (points.length < 2) return <div ref={ref} className="grid place-items-center text-small text-ink-3" style={{ height }}>Not enough history yet. This fills in as days go by.</div>;
 
@@ -102,6 +106,8 @@ export function TrendChart({ points, label, height = 230 }: { points: TrendPoint
   const line = points.map((p, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(p.value).toFixed(1)}`).join("");
   const area = `${line}L${x(points.length - 1).toFixed(1)},${m.top + plotH}L${m.left},${m.top + plotH}Z`;
   const xTicks = [0, 1, 2, 3].map((k) => Math.round((k / 3) * (points.length - 1)));
+  // The comparison runs over the same dates; if it is longer, it just runs off the right edge.
+  const compareLine = compare ? compare.values.slice(0, points.length).map((v, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join("") : null;
   const shown = active ?? points.length - 1;
   const first = points[0];
   const last = points[points.length - 1];
@@ -126,7 +132,7 @@ export function TrendChart({ points, label, height = 230 }: { points: TrendPoint
           height={height}
           role="img"
           tabIndex={0}
-          aria-label={`${label}: ${dollars(first.value)} on ${formatMedium(first.date)}, ${dollars(last.value)} on ${formatMedium(last.date)}. Use the arrow keys to read each day.`}
+          aria-label={`${label}: ${dollars(first.value)} on ${formatDate(first.date)}, ${dollars(last.value)} on ${formatDate(last.date)}. Use the arrow keys to read each point.`}
           onPointerMove={onMove}
           onPointerLeave={() => setActive(null)}
           onKeyDown={onKey}
@@ -149,10 +155,11 @@ export function TrendChart({ points, label, height = 230 }: { points: TrendPoint
           ))}
           {xTicks.map((i, k) => (
             <text key={i} x={x(i)} y={height - 6} textAnchor={k === 0 ? "start" : k === xTicks.length - 1 ? "end" : "middle"} className="fill-ink-3 text-[11px]">
-              {formatShort(points[i].date)}
+              {formatDate === formatMedium ? formatShort(points[i].date) : formatDate(points[i].date)}
             </text>
           ))}
           <path d={area} fill={`url(#${gradient})`} />
+          {compareLine && <path d={compareLine} fill="none" stroke="var(--series-muted)" strokeWidth="1.75" strokeDasharray="4 4" strokeLinejoin="round" />}
           <path d={line} fill="none" stroke="var(--series-1)" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
           {active !== null && <line x1={x(shown)} x2={x(shown)} y1={m.top} y2={m.top + plotH} stroke="var(--axis)" />}
           <circle cx={x(shown)} cy={y(points[shown].value)} r="4.5" fill="var(--series-1)" stroke="var(--sheet)" strokeWidth="2" />
@@ -161,7 +168,13 @@ export function TrendChart({ points, label, height = 230 }: { points: TrendPoint
       {active !== null && width > 0 && (
         <Tooltip x={x(active)} width={width}>
           <p className="tabular font-semibold">{dollars(points[active].value)}</p>
-          <p className="text-micro text-ink-3">{formatMedium(points[active].date)}</p>
+          <p className="text-micro text-ink-3">{formatDate(points[active].date)}</p>
+          {compare && compare.values[active] !== undefined && (
+            <p className="mt-1 flex justify-between gap-4 text-micro">
+              <span className="text-ink-3">{compare.label}</span>
+              <span className="tabular">{dollars(compare.values[active])}</span>
+            </p>
+          )}
           {points[active].detail?.map((d) => (
             <p key={d.label} className="mt-1 flex justify-between gap-4 text-micro">
               <span className="text-ink-3">{d.label}</span>
@@ -169,6 +182,12 @@ export function TrendChart({ points, label, height = 230 }: { points: TrendPoint
             </p>
           ))}
         </Tooltip>
+      )}
+      {compare && (
+        <div className="absolute inset-x-0 -bottom-7 flex flex-wrap gap-x-4 pl-[46px]">
+          <LegendKey color="var(--series-1)" label={compare.mainLabel} />
+          <LegendKey color="var(--series-muted)" label={compare.label} dashed />
+        </div>
       )}
     </div>
   );

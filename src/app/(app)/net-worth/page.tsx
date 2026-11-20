@@ -1,6 +1,7 @@
 "use client";
 
-import { Plus } from "lucide-react";
+import { ChevronRight, Plus } from "lucide-react";
+import Link from "next/link";
 import { useState } from "react";
 import { TrendChart } from "@/components/charts";
 import { Button, Dialog, ErrorNote, Field, Input, MoneyInput, PageHeader, Segmented, Sheet, SheetHeader, Skeleton, Tag, confirm, toast } from "@/components/ui";
@@ -203,6 +204,11 @@ export default function NetWorthPage() {
           </Sheet>
           <Sheet>
             <SheetHeader title="What you owe" action={<Tag tone="pink">{dollars(data.debts)}</Tag>} />
+            {data.debts > 0 && (
+              <Link href="/debt" className="mb-3 flex min-h-11 items-center justify-between gap-3 rounded-2xl bg-sunk px-3.5 font-bold text-accent-text">
+                See your payoff plan <ChevronRight size={17} />
+              </Link>
+            )}
             {data.debts > 0 ? (
               <div className="divide-y divide-line-soft">
                 <Group type="credit" accounts={of("credit", -1)} onEdit={(a) => setDialog({ open: true, account: a })} />

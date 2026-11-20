@@ -1,5 +1,5 @@
 import { and, eq, inArray, ne, sql } from "drizzle-orm";
-import { accounts, balanceSnapshots, budgets, categoryRules, goals, recurringOverrides, transactions } from "@/db/schema";
+import { accounts, balanceSnapshots, budgets, categoryRules, debtPlans, goals, recurringOverrides, transactions, userSettings } from "@/db/schema";
 import { isCategoryKey } from "@/lib/categories";
 import { merchantKey } from "@/lib/finance/recurring";
 import type { Ctx } from "./auth";
@@ -152,4 +152,21 @@ export async function updateManualAccount(ctx: Ctx, id: string, patch: { name?: 
 export async function deleteManualAccount(ctx: Ctx, id: string) {
   await manualAccount(ctx, id);
   await ctx.db.delete(accounts).where(eq(accounts.id, id));
+}
+
+/** How much extra goes toward debt each month, and which debt gets it first. */
+export async function setDebtSettings(ctx: Ctx, patch: { extra?: number; strategy?: "avalanche" | "snowball" }) {
+  const set = { ...(patch.extra !== undefined ? { debtExtra: patch.extra } : {}), ...(patch.strategy ? { debtStrategy: patch.strategy } : {}) };
+  if (Object.keys(set).length === 0) return;
+  await ctx.db.insert(userSettings).values({ userId: ctx.userId, ...set }).onConflictDoUpdate({ target: userSettings.userId, set });
+}
+
+/** The interest rate and monthly payment for one debt, when the bank doesn't say or the owner knows better. */
+export async function setDebtPlan(ctx: Ctx, accountId: string, patch: { aprPercent?: number | null; monthlyPayment?: number | null }) {
+  const [account] = await ctx.db.select({ id: accounts.id }).from(accounts).where(and(eq(accounts.id, accountId), eq(accounts.userId, ctx.userId))).limit(1);
+  if (!account) throw new HttpError(404, "Account not found.");
+  await ctx.db
+    .insert(debtPlans)
+    .values({ accountId, userId: ctx.userId, aprPercent: patch.aprPercent ?? null, monthlyPayment: patch.monthlyPayment ?? null })
+    .onConflictDoUpdate({ target: debtPlans.accountId, set: { ...(patch.aprPercent !== undefined ? { aprPercent: patch.aprPercent } : {}), ...(patch.monthlyPayment !== undefined ? { monthlyPayment: patch.monthlyPayment } : {}) } });
 }
