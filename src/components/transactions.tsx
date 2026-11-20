@@ -6,7 +6,7 @@ import { formatMedium, formatRelativeDay, type ISODate } from "@/lib/dates";
 import { dollarsExact, signedAmount } from "@/lib/money";
 import type { TxView } from "@/lib/types";
 import { CategoryIcon } from "./category-icon";
-import { Button, Dialog, ErrorNote, Field, Input, Select, Tag, cx } from "./ui";
+import { Button, Dialog, ErrorNote, Field, Input, Select, Tag, cx, toast } from "./ui";
 import { send } from "./use-api";
 
 /** Remembers which rows have been shown, so only genuinely new ones animate in. */
@@ -35,11 +35,11 @@ export function Amount({ cents, className, neutral }: { cents: number; className
 function TxRow({ tx, fresh, onOpen }: { tx: TxView; fresh: boolean; onOpen: () => void }) {
   return (
     <li className={cx("rounded-control", fresh && "arrived")}>
-      <button type="button" onClick={onOpen} className="flex w-full items-center gap-3 rounded-control px-2 py-2.5 text-left transition-colors hover:bg-sunk">
+      <button type="button" onClick={onOpen} className="flex min-h-[60px] w-full items-center gap-3 rounded-2xl px-2 py-2 text-left transition-colors hover:bg-sunk active:bg-sunk">
         <CategoryIcon category={tx.category} />
         <span className="min-w-0 flex-1">
           <span className="flex items-center gap-2">
-            <span className="truncate font-medium">{tx.name}</span>
+            <span className="truncate font-bold">{tx.name}</span>
             {tx.pending && <Tag>Pending</Tag>}
           </span>
           <span className="block truncate text-small text-ink-3">
@@ -115,6 +115,12 @@ function TxForm({ tx, onClose }: { tx: TxView; onClose: () => void }) {
     try {
       await send("PATCH", `/api/transactions/${tx.id}`, { category: categoryKey, note });
       onClose();
+      const before = { category: tx.category, note: tx.note ?? "" };
+      const changed = categoryKey !== before.category;
+      // Everyday changes get an Undo instead of an "are you sure?".
+      toast(changed ? `Moved to ${category(categoryKey).label}` : "Note saved", {
+        action: { label: "Undo", run: () => send("PATCH", `/api/transactions/${tx.id}`, before) },
+      });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Couldn’t save. Try again.");
       setSaving(false);

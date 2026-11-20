@@ -54,6 +54,17 @@ describe("sample household", () => {
     expect(sum("everyday")).toBe(plan.everydaySpent);
   });
 
+  it("lists what needs a look on Home, each with somewhere to go", async () => {
+    const { attention } = await getOverview(ctx);
+    // The seeded household has a bill due within two days, a price increase and categories over their limits.
+    expect(attention.map((a) => a.kind)).toEqual(expect.arrayContaining(["due", "price", "budget"]));
+    expect(attention.find((a) => a.kind === "price")).toMatchObject({ title: "Netflix raised its price", href: "/bills" });
+    expect(attention.find((a) => a.kind === "due")?.title).toMatch(/is due (today|tomorrow|in 2 days)$/);
+    expect(attention.every((a) => a.href.startsWith("/") && a.detail.length > 0)).toBe(true);
+    // Most urgent first: what's due comes before budget warnings.
+    expect(attention.findIndex((a) => a.kind === "due")).toBeLessThan(attention.findIndex((a) => a.kind === "budget"));
+  });
+
   it("net worth equals assets minus debts and matches the accounts", async () => {
     const w = await getNetWorth(ctx, "1y");
     expect(w.net).toBe(w.assets - w.debts);

@@ -1,10 +1,13 @@
 import { and, asc, desc, eq, gte, ilike, inArray, lte, ne, or, sql } from "drizzle-orm";
 import { accounts, balanceSnapshots, budgets, goals, holdings, items, recurringOverrides, transactions, type Account } from "@/db/schema";
-import { addDays, addMonths, addMonthsToMonth, eachDay, monthEnd, monthOf, monthStart, type ISODate } from "@/lib/dates";
+import { category } from "@/lib/categories";
+import { addDays, addMonths, addMonthsToMonth, diffDays, eachDay, formatDistance, monthEnd, monthOf, monthStart, type ISODate } from "@/lib/dates";
+import { dollars, dollarsExact } from "@/lib/money";
 import { buildMonthPlan, spendingByCategory } from "@/lib/finance/plan";
 import { detectRecurring, monthlyEquivalent, upcomingBetween, type RecurringKind } from "@/lib/finance/recurring";
 import type {
   AccountView,
+  AttentionItem,
   AccountsPayload,
   BudgetPayload,
   BudgetRow,
@@ -416,8 +419,28 @@ export async function getOverview(ctx: Ctx): Promise<Overview> {
   const due = upcomingBills(bundle, ctx.today, 30);
   const end = worth.series[worth.series.length - 1] ?? { assets: 0, debts: 0, net: 0 };
 
+  // What needs a look, most urgent first.
+  const attention: AttentionItem[] = [];
+  if (sync.needsAttention > 0) {
+    attention.push({ kind: "bank", title: sync.needsAttention === 1 ? "A bank needs you to sign in again" : `${sync.needsAttention} banks need you to sign in again`, detail: "Until then, new transactions from it won’t show up.", href: "/accounts" });
+  }
+  for (const bill of due.filter((b) => diffDays(b.date, ctx.today) <= 2)) {
+    attention.push({ kind: "due", title: `${bill.name} is due ${formatDistance(bill.date, ctx.today)}`, detail: `${dollarsExact(-bill.amount)}${bill.estimated ? ", based on past bills" : ""}`, href: "/bills" });
+  }
+  for (const s of bundle.series) {
+    if (s.active && s.priceChange && s.priceChange.to < s.priceChange.from) {
+      attention.push({ kind: "price", title: `${s.name} raised its price`, detail: `${dollarsExact(-s.priceChange.from)} to ${dollarsExact(-s.priceChange.to)}, ${dollars((s.priceChange.from - s.priceChange.to) * 12)} more a year`, href: "/bills" });
+    }
+  }
+  for (const row of rows) {
+    if (row.limit !== null && row.spent > row.limit) {
+      attention.push({ kind: "budget", title: `${category(row.category).label} is over its limit`, detail: `${dollars(row.spent)} spent of ${dollars(row.limit)}`, href: "/budget" });
+    }
+  }
+
   return {
     today: ctx.today,
+    attention,
     firstName: ctx.user.name.split(" ")[0],
     plan,
     netWorth: { net: end.net, assets: end.assets, debts: end.debts, change: changeOver(worth.series, 30), series: worth.series },

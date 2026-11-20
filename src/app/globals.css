@@ -1,47 +1,65 @@
 @import "tailwindcss";
-@import "@fontsource-variable/bricolage-grotesque/standard.css";
-@import "@fontsource-variable/schibsted-grotesk/index.css";
+@import "@fontsource-variable/archivo/wdth.css";
 
 /*
-  Passbook's look comes from the paperwork of money: pale green safety paper,
-  blue-black ink, and the tints of carbonless copy forms (mint, pink, canary).
-  Dark mode is the carbon sheet itself.
+  Passbook follows the same house style as the owner's other apps: phone
+  first, bright, bold titles, chunky cards, big tap targets. The rules are
+  written down in docs/house-style.md.
 
-  Tints carry meaning and are used the same way everywhere:
+  Colour jobs, used the same way everywhere:
+    accent (green) = the app itself: main buttons, links, "you are here"
     mint   = money coming in
     pink   = bills and money owed
     canary = needs a look
     sky    = put away (savings, investing)
+  Each section also has its own colour (--sec) for the tab bar and menu.
 */
 
 :root {
   color-scheme: light;
-  --paper: #ecf1ec;
+  --paper: #eef1f8;
   --sheet: #ffffff;
-  --sunk: #f4f7f4;
-  --ink: #16244d;
-  --ink-2: #47557c;
-  --ink-3: #5f6b88;
-  --line: #d3dcd5;
-  --line-soft: #e5ebe6;
+  --sunk: #f3f5fa;
+  --ink: #131a2e;
+  --ink-2: #434d66;
+  --ink-3: #5d6781;
+  --line: #d5dbe8;
+  --line-soft: #e4e8f1;
 
-  --accent: #2746d9;
-  --accent-strong: #1c36b0;
-  --accent-text: #2746d9;
+  --accent: #08835a;
+  --accent-strong: #066b49;
+  --accent-text: #077a50;
+  --accent-soft: #dff5ea;
   --on-accent: #ffffff;
 
-  --mint: #d3edde;
-  --mint-ink: #105a3a;
-  --pink: #f9d5dc;
-  --pink-ink: #8b2140;
-  --canary: #fbe9a0;
-  --canary-ink: #654a00;
-  --sky: #d9e2fc;
-  --sky-ink: #1c36b0;
+  --mint: #d8f5e6;
+  --mint-ink: #0a6642;
+  --pink: #ffe1e6;
+  --pink-ink: #a3233f;
+  --canary: #fff0b8;
+  --canary-ink: #6b4d00;
+  --sky: #dfe7ff;
+  --sky-ink: #2b41b8;
 
-  --good: #15744a;
-  --warn: #9a5b00;
-  --bad: #be322b;
+  --good: #0a7a4e;
+  --warn: #a35d00;
+  --bad: #c9302c;
+
+  /* The big band at the top of Home. */
+  --hero-a: #0a7d55;
+  --hero-b: #0b6672;
+  --hero-over-a: #b3332d;
+  --hero-over-b: #8f2748;
+
+  /* One colour per section, for wayfinding. */
+  --c-home: #08835a;
+  --c-activity: #2459d6;
+  --c-bills: #cf2f5b;
+  --c-budget: #b85c00;
+  --c-worth: #4c3fd1;
+  --c-savings: #0b7c8a;
+  --c-investing: #8a3fc7;
+  --c-accounts: #46536e;
 
   /* Chart series, validated for color-vision deficiency on --sheet. */
   --series-1: #2746d9;
@@ -50,83 +68,116 @@
   --series-4: #eda100;
   --series-5: #e87ba4;
   --series-6: #008300;
-  --series-muted: #a9b3c9;
-  --grid: #e5ebe6;
-  --axis: #c3cdc6;
+  --series-muted: #a4aec6;
+  --grid: #e4e8f1;
+  --axis: #c3cbdb;
+
+  --sh-card: 0 1px 2px rgb(19 26 46 / 0.05), 0 6px 18px rgb(19 26 46 / 0.06);
+  --sh-float: 0 12px 40px rgb(19 26 46 / 0.2);
 }
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     color-scheme: dark;
-    --paper: #0d1330;
-    --sheet: #1a2247;
-    --sunk: #151c3d;
-    --ink: #eef1fb;
-    --ink-2: #bcc5e0;
-    --ink-3: #96a1c4;
-    --line: #313b6e;
-    --line-soft: #262f5c;
-    --accent: #4963ee;
-    --accent-strong: #5f77f5;
-    --accent-text: #a3b4ff;
+    --paper: #0d1220;
+    --sheet: #161e30;
+    --sunk: #1c2539;
+    --ink: #e9eef8;
+    --ink-2: #b4bfd6;
+    --ink-3: #8f9bb5;
+    --line: #2a3550;
+    --line-soft: #212b42;
+    --accent: #0b855b;
+    --accent-strong: #0e9a6a;
+    --accent-text: #5fe0ae;
+    --accent-soft: #12382b;
     --on-accent: #ffffff;
-    --mint: #173f33;
-    --mint-ink: #93e2b9;
-    --pink: #4c2238;
-    --pink-ink: #ffb5c6;
-    --canary: #4a3d10;
-    --canary-ink: #f5d978;
-    --sky: #22306c;
-    --sky-ink: #b9c6ff;
-    --good: #58cf95;
-    --warn: #f1b445;
-    --bad: #ff8078;
+    --mint: #12382b;
+    --mint-ink: #8ee6bd;
+    --pink: #45202b;
+    --pink-ink: #ffb3c1;
+    --canary: #42360e;
+    --canary-ink: #f6d877;
+    --sky: #1f2b5c;
+    --sky-ink: #b7c4ff;
+    --good: #4fd49a;
+    --warn: #f3b548;
+    --bad: #ff8a80;
+    --hero-a: #0a6d4b;
+    --hero-b: #0a5560;
+    --hero-over-a: #8f2a26;
+    --hero-over-b: #6f2039;
+    --c-home: #4fd49a;
+    --c-activity: #7da2ff;
+    --c-bills: #ff7d9c;
+    --c-budget: #ffab4d;
+    --c-worth: #9d94ff;
+    --c-savings: #4ccad8;
+    --c-investing: #c592f5;
+    --c-accounts: #a9b6d1;
     --series-1: #5b7bf2;
     --series-2: #d95926;
     --series-3: #199e70;
     --series-4: #c98500;
     --series-5: #d55181;
     --series-6: #0ca30c;
-    --series-muted: #5a6594;
-    --grid: #262f5c;
-    --axis: #3a4580;
+    --series-muted: #56627f;
+    --grid: #212b42;
+    --axis: #34405e;
+    --sh-card: 0 1px 2px rgb(0 0 0 / 0.3);
+    --sh-float: 0 12px 40px rgb(0 0 0 / 0.55);
   }
 }
 
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --paper: #0d1330;
-  --sheet: #1a2247;
-  --sunk: #151c3d;
-  --ink: #eef1fb;
-  --ink-2: #bcc5e0;
-  --ink-3: #96a1c4;
-  --line: #313b6e;
-  --line-soft: #262f5c;
-  --accent: #4963ee;
-  --accent-strong: #5f77f5;
-  --accent-text: #a3b4ff;
+  --paper: #0d1220;
+  --sheet: #161e30;
+  --sunk: #1c2539;
+  --ink: #e9eef8;
+  --ink-2: #b4bfd6;
+  --ink-3: #8f9bb5;
+  --line: #2a3550;
+  --line-soft: #212b42;
+  --accent: #0b855b;
+  --accent-strong: #0e9a6a;
+  --accent-text: #5fe0ae;
+  --accent-soft: #12382b;
   --on-accent: #ffffff;
-  --mint: #173f33;
-  --mint-ink: #93e2b9;
-  --pink: #4c2238;
-  --pink-ink: #ffb5c6;
-  --canary: #4a3d10;
-  --canary-ink: #f5d978;
-  --sky: #22306c;
-  --sky-ink: #b9c6ff;
-  --good: #58cf95;
-  --warn: #f1b445;
-  --bad: #ff8078;
+  --mint: #12382b;
+  --mint-ink: #8ee6bd;
+  --pink: #45202b;
+  --pink-ink: #ffb3c1;
+  --canary: #42360e;
+  --canary-ink: #f6d877;
+  --sky: #1f2b5c;
+  --sky-ink: #b7c4ff;
+  --good: #4fd49a;
+  --warn: #f3b548;
+  --bad: #ff8a80;
+  --hero-a: #0a6d4b;
+  --hero-b: #0a5560;
+  --hero-over-a: #8f2a26;
+  --hero-over-b: #6f2039;
+  --c-home: #4fd49a;
+  --c-activity: #7da2ff;
+  --c-bills: #ff7d9c;
+  --c-budget: #ffab4d;
+  --c-worth: #9d94ff;
+  --c-savings: #4ccad8;
+  --c-investing: #c592f5;
+  --c-accounts: #a9b6d1;
   --series-1: #5b7bf2;
   --series-2: #d95926;
   --series-3: #199e70;
   --series-4: #c98500;
   --series-5: #d55181;
   --series-6: #0ca30c;
-  --series-muted: #5a6594;
-  --grid: #262f5c;
-  --axis: #3a4580;
+  --series-muted: #56627f;
+  --grid: #212b42;
+  --axis: #34405e;
+  --sh-card: 0 1px 2px rgb(0 0 0 / 0.3);
+  --sh-float: 0 12px 40px rgb(0 0 0 / 0.55);
 }
 
 @theme inline {
@@ -141,6 +192,7 @@
   --color-accent: var(--accent);
   --color-accent-strong: var(--accent-strong);
   --color-accent-text: var(--accent-text);
+  --color-accent-soft: var(--accent-soft);
   --color-on-accent: var(--on-accent);
   --color-mint: var(--mint);
   --color-mint-ink: var(--mint-ink);
@@ -153,24 +205,41 @@
   --color-good: var(--good);
   --color-warn: var(--warn);
   --color-bad: var(--bad);
+  --color-sec: var(--sec, var(--accent-text));
 
-  --font-sans: "Schibsted Grotesk Variable", ui-sans-serif, system-ui, sans-serif;
-  --font-display: "Bricolage Grotesque Variable", "Schibsted Grotesk Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: "Archivo Variable", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-display: "Archivo Variable", ui-sans-serif, system-ui, -apple-system, sans-serif;
 
-  /* Type scale, roughly a major third from a 15px base. */
   --text-micro: 0.75rem;
-  --text-small: 0.8125rem;
-  --text-body: 0.9375rem;
-  --text-lead: 1.0625rem;
+  --text-small: 0.875rem;
+  --text-body: 1rem;
+  --text-lead: 1.125rem;
   --text-title: 1.375rem;
   --text-headline: 1.875rem;
 
-  --radius-sheet: 18px;
-  --radius-control: 10px;
+  --radius-sheet: 20px;
+  --radius-control: 14px;
+
+  --shadow-card: var(--sh-card);
+  --shadow-float: var(--sh-float);
 }
+
+/* Section colours: a page or a menu item sets one of these, and children read --sec. */
+.sec-home { --sec: var(--c-home); }
+.sec-activity { --sec: var(--c-activity); }
+.sec-bills { --sec: var(--c-bills); }
+.sec-budget { --sec: var(--c-budget); }
+.sec-worth { --sec: var(--c-worth); }
+.sec-savings { --sec: var(--c-savings); }
+.sec-investing { --sec: var(--c-investing); }
+.sec-accounts { --sec: var(--c-accounts); }
 
 html {
   background: var(--paper);
+  -webkit-text-size-adjust: 100%;
+  /* No double-tap zoom, and no browser pull-to-refresh: the app has its own. */
+  touch-action: manipulation;
+  overscroll-behavior-y: none;
 }
 
 body {
@@ -178,27 +247,38 @@ body {
   color: var(--ink);
   font-family: var(--font-sans);
   font-size: var(--text-body);
-  line-height: 1.5;
+  line-height: 1.45;
   -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
   text-rendering: optimizeLegibility;
+  /* Nothing may push a page sideways on a phone. */
+  overflow-x: clip;
 }
 
-/* Headlines and figures: Bricolage, set slightly condensed so long sums stay compact. */
+/* iPhone zooms into any text box under 16px, so keep them at 16px on touch screens. */
+@media (pointer: coarse) {
+  input,
+  select,
+  textarea {
+    font-size: 16px !important;
+  }
+}
+
+/* Titles: Archivo, heavy and a little wide. */
 .display {
   font-family: var(--font-display);
-  font-stretch: 84%;
-  font-variation-settings: "opsz" 48;
-  font-weight: 600;
-  letter-spacing: -0.015em;
-  line-height: 1.05;
+  font-weight: 800;
+  font-stretch: 108%;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
 }
 
+/* Money figures: heavy and condensed, like a scoreboard, so long sums stay compact. */
 .figure {
   font-family: var(--font-display);
-  font-stretch: 80%;
-  font-variation-settings: "opsz" 72;
-  font-weight: 650;
-  letter-spacing: -0.02em;
+  font-weight: 800;
+  font-stretch: 82%;
+  letter-spacing: -0.015em;
   line-height: 1;
 }
 
@@ -210,12 +290,19 @@ body {
 :focus-visible {
   outline: 2px solid var(--accent-text);
   outline-offset: 2px;
-  border-radius: 6px;
+  border-radius: 8px;
 }
 
 ::selection {
   background: var(--sky);
   color: var(--ink);
+}
+
+.no-scrollbar {
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
 }
 
 /* A row that just arrived washes mint, then settles. */
@@ -250,50 +337,126 @@ body {
   animation: live-pulse 2.2s ease-out infinite;
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .arrived,
-  .live-dot {
-    animation: none;
+/* Pop-ups: a sheet that slides up on a phone, a centred card on bigger screens. */
+dialog.sheet {
+  margin: auto auto 0;
+  width: 100%;
+  max-width: 100%;
+  max-height: min(92dvh, var(--sheet-max, 92dvh));
+  border-radius: 26px 26px 0 0;
+  border: 1px solid var(--line);
+  border-bottom: 0;
+  background: var(--sheet);
+  color: var(--ink);
+  padding: 0;
+  box-shadow: var(--sh-float);
+  overscroll-behavior: contain;
+  bottom: var(--keyboard, 0px);
+}
+dialog.sheet[open] {
+  animation: sheet-up 0.26s cubic-bezier(0.32, 0.72, 0, 1);
+}
+dialog.sheet::backdrop {
+  background: rgb(13 18 32 / 0.45);
+  animation: fade-in 0.2s ease;
+}
+@keyframes sheet-up {
+  from {
+    transform: translateY(100%);
+  }
+}
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
+@media (min-width: 640px) {
+  dialog.sheet {
+    margin: auto;
+    width: min(32rem, calc(100vw - 2rem));
+    max-height: 85dvh;
+    border-radius: 26px;
+    border-bottom: 1px solid var(--line);
+  }
+  dialog.sheet[open] {
+    animation: sheet-pop 0.2s cubic-bezier(0.23, 1, 0.32, 1);
+  }
+  @keyframes sheet-pop {
+    from {
+      transform: scale(0.96);
+      opacity: 0;
+    }
   }
 }
 
-/*
-  The stub: a tear-off ticket. The seam between stub and body is a row of
-  perforations with a notch punched out at each end.
-*/
-.stub {
-  position: relative;
-  display: grid;
-  grid-template-columns: var(--stub-width, 3.5rem) 1fr;
-  border-radius: 10px;
-  background: var(--sunk);
+/* Messages above the tab bar. */
+@keyframes toast-in {
+  from {
+    transform: translateY(8px);
+    opacity: 0;
+  }
 }
-.stub > .stub-tab {
-  border-radius: 10px 0 0 10px;
-  border-right: 2px dotted var(--stub-seam, var(--sheet));
-}
-.stub::before,
-.stub::after {
-  content: "";
-  position: absolute;
-  left: calc(var(--stub-width, 3.5rem) - 6px);
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  background: var(--stub-seam, var(--sheet));
-}
-.stub::before {
-  top: -5px;
-}
-.stub::after {
-  bottom: -5px;
+.toast {
+  animation: toast-in 0.2s ease-out;
 }
 
-dialog::backdrop {
-  background: color-mix(in srgb, var(--ink) 45%, transparent);
+/* Pull to refresh: a pill that slides down from the top. */
+.pull {
+  position: fixed;
+  top: env(safe-area-inset-top);
+  left: 50%;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 14px 7px 8px;
+  border-radius: 999px;
+  background: var(--sheet);
+  border: 1px solid var(--line);
+  box-shadow: var(--sh-float);
+  font-size: 0.8125rem;
+  font-weight: 650;
+  color: var(--ink-2);
+  white-space: nowrap;
+  pointer-events: none;
 }
-:root[data-theme="dark"] dialog::backdrop {
-  background: rgb(4 7 22 / 0.7);
+.pull.settling {
+  transition: transform 0.2s ease;
+}
+.pull-circle {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--sunk);
+  color: var(--ink);
+}
+.pull.ready .pull-circle {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+.pull.done .pull-circle {
+  background: var(--good);
+  color: var(--sheet);
+}
+.pull-circle.spinning svg {
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .arrived,
+  .live-dot,
+  .toast,
+  dialog.sheet[open],
+  dialog.sheet::backdrop {
+    animation: none;
+  }
 }
 
 /* Hide number spinners; amounts are typed. */

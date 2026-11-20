@@ -1,9 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import { BillStub } from "@/components/bills";
+import { BillRow } from "@/components/bills";
 import { CategoryIcon } from "@/components/category-icon";
-import { Button, Dialog, EmptyState, ErrorNote, PageHeader, Sheet, SheetHeader, Skeleton, Tag } from "@/components/ui";
+import { Button, Dialog, EmptyState, ErrorNote, Fold, PageHeader, Sheet, SheetHeader, Skeleton, Tag, toast } from "@/components/ui";
 import { send, useApi } from "@/components/use-api";
 import { diffDays, formatDistance, formatMedium, formatShort } from "@/lib/dates";
 import { FREQUENCY_LABEL } from "@/lib/finance/recurring";
@@ -12,10 +12,10 @@ import type { RecurringPayload, RecurringView } from "@/lib/types";
 
 function Stat({ label, value, note, tone }: { label: string; value: string; note: string; tone: string }) {
   return (
-    <div className={`rounded-sheet px-5 py-4 ${tone}`}>
-      <p className="text-small">{label}</p>
-      <p className="figure mt-2 text-[2rem]">{value}</p>
-      <p className="mt-1.5 text-small opacity-85">{note}</p>
+    <div className={`min-w-0 rounded-sheet px-4 py-3.5 shadow-card sm:px-5 sm:py-4 ${tone}`}>
+      <p className="text-small font-bold">{label}</p>
+      <p className="figure mt-2 text-[1.75rem] sm:text-[2rem]">{value}</p>
+      <p className="mt-1.5 truncate text-small opacity-85">{note}</p>
     </div>
   );
 }
@@ -24,11 +24,11 @@ function SeriesRow({ series, onOpen }: { series: RecurringView; onOpen: () => vo
   const change = series.priceChange;
   return (
     <li>
-      <button type="button" onClick={onOpen} className="flex w-full items-center gap-3 rounded-control px-2 py-2.5 text-left transition-colors hover:bg-sunk">
+      <button type="button" onClick={onOpen} className="flex min-h-[60px] w-full items-center gap-3 rounded-2xl px-2 py-2 text-left transition-colors hover:bg-sunk active:bg-sunk">
         <CategoryIcon category={series.category} />
         <span className="min-w-0 flex-1">
           <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
-            <span className="truncate font-medium">{series.name}</span>
+            <span className="truncate font-bold">{series.name}</span>
             {change && <Tag tone="canary">{change.to < change.from ? `Went up ${dollarsExact(change.from - change.to)}` : `Went down ${dollarsExact(change.to - change.from)}`}</Tag>}
             {series.cancelled && <Tag>Marked cancelled</Tag>}
           </span>
@@ -50,13 +50,16 @@ function SeriesDialog({ series, onClose }: { series: RecurringView | null; onClo
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const update = async (patch: { kind?: "bill" | "subscription" | "ignore"; cancelled?: boolean }) => {
+  const update = async (patch: { kind?: "bill" | "subscription" | "ignore"; cancelled?: boolean }, done: string) => {
     if (!series) return;
     setBusy(true);
     setError(null);
+    // What to put back if the person taps Undo.
+    const before = { kind: series.kind === "income" ? undefined : series.kind, cancelled: series.cancelled };
     try {
       await send("PATCH", "/api/recurring", { key: series.key, ...patch });
       onClose();
+      toast(done, { action: { label: "Undo", run: () => send("PATCH", "/api/recurring", { key: series.key, ...before }) } });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Couldn’t save. Try again.");
     } finally {
@@ -104,18 +107,18 @@ function SeriesDialog({ series, onClose }: { series: RecurringView | null; onClo
           {series.kind !== "income" && (
             <div className="flex flex-wrap gap-2 border-t border-line-soft pt-4">
               {series.cancelled ? (
-                <Button size="sm" disabled={busy} onClick={() => update({ cancelled: false })}>
+                <Button size="sm" disabled={busy} onClick={() => update({ cancelled: false }, `${series.name} is back in your bills`)}>
                   Still paying for this
                 </Button>
               ) : (
-                <Button size="sm" disabled={busy} onClick={() => update({ cancelled: true })}>
+                <Button size="sm" disabled={busy} onClick={() => update({ cancelled: true }, `${series.name} marked as cancelled`)}>
                   I cancelled this
                 </Button>
               )}
-              <Button size="sm" disabled={busy} onClick={() => update({ kind: series.kind === "bill" ? "subscription" : "bill" })}>
+              <Button size="sm" disabled={busy} onClick={() => update({ kind: series.kind === "bill" ? "subscription" : "bill" }, `${series.name} moved to ${series.kind === "bill" ? "subscriptions" : "bills"}`)}>
                 {series.kind === "bill" ? "Move to subscriptions" : "Move to bills"}
               </Button>
-              <Button size="sm" variant="danger" disabled={busy} onClick={() => update({ kind: "ignore" })}>
+              <Button size="sm" variant="danger" disabled={busy} onClick={() => update({ kind: "ignore" }, `${series.name} hidden from bills`)}>
                 This doesn’t repeat
               </Button>
             </div>
@@ -164,12 +167,12 @@ export default function BillsPage() {
 
   return (
     <>
-      <PageHeader title="Bills and subscriptions" lead="Found automatically from charges that repeat. Select any of them to see past charges or tell Passbook it was cancelled." />
+      <PageHeader title="Bills" lead="Bills and subscriptions, found on their own from charges that repeat. Tap one to see past charges or say you cancelled it." />
 
-      <div className="mb-5 grid grid-cols-1 gap-3 sm:grid-cols-3">
-        <Stat label="Bills each month" value={dollars(data.monthlyBills)} note={`${bills.length} regular bills`} tone="bg-pink text-pink-ink" />
-        <Stat label="Subscriptions each month" value={dollars(data.monthlySubscriptions)} note={`${dollars(data.monthlySubscriptions * 12)} a year across ${subscriptions.length}`} tone="bg-sky text-sky-ink" />
-        <Stat label="Due in the next 30 days" value={dollars(next30.reduce((s, u) => s - u.amount, 0))} note={next30[0] ? `Next: ${next30[0].name}, ${formatDistance(next30[0].date, data.today)}` : "Nothing scheduled"} tone="bg-sheet border border-line-soft" />
+      <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-3 [&>*:last-child]:col-span-2 sm:[&>*:last-child]:col-span-1">
+        <Stat label="Bills a month" value={dollars(data.monthlyBills)} note={`${bills.length} regular bills`} tone="bg-pink text-pink-ink" />
+        <Stat label="Subscriptions a month" value={dollars(data.monthlySubscriptions)} note={`${dollars(data.monthlySubscriptions * 12)} a year across ${subscriptions.length}`} tone="bg-sky text-sky-ink" />
+        <Stat label="Due in the next 30 days" value={dollars(next30.reduce((s, u) => s - u.amount, 0))} note={next30[0] ? `Next: ${next30[0].name}, ${formatDistance(next30[0].date, data.today)}` : "Nothing scheduled"} tone="border border-line-soft bg-sheet" />
       </div>
 
       {raised.length > 0 && (
@@ -191,11 +194,23 @@ export default function BillsPage() {
         <Sheet>
           <SheetHeader title="Coming up" hint="The next six weeks, in the order they’re due." />
           {data.upcoming.length > 0 ? (
-            <ul className="flex flex-col gap-2.5">
-              {data.upcoming.map((bill) => (
-                <BillStub key={`${bill.key}-${bill.date}`} bill={bill} today={data.today} />
-              ))}
-            </ul>
+            <>
+              <ul className="flex flex-col gap-2">
+                {data.upcoming.slice(0, 6).map((bill) => (
+                  <BillRow key={`${bill.key}-${bill.date}`} bill={bill} today={data.today} />
+                ))}
+              </ul>
+              {data.upcoming.length > 6 && (
+                // Keep the screen short: the later ones are one tap away.
+                <Fold title="Later on" summary={`${data.upcoming.length - 6} more`} className="mt-2">
+                  <ul className="flex flex-col gap-2 pb-1">
+                    {data.upcoming.slice(6).map((bill) => (
+                      <BillRow key={`${bill.key}-${bill.date}`} bill={bill} today={data.today} />
+                    ))}
+                  </ul>
+                </Fold>
+              )}
+            </>
           ) : (
             <EmptyState title="Nothing due soon" />
           )}

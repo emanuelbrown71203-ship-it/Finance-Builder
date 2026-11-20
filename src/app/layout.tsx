@@ -5,12 +5,21 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: { default: APP_NAME, template: `%s | ${APP_NAME}` },
   description: "See every account, bill, budget and goal in one place, updated as your money moves.",
+  manifest: "/manifest.webmanifest",
+  // Lets the app open full screen from an iPhone home screen, like the owner's other apps.
+  appleWebApp: { capable: true, title: APP_NAME, statusBarStyle: "default" },
+  icons: { icon: [{ url: "/icon.svg", type: "image/svg+xml" }, { url: "/icon-192.png", sizes: "192x192", type: "image/png" }], apple: "/apple-touch-icon.png" },
+  other: { "mobile-web-app-capable": "yes" },
 };
 
 export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  // Draw under the notch and home bar; the app pads for them itself.
+  viewportFit: "cover",
   themeColor: [
-    { media: "(prefers-color-scheme: light)", color: "#ecf1ec" },
-    { media: "(prefers-color-scheme: dark)", color: "#0d1330" },
+    { media: "(prefers-color-scheme: light)", color: "#eef1f8" },
+    { media: "(prefers-color-scheme: dark)", color: "#0d1220" },
   ],
 };
 

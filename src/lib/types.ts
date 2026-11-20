@@ -72,8 +72,12 @@ export type UpcomingBill = {
 
 export type NetWorthPoint = { date: ISODate; assets: number; debts: number; net: number };
 
+/** Something on Home that wants the person's attention, with where to go to deal with it. */
+export type AttentionItem = { kind: "bank" | "due" | "price" | "budget"; title: string; detail: string; href: string };
+
 export type Overview = {
   today: ISODate;
+  attention: AttentionItem[];
   firstName: string;
   plan: MonthPlan;
   netWorth: { net: number; assets: number; debts: number; change: number; series: NetWorthPoint[] };

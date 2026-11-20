@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { niceTicks } from "@/components/charts";
+import { PULL_THRESHOLD, pullDistance } from "@/components/pull-to-refresh";
 
 describe("niceTicks", () => {
   it("always gives at least three round reference lines", () => {
@@ -11,5 +12,18 @@ describe("niceTicks", () => {
   });
   it("copes with a flat series", () => {
     expect(niceTicks(500, 500)).toEqual([500]);
+  });
+});
+
+describe("pull to refresh", () => {
+  it("the pill lags behind the finger, never goes negative, and stops", () => {
+    expect(pullDistance(-40)).toBe(0);
+    expect(pullDistance(60)).toBe(30);
+    expect(pullDistance(1000)).toBe(110);
+  });
+  it("takes a deliberate pull to refresh", () => {
+    // A finger has to travel about 128px before letting go refreshes.
+    expect(pullDistance(100)).toBeLessThan(PULL_THRESHOLD);
+    expect(pullDistance(130)).toBeGreaterThanOrEqual(PULL_THRESHOLD);
   });
 });

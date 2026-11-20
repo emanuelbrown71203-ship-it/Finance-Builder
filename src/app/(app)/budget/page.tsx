@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { CategoryIcon } from "@/components/category-icon";
 import { Columns } from "@/components/charts";
-import { Button, Dialog, ErrorNote, Field, IconButton, Meter, MoneyInput, PageHeader, Sheet, SheetHeader, Skeleton, Tag } from "@/components/ui";
+import { Button, Dialog, ErrorNote, Field, IconButton, Meter, MoneyInput, PageHeader, Sheet, SheetHeader, Skeleton, Tag, toast } from "@/components/ui";
 import { send, useApi } from "@/components/use-api";
 import { SPENDING_CATEGORIES, category } from "@/lib/categories";
 import { addMonthsToMonth, monthName, monthOf } from "@/lib/dates";
@@ -30,6 +30,11 @@ function LimitForm({ row, onClose }: { row: BudgetRow; onClose: () => void }) {
     try {
       await send("PUT", "/api/budget", { category: row.category, monthlyLimit });
       onClose();
+      const name = category(row.category).label;
+      const before = row.limit;
+      toast(monthlyLimit === null ? `Limit removed from ${name}` : `${name} limit set to ${dollars(monthlyLimit)}`, {
+        action: { label: "Undo", run: () => send("PUT", "/api/budget", { category: row.category, monthlyLimit: before }) },
+      });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Couldn’t save. Try again.");
       setBusy(false);

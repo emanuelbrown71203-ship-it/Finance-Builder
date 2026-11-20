@@ -17,18 +17,32 @@ household with about 13 months of history, and a simulator that adds a card purc
 30 to 60 seconds so you can watch the live feed work. Nothing to sign in to, nothing to set up.
 Sample data resets each day.
 
+## Made for the phone
+
+Passbook follows the same house style as the owner's other apps (written down in
+`docs/house-style.md`):
+
+- A bar along the bottom on a phone, a menu down the side on a wide screen.
+- **Pull down at the top of any screen to refresh.** It checks the banks, reloads every number and
+  loads a newer version of the app if one is out.
+- Pop-ups slide up from the bottom and can be dragged down to close.
+- Everyday changes show a short message with **Undo**. Only permanent things ask "are you sure?".
+- Settings has Automatic / Light / Dark and the version number.
+- It can be added to an iPhone or Android home screen and opens full screen like an app.
+
 ## The screens
 
 | Screen | What it does |
 | --- | --- |
-| Home | What's left to spend this month after bills and savings, drawn as a burn-down against an even pace, with paydays and bills marked on their dates. Latest activity, upcoming bills, net worth, budget, goals and investments at a glance. |
-| Transactions | Everything from every account, live. Search, filter by category, account, month or direction. Select one to recategorize it or add a note. |
-| Bills | Recurring bills, subscriptions and income, detected from history. Upcoming due dates, price-increase alerts, "I cancelled this". |
-| Budget | Spending by category against monthly limits, month-over-month, and six months of money in vs money out. |
-| Net worth | Assets minus debts over time, by account. Add things no bank reports (a car, a house) by hand. |
+| Home | What's left to spend this month after bills and savings, what needs a look (bills due, price increases, categories over their limit), what's coming up and the latest activity. |
+| Transactions | Everything from every account, live. Search and filter. Tap one to change its category or add a note. |
+| Bills | Recurring bills, subscriptions and income, found from history. Upcoming due dates, price-increase alerts, "I cancelled this". |
+| Budget | Spending by category against monthly limits, month over month, and six months of money in vs money out. |
+| Net worth | What you own minus what you owe over time, by account. Add things no bank reports (a car, a house) by hand. |
 | Savings | Savings balance, monthly saving history, and goals with a projected finish date. |
-| Investing | Total, trend, split by asset type, and holdings with gain or loss. |
-| Accounts | Linked institutions, their status, and linking or removing a bank. |
+| Investing | Total, trend, split by type, and holdings with gain or loss. |
+| Accounts | Linked banks, their status, and linking or removing one. |
+| Settings | Light or dark, how to put it on your home screen, your account, version. |
 
 ## Going live with real bank data
 
@@ -67,10 +81,11 @@ refresh. "Refresh" in the top bar forces a sync on demand.
 - **Plaid** for bank connections: Link, `/transactions/sync` with cursors, holdings,
   liabilities, and signed webhooks.
 - **Charts are hand-drawn SVG** (`src/components/charts.tsx`): no chart library.
+- **Type:** Archivo, the same family as the YouTube Dashboard and HOH Hub.
 
 ```
 src/
-  app/(app)/         the eight screens
+  app/(app)/         the screens
   app/(auth)/        sign in, create account
   app/api/           route handlers (one folder per resource)
   components/        shell, charts, transaction list, dialogs, UI primitives

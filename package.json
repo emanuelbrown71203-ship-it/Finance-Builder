@@ -1,6 +1,6 @@
 {
   "name": "passbook",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -15,6 +15,7 @@
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.17",
+    "@fontsource-variable/archivo": "^5.3.0",
     "@fontsource-variable/bricolage-grotesque": "^5.3.0",
     "@fontsource-variable/schibsted-grotesk": "^5.3.0",
     "drizzle-orm": "^0.45.4",

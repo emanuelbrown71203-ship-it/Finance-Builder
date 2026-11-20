@@ -1,10 +1,10 @@
 "use client";
 
-import { Search } from "lucide-react";
+import { Search, SlidersHorizontal } from "lucide-react";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { TxList } from "@/components/transactions";
-import { Button, EmptyState, ErrorNote, Input, PageHeader, Segmented, Select, Sheet, Skeleton } from "@/components/ui";
+import { Button, Dialog, EmptyState, ErrorNote, Field, Input, PageHeader, Segmented, Select, Sheet, Skeleton } from "@/components/ui";
 import { LIVE_INTERVAL, useApi } from "@/components/use-api";
 import { CATEGORIES } from "@/lib/categories";
 import { addMonthsToMonth, monthName, monthOf } from "@/lib/dates";
@@ -12,6 +12,11 @@ import type { Me, TransactionsPayload } from "@/lib/types";
 
 const PAGE = 60;
 type Flow = "all" | "in" | "out";
+const FLOW_OPTIONS: { value: Flow; label: string }[] = [
+  { value: "all", label: "All" },
+  { value: "in", label: "Money in" },
+  { value: "out", label: "Money out" },
+];
 
 export default function TransactionsPage() {
   // Reading the address bar suspends during prerender, so the filters sit behind a boundary.
@@ -64,49 +69,83 @@ function Transactions() {
     setFlow("all");
   };
 
+  const [sheetOpen, setSheetOpen] = useState(false);
+  const activeFilters = [categoryKey, account, month, flow !== "all" ? flow : ""].filter(Boolean).length;
+
+  const categorySelect = (id?: string) => (
+    <Select id={id} aria-label="Category" value={categoryKey} onChange={(e) => setCategoryKey(e.target.value)}>
+      <option value="">All categories</option>
+      {CATEGORIES.map((c) => (
+        <option key={c.key} value={c.key}>
+          {c.label}
+        </option>
+      ))}
+    </Select>
+  );
+  const accountSelect = (id?: string) => (
+    <Select id={id} aria-label="Account" value={account} onChange={(e) => setAccount(e.target.value)}>
+      <option value="">All accounts</option>
+      {data?.accounts.map((a) => (
+        <option key={a.id} value={a.id}>
+          {a.name}
+        </option>
+      ))}
+    </Select>
+  );
+  const monthSelect = (id?: string) => (
+    <Select id={id} aria-label="Month" value={month} onChange={(e) => setMonth(e.target.value)}>
+      <option value="">All time</option>
+      {months.map((m) => (
+        <option key={m} value={m}>
+          {monthName(m)} {m.slice(0, 4)}
+        </option>
+      ))}
+    </Select>
+  );
+
   return (
     <>
-      <PageHeader title="Transactions" lead="Every charge and deposit from your linked accounts, newest first. Select one to change its category or add a note." />
+      <PageHeader title="Transactions" lead="Every charge and deposit, newest first. Tap one to change its category or add a note." />
 
-      <div className="mb-4 grid grid-cols-1 gap-2.5 sm:grid-cols-2 xl:grid-cols-[minmax(14rem,1.4fr)_1fr_1fr_1fr_auto]">
-        <div className="relative sm:col-span-2 xl:col-span-1">
-          <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ink-3" />
-          <Input type="search" aria-label="Search transactions" placeholder="Search by name or note" value={search} onChange={(e) => setSearch(e.target.value)} className="pl-9" />
+      {/* On a phone: a search box and one Filter button. The choices open in a sheet. */}
+      <div className="mb-4 flex gap-2 lg:hidden">
+        <div className="relative min-w-0 flex-1">
+          <Search size={17} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-ink-3" />
+          <Input type="search" enterKeyHint="search" aria-label="Search transactions" placeholder="Search by name or note" value={search} onChange={(e) => setSearch(e.target.value)} className="pl-10" />
         </div>
-        <Select aria-label="Category" value={categoryKey} onChange={(e) => setCategoryKey(e.target.value)}>
-          <option value="">All categories</option>
-          {CATEGORIES.map((c) => (
-            <option key={c.key} value={c.key}>
-              {c.label}
-            </option>
-          ))}
-        </Select>
-        <Select aria-label="Account" value={account} onChange={(e) => setAccount(e.target.value)}>
-          <option value="">All accounts</option>
-          {data?.accounts.map((a) => (
-            <option key={a.id} value={a.id}>
-              {a.name}
-            </option>
-          ))}
-        </Select>
-        <Select aria-label="Month" value={month} onChange={(e) => setMonth(e.target.value)}>
-          <option value="">All time</option>
-          {months.map((m) => (
-            <option key={m} value={m}>
-              {monthName(m)} {m.slice(0, 4)}
-            </option>
-          ))}
-        </Select>
-        <Segmented
-          label="Direction"
-          value={flow}
-          onChange={setFlow}
-          options={[
-            { value: "all", label: "All" },
-            { value: "in", label: "Money in" },
-            { value: "out", label: "Money out" },
-          ]}
-        />
+        <Button onClick={() => setSheetOpen(true)} className="relative px-4" aria-label={activeFilters > 0 ? `Filter, ${activeFilters} on` : "Filter"}>
+          <SlidersHorizontal size={18} />
+          Filter
+          {activeFilters > 0 && <span className="tabular flex h-5 min-w-5 items-center justify-center rounded-full bg-[var(--c-activity)] px-1 text-micro font-extrabold text-sheet">{activeFilters}</span>}
+        </Button>
+      </div>
+      <Dialog open={sheetOpen} onClose={() => setSheetOpen(false)} title="Filter">
+        <div className="flex flex-col gap-4">
+          <Field label="Category">{(id) => categorySelect(id)}</Field>
+          <Field label="Account">{(id) => accountSelect(id)}</Field>
+          <Field label="Month">{(id) => monthSelect(id)}</Field>
+          <Segmented label="Direction" full value={flow} onChange={setFlow} options={FLOW_OPTIONS} />
+          <div className="mt-2 flex gap-2">
+            <Button className="flex-1" onClick={clear} disabled={!filtered}>
+              Clear all
+            </Button>
+            <Button className="flex-1" variant="primary" onClick={() => setSheetOpen(false)}>
+              {data ? `Show ${data.total.toLocaleString("en-US")}` : "Show results"}
+            </Button>
+          </div>
+        </div>
+      </Dialog>
+
+      {/* On a wide screen everything fits in one row. */}
+      <div className="mb-4 hidden gap-2.5 lg:grid lg:grid-cols-[minmax(14rem,1.4fr)_1fr_1fr_1fr_auto]">
+        <div className="relative">
+          <Search size={17} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-ink-3" />
+          <Input type="search" aria-label="Search transactions" placeholder="Search by name or note" value={search} onChange={(e) => setSearch(e.target.value)} className="pl-10" />
+        </div>
+        {categorySelect()}
+        {accountSelect()}
+        {monthSelect()}
+        <Segmented label="Direction" value={flow} onChange={setFlow} options={FLOW_OPTIONS} />
       </div>
 
       <Sheet className={isValidating && !data ? "opacity-60" : undefined}>
@@ -130,7 +169,7 @@ function Transactions() {
                 <>
                   {" "}
                   match.{" "}
-                  <button type="button" onClick={clear} className="font-medium text-accent-text hover:underline">
+                  <button type="button" onClick={clear} className="font-bold text-accent-text">
                     Clear filters
                   </button>
                 </>

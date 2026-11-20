@@ -3,7 +3,7 @@
 import { Plus } from "lucide-react";
 import { useState } from "react";
 import { Columns } from "@/components/charts";
-import { Button, Dialog, EmptyState, ErrorNote, Field, Input, MoneyInput, PageHeader, Sheet, Skeleton, Tag } from "@/components/ui";
+import { Button, Dialog, EmptyState, ErrorNote, Field, Input, MoneyInput, PageHeader, Sheet, Skeleton, Tag, confirm, toast } from "@/components/ui";
 import { send, useApi } from "@/components/use-api";
 import { formatMedium, monthName } from "@/lib/dates";
 import { dollars, parseDollarsToCents } from "@/lib/money";
@@ -48,7 +48,10 @@ function GoalForm({ mode, onClose }: { mode: Exclude<Mode, { kind: "closed" }>; 
     if (mode.kind === "add") {
       const cents = parseDollarsToCents(amount);
       if (cents === null || cents <= 0) return setError("Enter an amount, like 100.");
-      return void run(() => send("PATCH", `/api/goals/${mode.goal.id}`, { add: cents }));
+      return void run(async () => {
+        await send("PATCH", `/api/goals/${mode.goal.id}`, { add: cents });
+        toast(`Added ${dollars(cents)} to ${mode.goal.name}`, { action: { label: "Undo", run: () => send("PATCH", `/api/goals/${mode.goal.id}`, { add: -cents }) } });
+      });
     }
     const targetCents = parseDollarsToCents(target);
     const monthlyCents = monthly.trim() ? parseDollarsToCents(monthly) : 0;
@@ -57,7 +60,11 @@ function GoalForm({ mode, onClose }: { mode: Exclude<Mode, { kind: "closed" }>; 
     if (targetCents === null || targetCents < 100) return setError("Enter how much you need, like 5000.");
     if (monthlyCents === null || savedCents === null) return setError("Amounts should be numbers, like 250.");
     const body = { name, target: targetCents, monthlyContribution: monthlyCents, targetDate: targetDate || null };
-    void run(() => (mode.kind === "edit" ? send("PATCH", `/api/goals/${mode.goal.id}`, body) : send("POST", "/api/goals", { ...body, saved: savedCents })));
+    void run(async () => {
+      if (mode.kind === "edit") await send("PATCH", `/api/goals/${mode.goal.id}`, body);
+      else await send("POST", "/api/goals", { ...body, saved: savedCents });
+      toast(mode.kind === "edit" ? "Goal saved" : `“${name.trim()}” added to your goals`);
+    });
   };
 
   return (
@@ -88,7 +95,14 @@ function GoalForm({ mode, onClose }: { mode: Exclude<Mode, { kind: "closed" }>; 
         )}
         <div className="flex flex-wrap justify-between gap-2">
           {mode.kind === "edit" ? (
-            <Button variant="danger" disabled={busy} onClick={() => run(() => send("DELETE", `/api/goals/${mode.goal.id}`))}>
+            <Button variant="danger" disabled={busy} onClick={async () => {
+              // Permanent, so this one asks first.
+              if (!(await confirm({ title: `Delete “${mode.goal.name}”?`, body: "The goal and what you’ve recorded toward it are removed. Your bank balance doesn’t change.", confirmLabel: "Delete goal", danger: true }))) return;
+              void run(async () => {
+                await send("DELETE", `/api/goals/${mode.goal.id}`);
+                toast("Goal deleted");
+              });
+            }}>
               Delete goal
             </Button>
           ) : (

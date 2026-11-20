@@ -3,7 +3,7 @@
 import { Plus } from "lucide-react";
 import { useState } from "react";
 import { TrendChart } from "@/components/charts";
-import { Button, Dialog, ErrorNote, Field, Input, MoneyInput, PageHeader, Segmented, Sheet, SheetHeader, Skeleton, Tag } from "@/components/ui";
+import { Button, Dialog, ErrorNote, Field, Input, MoneyInput, PageHeader, Segmented, Sheet, SheetHeader, Skeleton, Tag, confirm, toast } from "@/components/ui";
 import { send, useApi } from "@/components/use-api";
 import { dollars, parseDollarsToCents } from "@/lib/money";
 import { ACCOUNT_TYPE_LABEL, type AccountView, type NetWorthPayload } from "@/lib/types";
@@ -42,7 +42,11 @@ function ManualForm({ account, onClose }: { account: AccountView | null; onClose
     const cents = parseDollarsToCents(value);
     if (!name.trim()) return setError("Give it a name, like “Honda Civic”.");
     if (cents === null) return setError("Enter what it’s worth, like 18500.");
-    void run(() => (account ? send("PATCH", `/api/accounts/${account.id}`, { name, value: cents }) : send("POST", "/api/accounts", { name, kind, value: cents })));
+    void run(async () => {
+      if (account) await send("PATCH", `/api/accounts/${account.id}`, { name, value: cents });
+      else await send("POST", "/api/accounts", { name, kind, value: cents });
+      toast(account ? `${name} updated` : `${name} added to your net worth`);
+    });
   };
 
   return (
@@ -65,7 +69,14 @@ function ManualForm({ account, onClose }: { account: AccountView | null; onClose
       </Field>
       <div className="flex flex-wrap justify-between gap-2">
         {account ? (
-          <Button variant="danger" disabled={busy} onClick={() => run(() => send("DELETE", `/api/accounts/${account.id}`))}>
+          <Button variant="danger" disabled={busy} onClick={async () => {
+              // Permanent, so this one asks first.
+              if (!(await confirm({ title: `Remove ${account.name}?`, body: "It comes off your net worth, along with its history. This can’t be undone.", confirmLabel: "Remove", danger: true }))) return;
+              void run(async () => {
+                await send("DELETE", `/api/accounts/${account.id}`);
+                toast(`${account.name} removed`);
+              });
+            }}>
             Remove
           </Button>
         ) : (
@@ -138,7 +149,7 @@ export default function NetWorthPage() {
         lead="Everything you own minus everything you owe, tracked day by day."
         action={
           <Button onClick={() => setDialog({ open: true, account: null })}>
-            <Plus size={16} /> Add something by hand
+            <Plus size={17} /> Add by hand
           </Button>
         }
       />

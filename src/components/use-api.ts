@@ -60,32 +60,42 @@ export function useNow(intervalMs: number): number {
 }
 
 const THEME_EVENT = "passbook-theme-change";
+const THEME_KEY = "passbook-theme";
+export type ThemeChoice = "system" | "light" | "dark";
 
 function subscribeTheme(onChange: () => void) {
-  const media = window.matchMedia("(prefers-color-scheme: dark)");
-  media.addEventListener("change", onChange);
   window.addEventListener(THEME_EVENT, onChange);
-  return () => {
-    media.removeEventListener("change", onChange);
-    window.removeEventListener(THEME_EVENT, onChange);
-  };
+  return () => window.removeEventListener(THEME_EVENT, onChange);
 }
 
-function isDark(): boolean {
+function currentTheme(): ThemeChoice {
   const chosen = document.documentElement.dataset.theme;
-  return chosen ? chosen === "dark" : window.matchMedia("(prefers-color-scheme: dark)").matches;
+  return chosen === "light" || chosen === "dark" ? chosen : "system";
 }
 
-/** Light or dark: the saved choice if there is one, otherwise whatever the device uses. */
-export function useTheme(): [boolean, () => void] {
-  const dark = useSyncExternalStore(subscribeTheme, isDark, () => false);
-  const toggle = () => {
-    const next = dark ? "light" : "dark";
-    document.documentElement.dataset.theme = next;
+/** Keeps the phone's status bar the same colour as the page. */
+function paintStatusBar(choice: ThemeChoice) {
+  const colors = { light: "#eef1f8", dark: "#0d1220" };
+  document.querySelectorAll<HTMLMetaElement>('meta[name="theme-color"]').forEach((meta) => {
+    const own = meta.media.includes("dark") ? colors.dark : colors.light;
+    meta.content = choice === "system" ? own : colors[choice];
+  });
+}
+
+/**
+ * Light, dark, or whatever the device uses. Saved on this device only, the
+ * same way the owner's other apps do it.
+ */
+export function useTheme(): [ThemeChoice, (choice: ThemeChoice) => void] {
+  const choice = useSyncExternalStore<ThemeChoice>(subscribeTheme, currentTheme, () => "system");
+  const set = (next: ThemeChoice) => {
+    if (next === "system") delete document.documentElement.dataset.theme;
+    else document.documentElement.dataset.theme = next;
     try {
-      localStorage.setItem("passbook-theme", next);
+      localStorage.setItem(THEME_KEY, next);
     } catch {}
+    paintStatusBar(next);
     window.dispatchEvent(new Event(THEME_EVENT));
   };
-  return [dark, toggle];
+  return [choice, set];
 }
