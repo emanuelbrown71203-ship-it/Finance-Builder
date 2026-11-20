@@ -49,6 +49,37 @@ export function siteOrigin(): string | null {
 }
 
 /**
+ * Where the database is. The address (DATABASE_URL) can be written without
+ * its password, with the password kept on its own in DATABASE_PASSWORD. Then
+ * the address is not a secret and can be corrected without anyone handling
+ * the password again.
+ */
+export function databaseUrl(): string | null {
+  const raw = process.env.DATABASE_URL;
+  if (!raw) return null;
+  const password = process.env.DATABASE_PASSWORD;
+  if (!password) return raw;
+  try {
+    const url = new URL(raw);
+    if (!url.password) url.password = password;
+    return url.href;
+  } catch {
+    return raw;
+  }
+}
+
+/** True when the database address has a password, in it or beside it. */
+function databaseConfigured(): boolean {
+  const full = databaseUrl();
+  if (!full) return false;
+  try {
+    return new URL(full).password !== "";
+  } catch {
+    return false;
+  }
+}
+
+/**
  * With real data, everything the app needs to keep it safe has to be in
  * place before it will answer. Returns what is missing, or null when ready.
  * (Checked on a deployed site only, so local testing can use the built-in database.)
@@ -57,6 +88,7 @@ export function liveConfigProblem(): string | null {
   if (isDemoMode() || process.env.NODE_ENV !== "production") return null;
   const missing: string[] = [];
   if (!process.env.DATABASE_URL) missing.push("DATABASE_URL");
+  else if (!databaseConfigured()) missing.push("DATABASE_PASSWORD");
   if (!siteOrigin()) missing.push("APP_URL");
   const key = process.env.TOKEN_ENCRYPTION_KEY;
   if (!key || Buffer.from(key, "base64").length !== 32) missing.push("TOKEN_ENCRYPTION_KEY");

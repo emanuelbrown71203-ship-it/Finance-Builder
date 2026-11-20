@@ -16,7 +16,7 @@ import { POST as connectorRoute } from "@/app/api/connector/route";
 import { DELETE as deleteAccountRoute, GET as meRoute } from "@/app/api/me/route";
 import { getDb, type DB } from "@/db";
 import { connectorTokens, sessions, users } from "@/db/schema";
-import { liveConfigProblem } from "@/lib/config";
+import { databaseUrl, liveConfigProblem } from "@/lib/config";
 import { contextForKey } from "@/server/connector";
 import { decryptSecret, encryptSecret, hashPassword, passwordNeedsUpgrade, sha256, verifyPassword } from "@/server/crypto";
 import { describeError } from "@/server/errors";
@@ -256,6 +256,11 @@ describe("secrets", () => {
     const b = describeError(query);
     expect(b).toContain("23505");
     expect(b).not.toMatch(/someone@example\.com|salt\$hash/);
+
+    // The database driver's own error, not wrapped: its message names the problem and carries no values.
+    const driver = Object.assign(new Error('database "nowhere" does not exist'), { name: "PostgresError", code: "3D000", query: "select count(*) from users", parameters: ["secret-value"] });
+    expect(describeError(driver)).toContain('3D000: database "nowhere" does not exist');
+    expect(describeError(driver)).not.toContain("secret-value");
   });
 
   it("a deployed site with real data refuses to run until everything it needs is in place", () => {
@@ -264,7 +269,15 @@ describe("secrets", () => {
     try {
       delete process.env.DATABASE_URL;
       expect(liveConfigProblem()).toContain("DATABASE_URL");
-      process.env.DATABASE_URL = "postgres://example";
+      // An address with no password isn't enough on its own...
+      process.env.DATABASE_URL = "postgres://app.project@db.example:6543/postgres";
+      expect(liveConfigProblem()).toContain("DATABASE_PASSWORD");
+      // ...until the password is supplied beside it. Characters that mean something in an address are handled.
+      process.env.DATABASE_PASSWORD = "p@ss/w:rd#1";
+      expect(liveConfigProblem()).toBeNull();
+      expect(decodeURIComponent(new URL(databaseUrl()!).password)).toBe("p@ss/w:rd#1");
+      delete process.env.DATABASE_PASSWORD;
+      process.env.DATABASE_URL = "postgres://app:secret@db.example:6543/postgres";
       expect(liveConfigProblem()).toBeNull();
       process.env.TOKEN_ENCRYPTION_KEY = "too-short";
       expect(liveConfigProblem()).toContain("TOKEN_ENCRYPTION_KEY");
@@ -272,7 +285,7 @@ describe("secrets", () => {
       delete process.env.APP_URL;
       expect(liveConfigProblem()).toContain("APP_URL");
     } finally {
-      for (const key of ["NODE_ENV", "DATABASE_URL", "APP_URL", "TOKEN_ENCRYPTION_KEY"]) {
+      for (const key of ["NODE_ENV", "DATABASE_URL", "DATABASE_PASSWORD", "APP_URL", "TOKEN_ENCRYPTION_KEY"]) {
         if (saved[key] === undefined) delete process.env[key];
         else process.env[key] = saved[key];
       }

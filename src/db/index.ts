@@ -1,5 +1,5 @@
 import type { PgDatabase, PgQueryResultHKT } from "drizzle-orm/pg-core";
-import { isDemoMode, liveConfigProblem } from "@/lib/config";
+import { databaseUrl, isDemoMode, liveConfigProblem } from "@/lib/config";
 import { MIGRATION_STATEMENTS } from "./embedded-migrations";
 import * as schema from "./schema";
 
@@ -18,7 +18,7 @@ async function connect(): Promise<DB> {
   // Real data never falls back to the in-memory database, where it would vanish on the next restart.
   const problem = liveConfigProblem();
   if (problem) throw new Error(problem);
-  const url = process.env.DATABASE_URL;
+  const url = databaseUrl();
   if (url && !isDemoMode()) {
     const { default: postgres } = await import("postgres");
     const { drizzle } = await import("drizzle-orm/postgres-js");
