@@ -1,7 +1,7 @@
 import { contextForKey, handleRpc } from "@/server/connector";
 import { describeError } from "@/server/errors";
 import { HttpError } from "@/server/http";
-import { assertUnderLimit, clientAddress, limit, limitKey } from "@/server/rate-limit";
+import { limit, limitKey } from "@/server/rate-limit";
 
 /**
  * The Claude connector endpoint: POST …/api/mcp/<key>. The key in the address
@@ -13,13 +13,11 @@ const answer = (body: unknown, status = 200) => Response.json(body, { status, he
 export async function POST(request: Request, route: { params: Promise<{ key: string }> }) {
   const { key } = await route.params;
   try {
-    // Wrong keys are limited per address so the key can't be guessed by trying many.
+    // A ceiling per address. The key itself is 240 random bits, so it can't be found by trying.
+    // (A right key is never refused because of someone else's wrong ones: Claude calls from shared addresses.)
     await limit(request, "mcp-address", 300, 60_000);
-    // After ten wrong keys from one address, nothing from it is looked up for ten minutes, right key or not.
-    await assertUnderLimit("mcp-miss", clientAddress(request), 10, 10 * 60_000);
     const ctx = await contextForKey(key);
     if (!ctx) {
-      await limit(request, "mcp-miss", 10, 10 * 60_000).catch(() => {});
       return answer({ error: "This connector link was switched off. Make a new one in Passbook, Settings, Connect to Claude." }, 404);
     }
     await limitKey("mcp-key", ctx.userId, 120, 60_000);

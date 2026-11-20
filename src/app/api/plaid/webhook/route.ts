@@ -14,7 +14,7 @@ export async function POST(request: Request) {
   if (!plaidConfig() || liveConfigProblem()) return json({ error: "Not configured." }, { status: 404 });
   try {
     // Anyone can call this address. A ceiling per caller keeps junk from being checked against Plaid without end.
-    await limit(request, "plaid-webhook", 240, 60_000);
+    await limit(request, "plaid-webhook", 60, 60_000);
   } catch (error) {
     if (error instanceof HttpError) return json({ error: error.message }, { status: error.status });
     console.error(describeError(error));

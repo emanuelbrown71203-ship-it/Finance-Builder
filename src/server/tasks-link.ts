@@ -1,4 +1,4 @@
-import { and, eq, gte, lt, ne } from "drizzle-orm";
+import { and, eq, gte, isNull, lt, ne, or } from "drizzle-orm";
 import { z } from "zod";
 import type { DB } from "@/db";
 import { billLinks, billTicks, taskLinks, transactions } from "@/db/schema";
@@ -39,6 +39,9 @@ const Bills = z.object({
     )
     .max(300),
 });
+
+/** How long a sent tick is given to finish before it may be sent again. */
+const RETRY_AFTER_MS = 2 * 60_000;
 
 /** Whose secret the stored link is, for the encryption. */
 const linkOwner = (userId: string) => `tasks:${userId}`;
@@ -268,9 +271,21 @@ export async function checkBills(db: DB, userId: string, fetchImpl: Fetch = fetc
   };
 
   // First, ticks from an earlier run that were never confirmed.
+  const waiting: string[] = [];
   for (const t of ticks.filter((row) => !row.confirmed)) {
     const bill = bills.find((b) => b.id === t.tasksBillId);
     if (bill && !bill.archived && unpaidDueDates(bill).includes(t.dueDate)) {
+      // Claimed in one statement, so two checks running at once (a bank sync and "Check now")
+      // can't both send it. A tick sent in the last two minutes is left to finish.
+      const claimed = await db
+        .update(billTicks)
+        .set({ attemptedAt: new Date() })
+        .where(and(eq(billTicks.id, t.id), eq(billTicks.userId, userId), eq(billTicks.confirmed, false), or(isNull(billTicks.attemptedAt), lt(billTicks.attemptedAt, new Date(Date.now() - RETRY_AFTER_MS)))))
+        .returning({ id: billTicks.id });
+      if (claimed.length === 0) {
+        waiting.push(t.tasksBillName);
+        continue;
+      }
       await sendTick({ id: t.id, billId: t.tasksBillId, billName: t.tasksBillName, dueDate: t.dueDate, amount: t.amount });
     } else {
       // Tasks for Two no longer shows it waiting, so it went through (or the bill is gone).
@@ -293,12 +308,12 @@ export async function checkBills(db: DB, userId: string, fetchImpl: Fetch = fetc
     const id = crypto.randomUUID();
     const inserted = await db
       .insert(billTicks)
-      .values({ id, userId, tasksBillId: m.billId, tasksBillName: m.billName.slice(0, 200), dueDate: m.dueDate, transactionId: m.transactionId, amount: m.amount, paidOn: m.paidOn, confirmed: false })
+      .values({ id, userId, tasksBillId: m.billId, tasksBillName: m.billName.slice(0, 200), dueDate: m.dueDate, transactionId: m.transactionId, amount: m.amount, paidOn: m.paidOn, confirmed: false, attemptedAt: new Date() })
       .onConflictDoNothing()
       .returning({ id: billTicks.id });
     if (inserted.length === 0) continue;
     await sendTick({ id, billId: m.billId, billName: m.billName, dueDate: m.dueDate, amount: m.amount });
   }
-  const message = problems.length > 0 ? `Couldn’t tick ${problems.join(", ").slice(0, 200)}. It will try again next time.` : ticked > 0 ? `Ticked off ${ticked} ${ticked === 1 ? "bill" : "bills"}.` : "Nothing new to tick off.";
+  const message = problems.length > 0 ? `Couldn’t tick ${problems.join(", ").slice(0, 200)}. It will try again next time.` : waiting.length > 0 && ticked === 0 ? `Still waiting to hear back about ${waiting.join(", ").slice(0, 200)}. It will check again in a couple of minutes.` : ticked > 0 ? `Ticked off ${ticked} ${ticked === 1 ? "bill" : "bills"}.` : "Nothing new to tick off.";
   return finish(ticked, message);
 }

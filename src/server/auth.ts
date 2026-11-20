@@ -104,7 +104,7 @@ export async function confirmWithPassword(ctx: Ctx, password: string): Promise<v
   await ctx.db.update(sessions).set({ authAt: new Date() }).where(eq(sessions.id, ctx.sessionId));
 }
 
-/** Changes the password and signs every other device out, so an old password stops working everywhere. */
+/** Changes the password, signs every other device out and switches off the Claude link. */
 export async function changePassword(ctx: Ctx, current: string, next: string): Promise<void> {
   if (ctx.demo || !ctx.sessionId) throw new HttpError(400, "The sample household has no password.");
   await checkOwnPassword(ctx, current);
@@ -113,7 +113,14 @@ export async function changePassword(ctx: Ctx, current: string, next: string): P
   if (next === current) throw new HttpError(400, "Pick a password you haven’t been using.");
   await ctx.db.update(users).set({ passwordHash: await hashPassword(next) }).where(eq(users.id, ctx.userId));
   await ctx.db.delete(sessions).where(and(eq(sessions.userId, ctx.userId), ne(sessions.id, ctx.sessionId)));
+  // A password is changed when someone else may have had it. Whatever they set up while they did goes too.
+  await ctx.db.delete(connectorTokens).where(eq(connectorTokens.userId, ctx.userId));
   await ctx.db.update(sessions).set({ authAt: new Date() }).where(eq(sessions.id, ctx.sessionId));
+}
+
+/** Marks this session as freshly checked. Used once a passkey has confirmed it's the same person. */
+export async function markFresh(ctx: Ctx): Promise<void> {
+  if (ctx.sessionId) await ctx.db.update(sessions).set({ authAt: new Date() }).where(eq(sessions.id, ctx.sessionId));
 }
 
 /** Passwords everyone tries first. A new password can't be one of them, or be built from the person's own name or email. */

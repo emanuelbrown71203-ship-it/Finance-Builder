@@ -64,5 +64,6 @@ export const MIGRATION_STATEMENTS: string[] = [
   "CREATE INDEX \"passkeys_user_idx\" ON \"passkeys\" USING btree (\"user_id\");",
   "ALTER TABLE \"bill_ticks\" ADD COLUMN \"paid_on\" text;",
   "ALTER TABLE \"bill_ticks\" ADD COLUMN \"confirmed\" boolean DEFAULT true NOT NULL;",
-  "ALTER TABLE \"sessions\" ADD COLUMN \"auth_at\" timestamp with time zone DEFAULT now() NOT NULL;"
+  "ALTER TABLE \"sessions\" ADD COLUMN \"auth_at\" timestamp with time zone DEFAULT now() NOT NULL;",
+  "ALTER TABLE \"bill_ticks\" ADD COLUMN \"attempted_at\" timestamp with time zone;"
 ];

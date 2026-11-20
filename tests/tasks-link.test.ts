@@ -227,6 +227,7 @@ describe("ticking bills in Tasks for Two", () => {
 
     for (const mode of ["timeout", "huge"] as const) {
       payMode = mode;
+      await db.update(billTicks).set({ attemptedAt: new Date(Date.now() - 5 * 60_000) }).where(eq(billTicks.tasksBillId, "b-water"));
       expect((await checkBills(db, USER, fakeTasks, now)).message).toBe("Couldn’t tick Water. It will try again next time.");
       const [held] = await db.select().from(billTicks).where(eq(billTicks.tasksBillId, "b-water"));
       // The note stays, marked unconfirmed, so this payment can't be matched to anything else meanwhile.
@@ -235,8 +236,14 @@ describe("ticking bills in Tasks for Two", () => {
     // It isn't shown as done while it's unconfirmed.
     expect((await getTasksLink(ctx, fakeTasks)).recent.map((r) => r.billName)).not.toContain("Water");
 
-    // Next run, Tasks for Two still shows it waiting, so the same tick is sent again, and this time it lands.
+    // Straight away, the tick is left alone: it may still be on its way, and another check may be running.
     payMode = "ok";
+    calls.length = 0;
+    expect((await checkBills(db, USER, fakeTasks, now)).message).toBe("Still waiting to hear back about Water. It will check again in a couple of minutes.");
+    expect(calls.some((c) => c.tool === "pay_bills")).toBe(false);
+
+    // A few minutes on, Tasks for Two still shows it waiting, so the same tick is sent again, and this time it lands.
+    await db.update(billTicks).set({ attemptedAt: new Date(Date.now() - 5 * 60_000) }).where(eq(billTicks.tasksBillId, "b-water"));
     calls.length = 0;
     expect(await checkBills(db, USER, fakeTasks, now)).toEqual({ ticked: 1, message: "Ticked off 1 bill." });
     expect(calls.filter((c) => c.tool === "pay_bills").map((c) => c.args.payments)).toEqual([[{ id: "b-water", due_date: "2026-11-15", amount: 42.1 }]]);

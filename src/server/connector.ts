@@ -34,10 +34,12 @@ const INSTRUCTIONS =
 /**
  * Everything sent to Claude passes through here. Text that came from a bank
  * or another person is flattened to one line and kept short, so a payment
- * memo can't smuggle in a page of instructions.
+ * memo can't smuggle in a page of instructions. This shortens the reach of
+ * such text; the instructions above are what tell Claude not to act on it.
  */
 function tidy(value: unknown): unknown {
-  if (typeof value === "string") return value.replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]+/g, " ").trim().slice(0, 160);
+  // Control characters, line breaks, and the invisible and direction-flipping characters text can hide in.
+  if (typeof value === "string") return value.replace(/[\u0000-\u001f\u007f-\u009f\u00ad\u061c\u200b-\u200f\u2028-\u202f\u2060-\u206f\ufeff]+/g, " ").trim().slice(0, 160);
   if (Array.isArray(value)) return value.map(tidy);
   if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, tidy(v)]));
   return value;

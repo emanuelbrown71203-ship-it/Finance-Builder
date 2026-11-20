@@ -125,24 +125,48 @@ export async function exchangePublicToken(db: DB, userId: string, publicToken: s
   return id;
 }
 
+/**
+ * Tells Plaid to switch one bank connection off. Nothing of ours is deleted here.
+ * Throws if Plaid couldn't be told, because then the connection may still be
+ * live there and our copy of its token is the only way to switch it off later.
+ */
+async function revokeAtPlaid(item: typeof items.$inferSelect): Promise<void> {
+  if (!item.accessTokenEnc || !plaidConfig()) return;
+  let accessToken: string;
+  try {
+    accessToken = decryptSecret(item.accessTokenEnc, bankOwner(item.userId));
+  } catch {
+    // A stored token that can't be opened can't be used for anything, switching the connection off
+    // included. Keeping it would only make this bank impossible to remove.
+    console.error(`A stored bank token could not be opened (item ${item.id}); it is being removed without telling Plaid.`);
+    return;
+  }
+  try {
+    await call(() => plaidClient().itemRemove({ access_token: accessToken }));
+  } catch (error) {
+    const code = plaidError(error).error_code;
+    // Already gone at Plaid: nothing left to switch off.
+    if (code === "ITEM_NOT_FOUND" || code === "INVALID_ACCESS_TOKEN") return;
+    console.error("Plaid itemRemove failed:", describeError(error));
+    throw new HttpError(502, `Couldn’t disconnect ${item.institutionName} just now, so nothing was removed here. Try again in a minute.`);
+  }
+}
+
 export async function removeItem(db: DB, userId: string, itemId: string): Promise<void> {
   const [item] = await db.select().from(items).where(and(eq(items.id, itemId), eq(items.userId, userId))).limit(1);
   if (!item) return;
-  if (item.accessTokenEnc && plaidConfig()) {
-    const accessToken = decryptSecret(item.accessTokenEnc, bankOwner(userId));
-    try {
-      await call(() => plaidClient().itemRemove({ access_token: accessToken }));
-    } catch (error) {
-      const code = plaidError(error).error_code;
-      // Already gone at Plaid: nothing left to switch off. Anything else, the connection may still be
-      // live there, so our copy of its token is kept: it is the only way to switch it off later.
-      if (code !== "ITEM_NOT_FOUND" && code !== "INVALID_ACCESS_TOKEN") {
-        console.error("Plaid itemRemove failed:", describeError(error));
-        throw new HttpError(502, `Couldn’t disconnect ${item.institutionName} just now, so nothing was removed. Try again in a minute.`);
-      }
-    }
-  }
+  await revokeAtPlaid(item);
   await db.delete(items).where(and(eq(items.id, item.id), eq(items.userId, userId)));
+}
+
+/**
+ * Switches off every bank connection a person has, at Plaid, before their
+ * account is deleted. Deletes nothing here: if any bank can't be switched
+ * off this throws and the account, with every token, is still intact.
+ */
+export async function revokeAllForUser(db: DB, userId: string): Promise<void> {
+  const rows = await db.select().from(items).where(eq(items.userId, userId));
+  for (const item of rows) await revokeAtPlaid(item);
 }
 
 /* ---------- sync ---------- */
@@ -437,9 +461,9 @@ async function backfillSnapshots(db: DB, userId: string, accountRows: (typeof ac
 
 /* ---------- webhooks ---------- */
 
-/** Plaid's signing keys, remembered for a day at most. `null` is a key id Plaid didn't recognise, remembered briefly. */
+/** Plaid's signing keys, remembered for an hour at most, so a key Plaid retires stops being trusted soon after. `null` is a key id Plaid didn't recognise, remembered briefly. */
 const keyCache = new Map<string, { jwk: JWK | null; until: number }>();
-const KEY_TTL = 24 * 3_600_000;
+const KEY_TTL = 3_600_000;
 const MISS_TTL = 5 * 60_000;
 const MAX_KEYS = 100;
 
@@ -453,8 +477,9 @@ async function signingKey(kid: string): Promise<JWK | null> {
     // A key Plaid has retired is no longer trusted.
     if (!key.expired_at) jwk = key;
   } catch (error) {
-    // Plaid being unreachable is not the same as the key being unknown: don't remember that.
-    if (!(error instanceof PlaidFailure) || !error.code) throw error;
+    // Only "no such key" (Plaid answers 400) is remembered. Plaid being unreachable, busy or
+    // rate limiting us is not the same thing, and remembering it would turn real webhooks away.
+    if (!(error instanceof PlaidFailure) || error.status !== 400) throw error;
   }
   if (keyCache.size >= MAX_KEYS) keyCache.clear();
   keyCache.set(kid, { jwk, until: Date.now() + (jwk ? KEY_TTL : MISS_TTL) });

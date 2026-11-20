@@ -3,7 +3,7 @@ import { generateAuthenticationOptions, generateRegistrationOptions, verifyAuthe
 import { getDb, type DB } from "@/db";
 import { authChallenges, passkeys, users } from "@/db/schema";
 import { APP_NAME, isDemoMode, siteOrigin } from "@/lib/config";
-import { endSession, startSession, type Ctx } from "./auth";
+import { endSession, markFresh, startSession, type Ctx } from "./auth";
 import { randomToken } from "./crypto";
 import { HttpError } from "./http";
 
@@ -111,6 +111,47 @@ export async function finishRegistration(ctx: Ctx, request: Request, response: R
     transports: credential.transports?.join(",") ?? null,
     name: deviceName(request),
   });
+  return { cookie: challengeCookie("", 0) };
+}
+
+/**
+ * "Confirm it's you" with Face ID, step 1. Unlike signing in, this is for one
+ * known person: only their own devices are offered.
+ */
+export async function confirmOptions(ctx: Ctx, request: Request) {
+  const own = await ctx.db.select({ id: passkeys.id, transports: passkeys.transports }).from(passkeys).where(eq(passkeys.userId, ctx.userId));
+  if (own.length === 0) throw new HttpError(400, "No Face ID device is set up for this account. Use your password.");
+  const options = await generateAuthenticationOptions({
+    rpID: site(request).rpID,
+    userVerification: "required",
+    allowCredentials: own.map((p) => ({ id: p.id, transports: (p.transports?.split(",") ?? undefined) as never })),
+  });
+  return { options, cookie: await saveChallenge(ctx.db, options.challenge, ctx.userId) };
+}
+
+/**
+ * Step 2. The passkey must belong to the person already signed in. Someone
+ * else's passkey on a shared device confirms nothing, and never changes who
+ * is signed in. On success this session is marked freshly checked.
+ */
+export async function finishConfirm(ctx: Ctx, request: Request, response: AuthenticationResponseJSON): Promise<{ cookie: string }> {
+  const { challenge, userId } = await takeChallenge(ctx.db, request);
+  const failed = new HttpError(401, "That didn’t confirm it’s you. Use your password instead.");
+  if (userId !== ctx.userId) throw failed;
+  const [key] = await ctx.db.select().from(passkeys).where(and(eq(passkeys.id, response.id), eq(passkeys.userId, ctx.userId))).limit(1);
+  if (!key) throw failed;
+  const { rpID, origin } = site(request);
+  const result = await verifyAuthenticationResponse({
+    response,
+    expectedChallenge: challenge,
+    expectedOrigin: origin,
+    expectedRPID: rpID,
+    requireUserVerification: true,
+    credential: { id: key.id, publicKey: new Uint8Array(Buffer.from(key.publicKey, "base64url")), counter: key.counter, transports: (key.transports?.split(",") ?? undefined) as never },
+  }).catch(() => null);
+  if (!result?.verified) throw failed;
+  await ctx.db.update(passkeys).set({ counter: result.authenticationInfo.newCounter, lastUsedAt: new Date() }).where(and(eq(passkeys.id, key.id), eq(passkeys.userId, ctx.userId)));
+  await markFresh(ctx);
   return { cookie: challengeCookie("", 0) };
 }
 

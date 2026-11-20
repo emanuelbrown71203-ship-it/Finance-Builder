@@ -10,16 +10,19 @@ process.env.SIGNUP_CODE = "walnut-harbor-42";
 import { POST as confirmRoute } from "@/app/api/auth/confirm/route";
 import { POST as loginRoute } from "@/app/api/auth/login/route";
 import { POST as logoutAllRoute } from "@/app/api/auth/logout-all/route";
+import { POST as passkeyConfirmOptionsRoute } from "@/app/api/auth/passkey/confirm-options/route";
+import { POST as passkeyConfirmRoute } from "@/app/api/auth/passkey/confirm/route";
 import { POST as passwordRoute } from "@/app/api/auth/password/route";
 import { POST as signupRoute } from "@/app/api/auth/signup/route";
 import { POST as connectorRoute } from "@/app/api/connector/route";
 import { DELETE as deleteAccountRoute, GET as meRoute } from "@/app/api/me/route";
 import { getDb, type DB } from "@/db";
-import { connectorTokens, sessions, users } from "@/db/schema";
+import { connectorTokens, items, passkeys, rateLimits, sessions, users } from "@/db/schema";
 import { databaseUrl, liveConfigProblem } from "@/lib/config";
 import { contextForKey } from "@/server/connector";
 import { decryptSecret, encryptSecret, hashPassword, passwordNeedsUpgrade, sha256, verifyPassword } from "@/server/crypto";
 import { describeError } from "@/server/errors";
+import { removeItem } from "@/server/plaid";
 import { assertUnderLimit, clientAddress, limitKey } from "@/server/rate-limit";
 
 const SITE = "https://passbook.test";
@@ -157,6 +160,29 @@ describe("confirm it’s you", () => {
     expect((await made.json()).key).toHaveLength(40);
   });
 
+  it("with Face ID, only the signed-in person's own device counts: someone else's on the same iPad confirms nothing", async () => {
+    await db.insert(users).values({ id: "partner", email: "partner@example.com", name: "Alex", passwordHash: await hashPassword("partner has their own") });
+    const [me] = await db.select().from(users).where(eq(users.email, person.email));
+    await db.insert(passkeys).values([
+      { id: "key-of-mine", userId: me.id, publicKey: "AAAA", name: "iPad" },
+      { id: "key-of-partner", userId: "partner", publicKey: "AAAA", name: "iPad" },
+    ]);
+    await age(11);
+    const options = await passkeyConfirmOptionsRoute(req("/api/auth/passkey/confirm-options", { cookie }), none);
+    expect(options.status).toBe(200);
+    // Only this account's device is offered.
+    expect(((await options.json()).allowCredentials as { id: string }[]).map((c) => c.id)).toEqual(["key-of-mine"]);
+    const challenge = cookieOf(options);
+    // The partner's passkey answers instead. It is refused, and nobody's session changes hands.
+    const answered = await passkeyConfirmRoute(req("/api/auth/passkey/confirm", { cookie: `${cookie}; ${challenge}`, body: { id: "key-of-partner", rawId: "key-of-partner", type: "public-key", response: {}, clientExtensionResults: {} } }), none);
+    expect(answered.status).toBe(401);
+    expect((await (await meRoute(req("/api/me", { method: "GET", cookie }), none)).json()).user.email).toBe(person.email);
+    expect((await connectorRoute(req("/api/connector", { cookie }), none)).status).toBe(403);
+    expect(await db.select().from(users).where(eq(users.id, "partner"))).toHaveLength(1);
+    await db.delete(passkeys).where(eq(passkeys.userId, me.id));
+    await confirmRoute(req("/api/auth/confirm", { body: { password: person.password }, cookie }), none);
+  });
+
   it("limits password guesses made from a signed-in device", async () => {
     await db.insert(users).values({ id: "guessed", email: "guessed@example.com", name: "Gus", passwordHash: await hashPassword("a perfectly fine one") });
     const login = await loginRoute(req("/api/auth/login", { body: { email: "guessed@example.com", password: "a perfectly fine one" }, ip: freshIp() }));
@@ -174,7 +200,10 @@ describe("changing the password and signing out everywhere", () => {
 
     expect((await passwordRoute(req("/api/auth/password", { body: { current: "not it at all", next: "a brand new passphrase" }, cookie }), none)).status).toBe(401);
     expect((await passwordRoute(req("/api/auth/password", { body: { current: person.password, next: "jordan12345678" }, cookie }), none)).status).toBe(400);
+    const linkBefore = (await (await connectorRoute(req("/api/connector", { cookie }), none)).json()).key as string;
     expect((await passwordRoute(req("/api/auth/password", { body: { current: person.password, next: "a brand new passphrase" }, cookie }), none)).status).toBe(200);
+    // Whoever had the old password may have made a Claude link with it. That goes too.
+    expect(await contextForKey(linkBefore)).toBeNull();
 
     expect((await meRoute(req("/api/me", { method: "GET", cookie: other }), none)).status).toBe(401);
     expect((await meRoute(req("/api/me", { method: "GET", cookie }), none)).status).toBe(200);
@@ -192,7 +221,40 @@ describe("changing the password and signing out everywhere", () => {
   });
 });
 
+describe("removing a bank", () => {
+  it("a bank whose stored token can no longer be opened can still be removed", async () => {
+    const saved = { id: process.env.PLAID_CLIENT_ID, secret: process.env.PLAID_SECRET };
+    Object.assign(process.env, { PLAID_CLIENT_ID: "test-client", PLAID_SECRET: "test-secret" });
+    try {
+      await db.insert(users).values({ id: "banked", email: "banked@example.com", name: "Bo" });
+      // One sealed for somebody else, one in a format that is no longer read.
+      await db.insert(items).values([
+        { id: "item-wrong-owner", userId: "banked", institutionName: "First Bank", accessTokenEnc: encryptSecret("access-production-abc", "bank:someone-else") },
+        { id: "item-old-format", userId: "banked", institutionName: "Second Bank", accessTokenEnc: "v1.aaaa.bbbb.cccc" },
+      ]);
+      await removeItem(db, "banked", "item-wrong-owner");
+      await removeItem(db, "banked", "item-old-format");
+      expect(await db.select().from(items).where(eq(items.userId, "banked"))).toHaveLength(0);
+    } finally {
+      for (const [key, value] of [["PLAID_CLIENT_ID", saved.id], ["PLAID_SECRET", saved.secret]] as const) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+    }
+  });
+});
+
 describe("rate limits", () => {
+  it("wrong invite codes are counted across every address together, and then no code is checked for a while", async () => {
+    await db.delete(rateLimits);
+    let last = 0;
+    for (let i = 0; i < 31; i++) last = (await signupRoute(req("/api/auth/signup", { body: { name: "Mal", email: `mal${i}@example.com`, password: "correct horse battery", code: `guess-${i}` }, ip: freshIp() }))).status;
+    expect(last).toBe(429);
+    // Even the right code waits now, so it can't be found by trying from many places.
+    expect((await signupRoute(req("/api/auth/signup", { body: { name: "Mal", email: "mal@example.com", password: "correct horse battery", code: "walnut-harbor-42" }, ip: freshIp() }))).status).toBe(429);
+    await db.delete(rateLimits);
+  });
+
   it("count in the database, refuse past the limit, and start again after the window", async () => {
     for (let i = 0; i < 3; i++) await limitKey("test-bucket", "someone", 3, 60_000);
     await expect(limitKey("test-bucket", "someone", 3, 60_000)).rejects.toThrow("Too many attempts");
@@ -261,6 +323,10 @@ describe("secrets", () => {
     const driver = Object.assign(new Error('database "nowhere" does not exist'), { name: "PostgresError", code: "3D000", query: "select count(*) from users", parameters: ["secret-value"] });
     expect(describeError(driver)).toContain('3D000: database "nowhere" does not exist');
     expect(describeError(driver)).not.toContain("secret-value");
+    // A "bad value" error quotes the value in its message, so only its code is kept.
+    const cast = Object.assign(new Error('invalid input syntax for type integer: "hunter2-password"'), { name: "PostgresError", code: "22P02", query: "select $1::int" });
+    expect(describeError(cast)).toContain("22P02");
+    expect(describeError(cast)).not.toContain("hunter2");
   });
 
   it("a deployed site with real data refuses to run until everything it needs is in place", () => {

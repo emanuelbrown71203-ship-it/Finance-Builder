@@ -5,4 +5,5 @@ import { removeItem } from "@/server/plaid";
 export const DELETE = withUser<{ id: string }>(async (ctx, _request, { id }) => {
   await removeItem(ctx.db, ctx.userId, id);
   return { ok: true };
-});
+  // It wipes that bank's history here, so it needs a fresh "confirm it's you".
+}, { fresh: true });

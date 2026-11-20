@@ -293,6 +293,8 @@ export const billTicks = pgTable(
     paidOn: text("paid_on"),
     /** False from the moment the tick is written down until Tasks for Two confirms it. */
     confirmed: boolean("confirmed").notNull().default(true),
+    /** When the tick was last sent. Stops two checks running at once from both sending the same one. */
+    attemptedAt: timestamp("attempted_at", { withTimezone: true }),
     createdAt: createdAt(),
   },
   (t) => [uniqueIndex("bill_ticks_bill_due_idx").on(t.userId, t.tasksBillId, t.dueDate), uniqueIndex("bill_ticks_tx_idx").on(t.userId, t.transactionId)],

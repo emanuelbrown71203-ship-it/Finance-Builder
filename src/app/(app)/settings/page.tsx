@@ -124,7 +124,7 @@ export default function SettingsPage() {
                 open={changingPassword}
                 onClose={(changed) => {
                   setChangingPassword(false);
-                  if (changed) toast("Password changed. Other devices were signed out.");
+                  if (changed) toast("Password changed. Other devices were signed out and the Claude link is off.");
                 }}
               />
               <Fold title="Delete my account" className="mt-3 border-t border-line-soft">

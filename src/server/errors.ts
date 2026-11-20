@@ -44,7 +44,9 @@ export function describeError(error: unknown): string {
     // Two shapes: the query layer wraps the driver's error (the wrapper's message holds the values,
     // so only its cause is read), or the driver's own error arrives as it is (its message is safe).
     const source = e.cause instanceof Error ? (e.cause as Loose) : "params" in e ? null : e;
-    what = `Database error ${short(source?.code, 10)}: ${short(source?.message, 200)} in: ${short(e.query, 300)}`;
+    // "Bad value" errors (codes starting 22) quote the value in their message, so only the code is kept.
+    const message = String(source?.code ?? "").startsWith("22") ? "(a value was refused)" : short(source?.message, 200);
+    what = `Database error ${short(source?.code, 10)}: ${message} in: ${short(e.query, 300)}`;
   } else if ("config" in e || "request" in e) {
     // A network failure from the HTTP client: no response, but the request is still attached.
     what = `${e.name}: ${short(e.code, 40) || "request failed"}`;

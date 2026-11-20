@@ -1,0 +1,1 @@
+ALTER TABLE "bill_ticks" ADD COLUMN "attempted_at" timestamp with time zone;

@@ -57,10 +57,11 @@ function ReauthForm({ onDone }: { onDone: (ok: boolean) => void }) {
     setBusy(true);
     setError(null);
     try {
-      const options = await post("/api/auth/passkey/login-options");
+      // Only this account's own devices are asked for, and the answer is checked against this account.
+      const options = await post("/api/auth/passkey/confirm-options");
       if (!options.ok) throw new Error(await problem(options, "Couldn’t start. Try again."));
       const answer = await startAuthentication({ optionsJSON: await options.json() });
-      const done = await post("/api/auth/passkey/login", answer);
+      const done = await post("/api/auth/passkey/confirm", answer);
       if (!done.ok) throw new Error(await problem(done, "That didn’t work. Try again."));
       await done.text();
       onDone(true);
@@ -146,7 +147,7 @@ function PasswordForm({ onDone }: { onDone: (changed: boolean) => void }) {
 
   return (
     <form onSubmit={submit} className="flex flex-col gap-4">
-      <p className="text-ink-2">Every other phone, tablet and computer is signed out when you change it.</p>
+      <p className="text-ink-2">Every other phone, tablet and computer is signed out, and the Claude link is switched off. Face ID devices you’ve set up stay: remove any you don’t recognise in Settings.</p>
       <Field label="Password now">{(id) => <Input id={id} type="password" value={current} onChange={(e) => setCurrent(e.target.value)} autoComplete="current-password" required />}</Field>
       <Field label="New password" hint="At least 10 characters.">
         {(id) => <Input id={id} type="password" value={next} onChange={(e) => setNext(e.target.value)} autoComplete="new-password" required minLength={10} />}

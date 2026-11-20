@@ -77,7 +77,9 @@ for it to be remembered and used whenever an app is built.
    and look at them. Check for sideways scrolling.
 3. Touch features (pull to refresh, sheets) can be driven in Playwright with a phone device and
    `Input.dispatchTouchEvent` over a CDP session.
-4. After changing `src/db/schema.ts`: `npm run db:generate`.
+4. After changing `src/db/schema.ts`: `npm run db:generate`. The real database is updated with
+   `npx tsx scripts/install-sql.ts --from <n>` (ask the owner first), never `npm run db:migrate`:
+   on Supabase that would put the tables in `public`, where browsers can reach them.
 
 ## Publishing
 

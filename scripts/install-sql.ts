@@ -9,6 +9,12 @@
  *   - row level security is on for every table, with access for that role
  *     only, so nothing opens up even if the schema were ever exposed.
  *
+ * The output is one transaction, and every statement names the schema it
+ * acts on. It never relies on a "search path", so it puts the tables in the
+ * right place whether it is run as one query or line by line. (An earlier
+ * version relied on the search path, and run line by line it would have
+ * created the tables in "public", open to browsers.)
+ *
  * The role itself (and its password) is created separately, so no password
  * is ever written to a file:
  *
@@ -26,7 +32,19 @@ const fromIndex = process.argv.includes("--from") ? Number(process.argv[process.
 
 const dir = join(process.cwd(), "drizzle");
 const files = readdirSync(dir).filter((f) => /^\d{4}_.*\.sql$/.test(f)).sort();
-const out: string[] = [];
+const out: string[] = ["begin;"];
+
+/** Rewrites one generated statement so every table it touches is named with our schema. */
+function qualify(statement: string): string {
+  const q = `"${SCHEMA}".`;
+  return statement
+    .replaceAll('"public".', q)
+    .replace(/^CREATE TABLE "/, `CREATE TABLE ${q}"`)
+    .replace(/^ALTER TABLE "/, `ALTER TABLE ${q}"`)
+    .replace(/^(CREATE (?:UNIQUE )?INDEX "[^"]+" ON) "/, `$1 ${q}"`)
+    .replace(/^DROP TABLE "/, `DROP TABLE ${q}"`)
+    .replace(/^DROP INDEX "/, `DROP INDEX ${q}"`);
+}
 
 if (fromIndex === 0) {
   out.push(
@@ -36,8 +54,6 @@ if (fromIndex === 0) {
     `alter role ${ROLE} set search_path = ${SCHEMA};`,
   );
 }
-out.push(`set local search_path = ${SCHEMA};`);
-
 const tables = new Set<string>();
 for (const file of files) {
   const number = Number(file.slice(0, 4));
@@ -45,8 +61,16 @@ for (const file of files) {
   for (const match of sql.matchAll(/CREATE TABLE "([a-z_]+)"/g)) if (number >= fromIndex) tables.add(match[1]);
   if (number < fromIndex) continue;
   out.push(`-- ${file}`);
-  // The generated migrations name the "public" schema in their foreign keys. Here every table is in ours.
-  for (const statement of sql.split("--> statement-breakpoint")) out.push(statement.trim().replaceAll('"public".', `"${SCHEMA}".`));
+  for (const raw of sql.split("--> statement-breakpoint")) {
+    const statement = raw.trim();
+    if (!statement) continue;
+    const fixed = qualify(statement);
+    // Anything this script doesn't know how to place is refused, not run wherever it happens to land.
+    if (!/^(CREATE TABLE|ALTER TABLE|CREATE (UNIQUE )?INDEX "[^"]+" ON|DROP TABLE|DROP INDEX) "passbook"\./.test(fixed)) {
+      throw new Error(`${file}: don't know how to place this statement in the ${SCHEMA} schema:\n${statement.slice(0, 200)}`);
+    }
+    out.push(fixed);
+  }
 }
 
 out.push(`grant select, insert, update, delete on all tables in schema ${SCHEMA} to ${ROLE};`);
@@ -56,4 +80,5 @@ for (const table of tables) {
     `create policy "${table}_app_only" on ${SCHEMA}."${table}" for all to ${ROLE} using (true) with check (true);`,
   );
 }
+out.push("commit;");
 console.log(out.filter(Boolean).join("\n"));
