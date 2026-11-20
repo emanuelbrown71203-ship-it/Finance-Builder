@@ -1,4 +1,4 @@
-import { and, eq, inArray, ne, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, ne, sql } from "drizzle-orm";
 import { accounts, balanceSnapshots, budgets, categoryRules, debtPlans, goals, recurringOverrides, transactions, userSettings } from "@/db/schema";
 import { isCategoryKey } from "@/lib/categories";
 import { merchantKey } from "@/lib/finance/recurring";
@@ -108,6 +108,8 @@ export async function setBudget(ctx: Ctx, category: string, monthlyLimit: number
 type GoalInput = { name: string; target: number; saved: number; monthlyContribution: number; targetDate: string | null };
 
 export async function createGoal(ctx: Ctx, input: GoalInput) {
+  const [{ count }] = await ctx.db.select({ count: sql<number>`count(*)::int` }).from(goals).where(eq(goals.userId, ctx.userId));
+  if (count >= 50) throw new HttpError(400, "That’s the most goals Passbook keeps. Delete one you’ve finished first.");
   await ctx.db.insert(goals).values({ id: crypto.randomUUID(), userId: ctx.userId, ...input });
 }
 
@@ -126,6 +128,8 @@ export async function deleteGoal(ctx: Ctx, id: string) {
 
 /** Things tracked by hand: a car, a house, a loan from a relative. */
 export async function createManualAccount(ctx: Ctx, input: { name: string; kind: "asset" | "debt"; value: number }) {
+  const [{ count }] = await ctx.db.select({ count: sql<number>`count(*)::int` }).from(accounts).where(and(eq(accounts.userId, ctx.userId), isNull(accounts.itemId)));
+  if (count >= 50) throw new HttpError(400, "That’s the most hand-tracked items Passbook keeps. Remove one first.");
   const id = crypto.randomUUID();
   const balance = input.kind === "debt" ? -Math.abs(input.value) : Math.abs(input.value);
   await ctx.db.insert(accounts).values({ id, userId: ctx.userId, itemId: null, name: input.name, institutionName: "Tracked by hand", type: input.kind === "debt" ? "loan" : "property", subtype: "manual", balance });

@@ -3,8 +3,8 @@
 import { ChevronRight, Landmark, LogOut } from "lucide-react";
 import Link from "next/link";
 import { CelebrationsRow, ClaudeSection, PasskeySection, RulesSection, TasksSection } from "@/components/settings-sections";
-import { Button, Fold, PageHeader, Segmented, Sheet, SheetHeader } from "@/components/ui";
-import { useApi, useTheme, type ThemeChoice } from "@/components/use-api";
+import { Button, Fold, PageHeader, Segmented, Sheet, SheetHeader, confirm, toast } from "@/components/ui";
+import { send, useApi, useTheme, type ThemeChoice } from "@/components/use-api";
 import { APP_NAME, APP_VERSION } from "@/lib/config";
 import type { Me } from "@/lib/types";
 
@@ -17,6 +17,20 @@ export default function SettingsPage() {
     // A full page load on purpose: it clears everything the signed-in session had cached.
     // eslint-disable-next-line @next/next/no-location-assign-relative-destination
     window.location.assign("/login");
+  };
+
+  const leave = () => {
+    // A full page load on purpose: it clears everything the signed-in session had cached.
+    // eslint-disable-next-line @next/next/no-location-assign-relative-destination
+    window.location.assign("/login");
+  };
+  const signOutEverywhere = async () => {
+    if (!(await confirm({ title: "Sign out of every device?", body: "Every phone, tablet and computer signed in to your account, including this one, will need to sign in again.", confirmLabel: "Sign out everywhere" }))) return;
+    await send("POST", "/api/auth/logout-all").then(leave, (e) => toast(e instanceof Error ? e.message : "Couldn’t do that. Try again.", { tone: "error" }));
+  };
+  const deleteAccount = async () => {
+    if (!(await confirm({ title: "Delete your account for good?", body: "Your bank connections, transactions, budgets, goals and sign-in are all removed. This can’t be undone.", confirmLabel: "Delete everything", danger: true }))) return;
+    await send("DELETE", "/api/me").then(leave, (e) => toast(e instanceof Error ? e.message : "Couldn’t do that. Try again.", { tone: "error" }));
   };
 
   return (
@@ -96,6 +110,16 @@ export default function SettingsPage() {
               <Button className="mt-4 w-full" onClick={signOut}>
                 <LogOut size={17} /> Sign out
               </Button>
+              <Button className="mt-2 w-full" onClick={signOutEverywhere}>
+                Sign out of every device
+              </Button>
+              <p className="mt-2 text-small text-ink-3">Use this if a phone or computer was lost. You’re also signed out on any device you haven’t used for two weeks.</p>
+              <Fold title="Delete my account" className="mt-3 border-t border-line-soft">
+                <p className="text-small text-ink-2">This disconnects every bank and permanently deletes your account and everything Passbook keeps for you. Nothing changes at your banks.</p>
+                <Button className="mb-2 mt-3 w-full" variant="danger" onClick={deleteAccount}>
+                  Delete my account
+                </Button>
+              </Fold>
             </>
           )}
         </Sheet>

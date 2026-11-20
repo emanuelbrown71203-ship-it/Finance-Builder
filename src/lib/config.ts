@@ -35,4 +35,9 @@ export function isDemoMode(): boolean {
 
 export const DEMO_USER_ID = "demo-user";
 export const DEFAULT_TIMEZONE = process.env.APP_TIMEZONE || "America/New_York";
-export const SESSION_COOKIE = "passbook_session";
+/**
+ * In production the cookie name starts with "__Host-". Browsers then refuse it
+ * unless it is Secure, for this exact site only, and set over https, which
+ * stops another site or a sub-domain from planting a session.
+ */
+export const SESSION_COOKIE = process.env.NODE_ENV === "production" ? "__Host-passbook_session" : "passbook_session";

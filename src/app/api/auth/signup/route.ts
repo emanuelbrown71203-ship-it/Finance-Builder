@@ -16,7 +16,7 @@ export const POST = publicRoute(async (request) => {
   const parsed = Body.safeParse(await request.json().catch(() => null));
   if (!parsed.success) throw new HttpError(400, parsed.error.issues[0]?.message ?? "Check the form and try again.");
   const result = await signUp(parsed.data);
-  if (!result.ok) throw new HttpError(409, result.error);
+  if (!result.ok) throw new HttpError(result.error.includes("already exists") ? 409 : 400, result.error);
   return json({ ok: true }, { headers: { "set-cookie": result.cookie } });
 });
 

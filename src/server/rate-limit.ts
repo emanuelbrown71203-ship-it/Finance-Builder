@@ -2,7 +2,7 @@ import { lt, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { rateLimits } from "@/db/schema";
 import { sha256 } from "./crypto";
-import { HttpError } from "./http";
+import { HttpError } from "./errors";
 
 /**
  * Slows down guessing. Counts attempts per key in the database, so the limit
