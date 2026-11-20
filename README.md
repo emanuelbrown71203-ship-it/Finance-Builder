@@ -105,7 +105,9 @@ everything else in the project:
   lands in the right place however it is run;
 - the app signs in as its own `passbook_app` role, which can read and write Passbook's tables
   and no other app's tables, and cannot change the database's structure. (Like every role, it
-  can still call functions in `public` that are open to everyone.);
+  can still use what Supabase leaves open to all roles: functions in `public` granted to
+  everyone, and the `pg_net` extension's request queue in the `net` schema. Closing those
+  means changing grants the other apps rely on, so it is a separate, deliberate step.);
 - row level security is on for every table, with access for that role only.
 
 Create the role first (`create role passbook_app login password '…'`), run the SQL as the
