@@ -2,6 +2,7 @@ import { category } from "@/lib/categories";
 import { addDays } from "@/lib/dates";
 import { thinkAbout, type Mood, type Tip } from "@/lib/nickel/brain";
 import type { Ctx } from "./auth";
+import { countUnclear } from "./names";
 import { getAccounts, getGoals, getOverview } from "./queries";
 
 export type NickelPayload = {
@@ -14,7 +15,7 @@ export type NickelPayload = {
 
 /** Gathers what Nickel looks at from the person's own numbers. Read-only. */
 export async function getNickel(ctx: Ctx): Promise<NickelPayload> {
-  const [overview, goals, accounts] = await Promise.all([getOverview(ctx), getGoals(ctx), getAccounts(ctx)]);
+  const [overview, goals, accounts, unclearNames] = await Promise.all([getOverview(ctx), getGoals(ctx), getAccounts(ctx), countUnclear(ctx)]);
   const days = overview.plan.days;
   const todayPlan = days.find((d) => d.date === ctx.today);
   const paidToday = (todayPlan?.events ?? []).filter((e) => e.type === "income" && e.settled && e.amount > 0).reduce((s, e) => s + e.amount, 0);
@@ -48,6 +49,7 @@ export async function getNickel(ctx: Ctx): Promise<NickelPayload> {
     netWorthChange: overview.netWorth.change,
     priciestDebt: debts[0] ? { name: debts[0].name, apr: debts[0].aprPercent! } : null,
     latest: latest ? { name: latest.name, amount: latest.amount, date: latest.date } : null,
+    unclearNames,
   });
   return { mood, tips, latest: latest ? { id: latest.id, name: latest.name, amount: latest.amount, createdAt: latest.createdAt } : null, demo: ctx.demo };
 }

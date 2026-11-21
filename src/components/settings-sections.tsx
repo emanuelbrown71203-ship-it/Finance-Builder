@@ -162,8 +162,8 @@ export function ClaudeSection() {
   };
 
   return (
-    <Sheet>
-      <SheetHeader title="Ask Claude about your money" hint="“How much did we spend eating out last month?” Claude answers from your real numbers. It can look, and it can’t change anything." />
+    <Sheet id="claude" className="scroll-mt-24">
+      <SheetHeader title="Ask Claude about your money" hint="“How much did we spend eating out last month?” Claude answers from your real numbers, on your own Claude plan. It can look, and it can’t change anything. Once it’s set up, hold Nickel and pick “Chat with Claude” to start a chat." />
       {!data ? null : shownKey ? (
         <div className="text-ink-2">
           {data.sampleKey ? (

@@ -105,6 +105,8 @@ export const transactions = pgTable(
     categoryLocked: boolean("category_locked").notNull().default(false),
     pending: boolean("pending").notNull().default(false),
     note: text("note"),
+    /** A name the owner gave this one transaction. Wins over name rules; syncs never touch it. */
+    customName: text("custom_name"),
     /** When this row first reached us. Drives the live feed ordering. */
     createdAt: createdAt(),
   },
@@ -221,6 +223,25 @@ export const categoryRules = pgTable(
 );
 
 /** Per-debt choices for the payoff plan, when the bank doesn't report them or the owner knows better. */
+/**
+ * "Every charge the bank calls X is Y." Matched on the tidied bank text (see
+ * nameKey), never stored on the transactions, so a rule can be changed or
+ * removed and every past and future charge follows.
+ */
+export const nameRules = pgTable(
+  "name_rules",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    merchantKey: text("merchant_key").notNull(),
+    /** Only charges of exactly this amount (signed cents). 0 means any amount. */
+    amount: cents("amount").notNull().default(0),
+    name: text("name").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex("name_rules_user_merchant_amount_idx").on(t.userId, t.merchantKey, t.amount)],
+);
+
 export const debtPlans = pgTable("debt_plans", {
   accountId: text("account_id").primaryKey().references(() => accounts.id, { onDelete: "cascade" }),
   userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),

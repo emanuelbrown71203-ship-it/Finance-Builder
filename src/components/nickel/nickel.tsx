@@ -4,9 +4,10 @@ import { ChevronRight, X } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { INTRO, SMALL_TALK, type Mood, type Tip } from "@/lib/nickel/brain";
+import { CLAUDE_PREFIX, CLAUDE_QUESTIONS, claudeLink } from "@/lib/nickel/claude";
 import { dollars } from "@/lib/money";
 import type { NickelPayload } from "@/server/nickel";
-import { cx } from "../ui";
+import { cx, toast } from "../ui";
 import { useApi, useNow } from "../use-api";
 import { RoboDog, type Eyes, type Mouth } from "./robo-dog";
 import { markSeen, nickelSettings, seenToday, useNickelSettings, type NickelEvent } from "./store";
@@ -66,6 +67,7 @@ export function Nickel() {
   const [asleep, setAsleep] = useState(false);
   const [bubble, setBubble] = useState<Bubble | null>(null);
   const [menu, setMenu] = useState(false);
+  const [asking, setAsking] = useState(false);
   const [drag, setDrag] = useState<{ x: number; y: number } | null>(null);
   const [wide, setWide] = useState(false);
   const [screenH, setScreenH] = useState(800);
@@ -407,13 +409,16 @@ export function Nickel() {
           <div role="status" aria-live="polite" className="rounded-[18px] border border-line bg-sheet p-3.5 text-small text-ink shadow-float">
             <div className="flex items-start justify-between gap-2">
               <p className="text-micro font-extrabold uppercase tracking-wide text-accent-text">{settings.name}</p>
-              <button type="button" onClick={() => (bubble?.kind === "intro" ? (nickelSettings.finishIntro(), setBubble(null)) : (setBubble(null), setMenu(false)))} aria-label="Close" className="-mr-2 -mt-2 inline-flex size-9 items-center justify-center rounded-full text-ink-3 active:bg-sunk">
+              <button type="button" onClick={() => (bubble?.kind === "intro" ? (nickelSettings.finishIntro(), setBubble(null)) : (setBubble(null), setMenu(false), setAsking(false)))} aria-label="Close" className="-mr-2 -mt-2 inline-flex size-9 items-center justify-center rounded-full text-ink-3 active:bg-sunk">
                 <X size={16} />
               </button>
             </div>
-            {menu ? (
+            {menu && asking ? (
+              <AskClaude onDone={() => (setMenu(false), setAsking(false))} />
+            ) : menu ? (
               <ul className="-mx-1 mt-1 flex flex-col">
                 <MenuItem onClick={() => (setMenu(false), act("bark"), say(nextLine()))}>Tell me something</MenuItem>
+                <MenuItem onClick={() => setAsking(true)}>Chat with Claude about my money</MenuItem>
                 <MenuItem onClick={() => (setMenu(false), nickelSettings.napFor(60 * 60_000))}>Nap for an hour</MenuItem>
                 <li>
                   <Link href="/settings#nickel" onClick={() => setMenu(false)} className="flex min-h-11 items-center justify-between rounded-xl px-2 font-bold active:bg-sunk">
@@ -515,6 +520,48 @@ export function Nickel() {
           </span>
         )}
       </button>
+    </div>
+  );
+}
+
+type ConnectorStatus = { connected: boolean; sampleKey: string | null };
+
+/**
+ * Starts a chat in the owner's own Claude app, on their own plan, with a
+ * question ready. Claude reads the numbers through the read-only Passbook
+ * connector; the link carries only the question.
+ */
+function AskClaude({ onDone }: { onDone: () => void }) {
+  const { data } = useApi<ConnectorStatus>("/api/connector");
+  if (!data) return <p className="mt-1 px-1 py-2 text-ink-3">One sec…</p>;
+  if (!data.connected && !data.sampleKey) {
+    return (
+      <div className="mt-1">
+        <p className="leading-relaxed">I can open a chat with Claude about your numbers, on your own Claude plan. Connect Claude once in Settings first. It can look, and it can’t change anything.</p>
+        <Link href="/settings#claude" onClick={onDone} className="mt-2.5 inline-flex min-h-10 items-center rounded-full bg-accent px-4 text-small font-bold text-on-accent active:scale-[0.97]">
+          Set up Claude
+        </Link>
+      </div>
+    );
+  }
+  const open = (question: string) => {
+    // In case Claude doesn't fill the question in, it's ready to paste.
+    void navigator.clipboard?.writeText(CLAUDE_PREFIX + question).catch(() => {});
+    toast("Opening Claude. Your question is copied too, in case you need to paste it.");
+    onDone();
+  };
+  return (
+    <div className="mt-1">
+      <p className="px-1 pb-1 text-ink-2">Opens Claude with a question ready. Claude reads your numbers and can’t change anything.</p>
+      <ul className="-mx-1 flex flex-col">
+        {[...CLAUDE_QUESTIONS, ""].map((q) => (
+          <li key={q || "own"}>
+            <a href={claudeLink(q)} target="_blank" rel="noopener noreferrer" onClick={() => open(q)} className="flex min-h-11 items-center rounded-xl px-2 py-1.5 font-bold leading-snug active:bg-sunk">
+              {q || "Ask my own question"}
+            </a>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

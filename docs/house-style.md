@@ -77,6 +77,10 @@ If a rule here and an app's own existing look disagree, the app's existing look 
   their ingredients land here."). A good empty state is a green "All clear."
 - Errors say what happened and what to do. They don't apologise and they aren't vague.
 - Up or down is always **an arrow and a number**, never colour alone.
+- **Anything named by someone else can be renamed.** When names come from outside (a bank, a store, an
+  import), let the owner rename them in place: "every one like this" (now and in future) or "just this
+  one", with Undo. Tidy obvious codes on your own, leave clear names alone, and always keep the original
+  visible one tap away ("Bank says: …").
 
 ## 7. The first screen
 

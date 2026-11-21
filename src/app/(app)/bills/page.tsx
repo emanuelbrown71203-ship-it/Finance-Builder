@@ -1,9 +1,10 @@
 "use client";
 
-import { ExternalLink } from "lucide-react";
+import { ExternalLink, PencilLine } from "lucide-react";
 import { useState } from "react";
 import { BillRow } from "@/components/bills";
 import { CategoryIcon } from "@/components/category-icon";
+import { BankSays, RenameForm } from "@/components/names";
 import { Button, Dialog, EmptyState, ErrorNote, Fold, PageHeader, Sheet, SheetHeader, Skeleton, Tag, toast } from "@/components/ui";
 import { send, useApi } from "@/components/use-api";
 import { diffDays, formatDistance, formatMedium, formatShort } from "@/lib/dates";
@@ -66,9 +67,14 @@ function CancelHelpBox({ name, help }: { name: string; help: CancelHelp }) {
   );
 }
 
-function SeriesDialog({ series, onClose }: { series: RecurringView | null; onClose: () => void }) {
+function SeriesDialog({ series, onClose: close }: { series: RecurringView | null; onClose: () => void }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [renaming, setRenaming] = useState(false);
+  const onClose = () => {
+    setRenaming(false);
+    close();
+  };
 
   const update = async (patch: { kind?: "bill" | "subscription" | "ignore"; cancelled?: boolean }, done: string) => {
     if (!series) return;
@@ -88,8 +94,20 @@ function SeriesDialog({ series, onClose }: { series: RecurringView | null; onClo
   };
 
   return (
-    <Dialog open={series !== null} onClose={onClose} title={series?.name ?? ""}>
-      {series && (
+    <Dialog open={series !== null} onClose={onClose} title={series ? (renaming ? `Rename ${series.name}` : series.name) : ""}>
+      {series && renaming && (
+        <RenameForm
+          key={series.key}
+          transactionId={series.sampleId}
+          current={series.name}
+          amount={series.history[series.history.length - 1]?.amount ?? series.amount}
+          bankName={series.bankName}
+          allowExact={series.fixedAmount}
+          onDone={onClose}
+          onCancel={() => setRenaming(false)}
+        />
+      )}
+      {series && !renaming && (
         <div className="flex flex-col gap-5">
           <div className="grid grid-cols-2 gap-3 text-small">
             <div className="rounded-control bg-sunk px-3 py-2">
@@ -100,6 +118,15 @@ function SeriesDialog({ series, onClose }: { series: RecurringView | null; onClo
               <p className="text-ink-3">Per year</p>
               <p className="tabular text-lead font-semibold">{dollars(series.monthly * 12)}</p>
             </div>
+          </div>
+          <div className="-mt-2 flex flex-wrap items-center justify-between gap-x-3">
+            <BankSays bankName={series.bankName.toLowerCase() !== series.name.toLowerCase() ? series.bankName : null} className="min-w-0 flex-1" />
+            {series.sampleId && (
+              <button type="button" onClick={() => setRenaming(true)} className="inline-flex min-h-11 items-center gap-1.5 text-small font-bold text-accent-text">
+                <PencilLine size={16} aria-hidden />
+                Rename
+              </button>
+            )}
           </div>
           <p className="text-small text-ink-2">
             {FREQUENCY_LABEL[series.frequency]} from {series.accountName}.{" "}
@@ -190,7 +217,7 @@ export default function BillsPage() {
 
   return (
     <>
-      <PageHeader title="Bills" lead="Bills and subscriptions, found on their own from charges that repeat. Tap one to see past charges or say you cancelled it." />
+      <PageHeader title="Bills" lead="Bills and subscriptions, found on their own from charges that repeat. Tap one to rename it, see past charges or say you cancelled it." />
 
       <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-3 [&>*:last-child]:col-span-2 sm:[&>*:last-child]:col-span-1">
         <Stat label="Bills a month" value={dollars(data.monthlyBills)} note={`${bills.length} regular bills`} tone="bg-pink text-pink-ink" />

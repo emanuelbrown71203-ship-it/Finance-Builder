@@ -9,7 +9,9 @@ import { buildMonthPlan, spendingByCategory } from "@/lib/finance/plan";
 import { payoffPlan, payoffOrder, type Debt, type Strategy } from "@/lib/finance/payoff";
 import { FREQUENCY_LABEL, detectRecurring, monthlyEquivalent, seriesKeyFor, upcomingBetween, type RecurringKind } from "@/lib/finance/recurring";
 import { cancelHelp, isKnownSubscription } from "@/lib/finance/subscriptions";
+import type { Namer } from "@/lib/finance/names";
 import { HttpError } from "./errors";
+import { loadNamer } from "./names";
 import type {
   AccountView,
   AttentionItem,
@@ -93,23 +95,39 @@ const txColumns = {
   category: transactions.category,
   pending: transactions.pending,
   note: transactions.note,
+  customName: transactions.customName,
   accountId: transactions.accountId,
   accountName: accounts.name,
   accountMask: accounts.mask,
   createdAt: transactions.createdAt,
 };
 
-type TxRow = Omit<TxView, "createdAt"> & { createdAt: Date };
-const txView = (r: TxRow): TxView => ({ ...r, createdAt: r.createdAt.toISOString() });
+type TxRow = Omit<TxView, "createdAt" | "bankName" | "nameSource" | "ruleId" | "ruleExact"> & { createdAt: Date };
+const txView = (r: TxRow, nameFor: Namer): TxView => {
+  const named = nameFor(r);
+  return { ...r, name: named.name, bankName: r.name, nameSource: named.source, ruleId: named.ruleId, ruleExact: named.exact, createdAt: r.createdAt.toISOString() };
+};
 
 export async function getTransactions(
   ctx: Ctx,
   filter: { q?: string; category?: string; accountId?: string; month?: string; flow?: "in" | "out"; limit: number; offset: number },
 ): Promise<TransactionsPayload> {
   const conditions = [eq(transactions.userId, ctx.userId)];
+  const nameFor = await loadNamer(ctx);
   if (filter.q) {
     const like = `%${filter.q.replace(/[%_\\]/g, (c) => `\\${c}`)}%`;
-    conditions.push(or(ilike(transactions.name, like), ilike(transactions.rawName, like), ilike(transactions.note, like))!);
+    const matches = [ilike(transactions.name, like), ilike(transactions.rawName, like), ilike(transactions.note, like), ilike(transactions.customName, like)];
+    // Names given by rules or the tidy-up aren't stored, so search what people actually see too.
+    const q = filter.q.toLowerCase();
+    const all = await ctx.db
+      .select({ id: transactions.id, name: transactions.name, amount: transactions.amount, customName: transactions.customName })
+      .from(transactions)
+      .where(eq(transactions.userId, ctx.userId))
+      .orderBy(desc(transactions.date))
+      .limit(20_000);
+    const seen = all.filter((t) => nameFor(t).name.toLowerCase().includes(q)).map((t) => t.id).slice(0, 5_000);
+    if (seen.length > 0) matches.push(inArray(transactions.id, seen));
+    conditions.push(or(...matches)!);
   }
   if (filter.category) conditions.push(eq(transactions.category, filter.category));
   if (filter.accountId) conditions.push(eq(transactions.accountId, filter.accountId));
@@ -135,24 +153,27 @@ export async function getTransactions(
       .orderBy(asc(accounts.name)),
   ]);
 
-  return { today: ctx.today, transactions: rows.map(txView), total: count, hasMore: filter.offset + rows.length < count, accounts: accountRows };
+  return { today: ctx.today, transactions: rows.map((r) => txView(r, nameFor)), total: count, hasMore: filter.offset + rows.length < count, accounts: accountRows };
 }
 
 async function recentTransactions(ctx: Ctx, limit: number): Promise<TxView[]> {
-  const rows = await ctx.db
-    .select(txColumns)
-    .from(transactions)
-    .innerJoin(accounts, eq(accounts.id, transactions.accountId))
-    .where(eq(transactions.userId, ctx.userId))
-    .orderBy(desc(transactions.date), desc(transactions.createdAt), desc(transactions.id))
-    .limit(limit);
-  return rows.map(txView);
+  const [rows, nameFor] = await Promise.all([
+    ctx.db
+      .select(txColumns)
+      .from(transactions)
+      .innerJoin(accounts, eq(accounts.id, transactions.accountId))
+      .where(eq(transactions.userId, ctx.userId))
+      .orderBy(desc(transactions.date), desc(transactions.createdAt), desc(transactions.id))
+      .limit(limit),
+    loadNamer(ctx),
+  ]);
+  return rows.map((r) => txView(r, nameFor));
 }
 
 /** Lightweight rows for analysis: everything except transfers since a date. */
 async function analysisRows(ctx: Ctx, from: ISODate) {
   return ctx.db
-    .select({ id: transactions.id, date: transactions.date, name: transactions.name, amount: transactions.amount, category: transactions.category, accountId: transactions.accountId })
+    .select({ id: transactions.id, date: transactions.date, name: transactions.name, amount: transactions.amount, category: transactions.category, accountId: transactions.accountId, customName: transactions.customName })
     .from(transactions)
     .where(and(eq(transactions.userId, ctx.userId), gte(transactions.date, from), ne(transactions.category, "transfer")))
     .orderBy(asc(transactions.date));
@@ -162,18 +183,26 @@ async function analysisRows(ctx: Ctx, from: ISODate) {
 
 type RecurringBundle = { series: RecurringView[]; history: Awaited<ReturnType<typeof analysisRows>>; accounts: AccountView[]; possible: PossibleSubscription[] };
 
+/** Where to cancel: the bank's text finds well-known services best; otherwise search by the name the owner sees. */
+function helpFor(bankName: string, shown: string) {
+  const known = cancelHelp(bankName);
+  return known.label?.startsWith("Search how to cancel") ? cancelHelp(shown) : known;
+}
+
 async function loadRecurring(ctx: Ctx): Promise<RecurringBundle> {
-  const [history, overrides, accountList] = await Promise.all([
+  const [raw, overrides, accountList, nameFor] = await Promise.all([
     // Two years back, so a charge that only comes once a year is seen twice.
     analysisRows(ctx, addMonths(ctx.today, -26)),
     ctx.db.select().from(recurringOverrides).where(eq(recurringOverrides.userId, ctx.userId)),
     listAccounts(ctx),
+    loadNamer(ctx),
   ]);
   const overrideByKey = new Map(overrides.map((o) => [o.seriesKey, o]));
   const accountName = new Map(accountList.map((a) => [a.id, a.name]));
 
   const series: RecurringView[] = [];
-  const detected = detectRecurring(history, ctx.today);
+  // Series are found and keyed by the bank's text, so renaming never splits or loses a bill.
+  const detected = detectRecurring(raw, ctx.today);
   for (const s of detected) {
     const o = overrideByKey.get(s.key);
     if (o?.kind === "ignore") continue;
@@ -181,15 +210,21 @@ async function loadRecurring(ctx: Ctx): Promise<RecurringBundle> {
     const cancelled = o?.cancelled ?? false;
     const active = s.active && !cancelled;
     const untilNext = diffDays(s.nextDate, ctx.today);
+    const latest = s.history[s.history.length - 1];
+    const named = nameFor({ name: s.name, amount: latest?.amount ?? s.amount });
     series.push({
       ...s,
+      name: named.name,
+      bankName: s.name,
+      ruleId: named.ruleId,
+      sampleId: latest?.id ?? "",
       kind,
       // A cancelled series stops counting toward what’s coming up.
       active,
       cancelled,
       accountName: accountName.get(s.accountId) ?? "",
       monthly: Math.abs(monthlyEquivalent(s)),
-      help: cancelHelp(s.name),
+      help: helpFor(s.name, named.name),
       renewsSoon: active && kind !== "income" && (s.frequency === "yearly" || s.frequency === "quarterly") && untilNext >= 0 && untilNext <= 30,
       startedRecently: active && kind === "subscription" && diffDays(ctx.today, s.firstDate) <= 100,
     });
@@ -198,12 +233,16 @@ async function loadRecurring(ctx: Ctx): Promise<RecurringBundle> {
   // A recent charge from a well-known subscription service that hasn't repeated yet.
   const known = new Set(detected.map((s) => s.key));
   const possible = new Map<string, PossibleSubscription>();
-  for (const t of history) {
-    if (t.amount >= 0 || diffDays(ctx.today, t.date) > 40 || !isKnownSubscription(t.name)) continue;
+  for (const t of raw) {
+    if (t.amount >= 0 || diffDays(ctx.today, t.date) > 40) continue;
+    const shown = nameFor(t).name;
+    if (!isKnownSubscription(t.name) && !isKnownSubscription(shown)) continue;
     const key = seriesKeyFor(t.name, t.amount);
     if (known.has(key) || overrideByKey.get(key)?.kind === "ignore") continue;
-    possible.set(key, { name: t.name, amount: t.amount, date: t.date, help: cancelHelp(t.name) });
+    possible.set(key, { name: shown, amount: t.amount, date: t.date, help: helpFor(t.name, shown) });
   }
+  // Everything after this point shows names, so give each transaction the name the owner sees.
+  const history = raw.map((t) => ({ ...t, name: nameFor(t).name }));
   return { series, history, accounts: accountList, possible: [...possible.values()] };
 }
 
@@ -619,7 +658,7 @@ export async function getDebt(ctx: Ctx): Promise<DebtPayload> {
   const views: DebtView[] = owed.map((a) => {
     const own = planFor.get(a.id);
     // A loan's regular payment usually shows up as a repeating charge named after it.
-    const series = bundle.series.find((s) => s.active && s.kind !== "income" && s.category === "loans" && s.name.toLowerCase().includes(a.name.toLowerCase()));
+    const series = bundle.series.find((s) => s.active && s.kind !== "income" && s.category === "loans" && `${s.bankName} ${s.name}`.toLowerCase().includes(a.name.toLowerCase()));
     const payment = own?.monthlyPayment ?? (series ? Math.abs(monthlyEquivalent(series)) : a.minimumPayment);
     const flow = cardFlow.get(a.id);
     return {
@@ -673,14 +712,15 @@ export async function getRecap(ctx: Ctx, weeksBack = 0): Promise<RecapPayload> {
   const to = addDays(from, 6);
   const beforeFrom = addDays(from, -7);
 
-  const [rows, bundle, worth, savings] = await Promise.all([
+  const [rows, bundle, worth, savings, nameFor] = await Promise.all([
     ctx.db
-      .select({ id: transactions.id, date: transactions.date, name: transactions.name, amount: transactions.amount, category: transactions.category, accountId: transactions.accountId })
+      .select({ id: transactions.id, date: transactions.date, name: transactions.name, amount: transactions.amount, category: transactions.category, accountId: transactions.accountId, customName: transactions.customName })
       .from(transactions)
       .where(and(eq(transactions.userId, ctx.userId), gte(transactions.date, beforeFrom), lte(transactions.date, to))),
     loadRecurring(ctx),
     balanceSeries(ctx, addDays(from, -1)),
     listAccounts(ctx),
+    loadNamer(ctx),
   ]);
   const real = rows.filter((t) => t.category !== "transfer");
   const week = real.filter((t) => t.date >= from);
@@ -704,7 +744,7 @@ export async function getRecap(ctx: Ctx, weeksBack = 0): Promise<RecapPayload> {
     count: out.length,
     noSpendDays: 7 - spendDays.size,
     topCategories: spendingByCategory(week).slice(0, 3),
-    biggest: biggest ? { name: biggest.name, amount: biggest.amount, date: biggest.date } : null,
+    biggest: biggest ? { name: nameFor(biggest).name, amount: biggest.amount, date: biggest.date } : null,
     billsPaid: { count: bills.length, total: bills.reduce((s, t) => s - t.amount, 0) },
     savedToGoals: rows.filter((t) => t.date >= from && savingsIds.has(t.accountId)).reduce((s, t) => s + t.amount, 0),
     netWorthChange: start && end ? end.net - start.net : null,

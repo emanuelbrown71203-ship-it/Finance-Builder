@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronRight, KeyRound, Landmark, LogOut } from "lucide-react";
+import { ChevronRight, KeyRound, Landmark, LogOut, PencilLine } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 import { ChangePasswordDialog } from "@/components/reauth";
@@ -60,6 +60,19 @@ export default function SettingsPage() {
         <PasskeySection demo={me?.demo ?? true} />
         <ClaudeSection />
         <TasksSection />
+        <Sheet>
+          <SheetHeader title="Names" />
+          <Link href="/transactions/names" className="-mx-1 flex min-h-[60px] items-center gap-3 rounded-2xl px-1 active:bg-sunk">
+            <span aria-hidden className="inline-flex size-10 items-center justify-center rounded-xl bg-sunk text-ink-2">
+              <PencilLine size={19} />
+            </span>
+            <span className="flex-1">
+              <span className="block font-bold">Bills and charges you’ve renamed</span>
+              <span className="block text-small text-ink-3">And bank code that could use a clearer name</span>
+            </span>
+            <ChevronRight size={18} className="text-ink-3" />
+          </Link>
+        </Sheet>
         <RulesSection />
 
         <Sheet>

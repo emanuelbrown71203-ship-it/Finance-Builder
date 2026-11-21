@@ -5,6 +5,9 @@ import { DEMO_USER_ID } from "@/lib/config";
 import type { Ctx } from "@/server/auth";
 import { deleteDeposit, setBudget, setDebtPlan, setDebtSettings, setRecurringOverride, updateGoal, updateTransaction } from "@/server/mutations";
 import { loadRules } from "@/server/rules";
+import { countUnclear, createNameRule, deleteNameRule, getNames, previewNameRule, renameRule, restoreNameRule } from "@/server/names";
+import { transactions as transactionsTable } from "@/db/schema";
+import { eq as eqOp } from "drizzle-orm";
 import { getAccounts, getBudget, getDebt, getGoal, getGoals, getInvestments, getNetWorth, getOverview, getRecap, getRecurring, getTransactions } from "@/server/queries";
 
 /** End-to-end over the real SQL: seed the sample household into PGlite, then read it back. */
@@ -284,5 +287,129 @@ describe("sample household", () => {
     expect(after.series.find((s) => s.name === "Spotify")).toMatchObject({ cancelled: true, active: false });
     expect(after.monthlySubscriptions).toBe(before.monthlySubscriptions - 1199);
     expect(after.upcoming.some((u) => u.name === "Spotify")).toBe(false);
+  });
+});
+
+describe("names", () => {
+  const all = { limit: 200, offset: 0 };
+
+  it("tidies bank code on its own and keeps what the bank sent", async () => {
+    const { transactions: tartine } = await getTransactions(ctx, { ...all, q: "Tartine" });
+    expect(tartine.length).toBeGreaterThan(2);
+    expect(tartine[0]).toMatchObject({ name: "Tartine Bakery", bankName: "SQ *TARTINE BAKERY 0423 SAN FRANCISCO CA", nameSource: "clean", ruleId: null });
+    const patreon = (await getRecurring(ctx)).series.find((s) => s.bankName.startsWith("PATREON"));
+    expect(patreon).toMatchObject({ name: "Patreon", key: "out:patreon membership ca" });
+    // Plain names are left exactly as they are.
+    expect((await getTransactions(ctx, { ...all, q: "Netflix" })).transactions[0]).toMatchObject({ name: "Netflix", nameSource: "bank" });
+    expect((await countUnclear(ctx)).count).toBeGreaterThanOrEqual(3);
+  });
+
+  it("names every charge like one, past and future, finds them by the new name, and Undo puts it all back", async () => {
+    const { transactions: before } = await getTransactions(ctx, { ...all, q: "Tartine" });
+    const result = await createNameRule(ctx, { transactionId: before[0].id, name: "  Morning   buns " });
+    expect(result.count).toBe(before.length);
+    expect(result.undo).toMatchObject({ previousName: null, customName: null });
+
+    const { transactions: after } = await getTransactions(ctx, { ...all, q: "morning buns" });
+    expect(after.map((t) => t.id).sort()).toEqual(before.map((t) => t.id).sort());
+    expect(after.every((t) => t.name === "Morning buns" && t.nameSource === "rule" && t.ruleId === result.ruleId)).toBe(true);
+
+    // A new charge from another branch arrives already named.
+    await db.insert(transactionsTable).values({ id: "names-new", userId: DEMO_USER_ID, accountId: "demo-card", date: today, name: "SQ *TARTINE BAKERY 1102 OAKLAND CA", rawName: "SQ *TARTINE BAKERY 1102 OAKLAND CA", amount: -950, category: "dining" });
+    expect((await getTransactions(ctx, { ...all, q: "morning buns" })).transactions.some((t) => t.id === "names-new")).toBe(true);
+
+    // Renaming again keeps the same rule and remembers the old name for Undo.
+    const again = await createNameRule(ctx, { transactionId: "names-new", name: "Tartine" });
+    expect(again.ruleId).toBe(result.ruleId);
+    expect(again.undo.previousName).toBe("Morning buns");
+
+    await deleteNameRule(ctx, result.ruleId);
+    expect((await getTransactions(ctx, { ...all, q: "Tartine" })).transactions.every((t) => t.name === "Tartine Bakery")).toBe(true);
+    await db.delete(transactionsTable).where(eqOp(transactionsTable.id, "names-new"));
+  });
+
+  it("can name only charges of one exact amount", async () => {
+    const r = await getRecurring(ctx);
+    const patreon = r.series.find((s) => s.bankName.startsWith("PATREON"))!;
+    const { ruleId } = await createNameRule(ctx, { transactionId: patreon.sampleId, name: "Podcast club", onlyThisAmount: true });
+    await db.insert(transactionsTable).values({ id: "names-odd", userId: DEMO_USER_ID, accountId: "demo-card", date: today, name: "PATREON* MEMBERSHIP 4155550123 CA", rawName: null, amount: -1_500, category: "entertainment" });
+    const { transactions } = await getTransactions(ctx, { ...all, q: "PATREON" });
+    expect(transactions.find((t) => t.id === "names-odd")).toMatchObject({ name: "Patreon", nameSource: "clean" });
+    expect(transactions.filter((t) => t.amount === -800).every((t) => t.name === "Podcast club" && t.ruleExact)).toBe(true);
+    await deleteNameRule(ctx, ruleId);
+    await db.delete(transactionsTable).where(eqOp(transactionsTable.id, "names-odd"));
+  });
+
+  it("lets one transaction have its own name, which beats a rule and can be removed", async () => {
+    const { transactions } = await getTransactions(ctx, { ...all, q: "Tartine" });
+    const [one, other] = transactions;
+    const { ruleId } = await createNameRule(ctx, { transactionId: other.id, name: "Tartine" });
+    await updateTransaction(ctx, one.id, { name: "Birthday cake" });
+    let list = (await getTransactions(ctx, { ...all, q: "Tartine" })).transactions;
+    expect(list.find((t) => t.id === one.id)).toMatchObject({ name: "Birthday cake", nameSource: "custom", customName: "Birthday cake" });
+    expect(list.find((t) => t.id === other.id)).toMatchObject({ name: "Tartine", nameSource: "rule" });
+    expect((await getTransactions(ctx, { ...all, q: "birthday" })).transactions.map((t) => t.id)).toEqual([one.id]);
+
+    // Naming every charge like it again makes the one-off name give way, and Undo brings it back.
+    const result = await createNameRule(ctx, { transactionId: one.id, name: "Tartine" });
+    expect(result.undo.customName).toBe("Birthday cake");
+    expect((await getTransactions(ctx, { ...all, q: "Tartine" })).transactions.find((t) => t.id === one.id)?.name).toBe("Tartine");
+
+    await updateTransaction(ctx, one.id, { name: "Birthday cake" });
+    await updateTransaction(ctx, one.id, { name: null });
+    list = (await getTransactions(ctx, { ...all, q: "Tartine" })).transactions;
+    expect(list.find((t) => t.id === one.id)).toMatchObject({ name: "Tartine", customName: null });
+    await expect(updateTransaction(ctx, one.id, { name: "x".repeat(61) })).rejects.toMatchObject({ status: 400 });
+    await deleteNameRule(ctx, ruleId);
+  });
+
+  it("renames a bill without losing what you told Passbook about it", async () => {
+    const patreon = (await getRecurring(ctx)).series.find((s) => s.bankName.startsWith("PATREON"))!;
+    await setRecurringOverride(ctx, patreon.key, { kind: "bill" });
+    const { ruleId } = await createNameRule(ctx, { transactionId: patreon.sampleId, name: "Podcast" });
+    const renamed = (await getRecurring(ctx)).series.find((s) => s.key === patreon.key)!;
+    expect(renamed).toMatchObject({ name: "Podcast", kind: "bill", ruleId, bankName: patreon.bankName });
+    expect((await getRecurring(ctx)).upcoming.find((u) => u.key === patreon.key)?.name).toBe("Podcast");
+    await deleteNameRule(ctx, ruleId);
+    await setRecurringOverride(ctx, patreon.key, { kind: "subscription" });
+  });
+
+  it("lists bank code that could be clearer, with a guess, and moves it to your names once kept", async () => {
+    let names = await getNames(ctx);
+    const clipper = names.unclear.find((u) => u.bankName.startsWith("CLIPPER"))!;
+    expect(clipper).toMatchObject({ suggestion: "Clipper Service" });
+    expect(names.unclear.find((u) => u.bankName.startsWith("STEAMGAMES"))?.suggestion).toBe("Steam");
+    expect(names.unclear.some((u) => u.bankName === "Netflix")).toBe(false);
+
+    const { ruleId, undo } = await createNameRule(ctx, { transactionId: clipper.sampleId, name: clipper.suggestion });
+    names = await getNames(ctx);
+    expect(names.unclear.some((u) => u.key === clipper.key)).toBe(false);
+    expect(names.rules.find((r) => r.id === ruleId)).toMatchObject({ name: "Clipper Service", amount: 0, count: clipper.count });
+
+    // Removing and putting back (Undo) restores the same name.
+    const { rule } = await deleteNameRule(ctx, ruleId);
+    const { ruleId: back } = await restoreNameRule(ctx, rule);
+    expect((await getNames(ctx)).rules.find((r) => r.id === back)?.name).toBe("Clipper Service");
+    await renameRule(ctx, back, "Muni");
+    expect((await getNames(ctx)).rules.find((r) => r.id === back)?.name).toBe("Muni");
+    expect(undo.previousName).toBeNull();
+    await deleteNameRule(ctx, back);
+  });
+
+  it("refuses names that are empty or too long, and never reaches another person's charges or names", async () => {
+    const { transactions } = await getTransactions(ctx, { ...all, q: "Tartine" });
+    await expect(createNameRule(ctx, { transactionId: transactions[0].id, name: "   " })).rejects.toMatchObject({ status: 400 });
+    await expect(createNameRule(ctx, { transactionId: transactions[0].id, name: "y".repeat(61) })).rejects.toMatchObject({ status: 400 });
+    await expect(restoreNameRule(ctx, { key: "DROP TABLE", amount: 0, name: "x" })).rejects.toMatchObject({ status: 400 });
+
+    const { ruleId } = await createNameRule(ctx, { transactionId: transactions[0].id, name: "Tartine" });
+    const stranger: Ctx = { ...ctx, userId: "someone-else", user: { id: "someone-else", name: "Pat", email: "pat@example.com" }, demo: false };
+    await expect(createNameRule(stranger, { transactionId: transactions[0].id, name: "Mine now" })).rejects.toMatchObject({ status: 404 });
+    await expect(previewNameRule(stranger, transactions[0].id, false)).rejects.toMatchObject({ status: 404 });
+    await expect(renameRule(stranger, ruleId, "Mine now")).rejects.toMatchObject({ status: 404 });
+    await expect(deleteNameRule(stranger, ruleId)).rejects.toMatchObject({ status: 404 });
+    expect((await getNames(stranger)).rules).toEqual([]);
+    expect((await previewNameRule(ctx, transactions[0].id, false)).count).toBe(transactions.length);
+    await deleteNameRule(ctx, ruleId);
   });
 });

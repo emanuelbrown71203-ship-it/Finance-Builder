@@ -18,6 +18,7 @@ const quiet: NickelInput = {
   netWorthChange: 0,
   priciestDebt: null,
   latest: null,
+  unclearNames: { count: 0, example: null },
 };
 
 describe("what Nickel notices", () => {
@@ -92,6 +93,13 @@ describe("what Nickel notices", () => {
     expect(tips.some((t) => t.text.includes("All clear") || t.text.includes("all clear"))).toBe(true);
   });
 
+  it("offers to tidy bank-code names once there are a few, and links to the Names screen", () => {
+    expect(thinkAbout({ ...quiet, unclearNames: { count: 2, example: "TST* LA TAQUERIA" } }).tips.some((t) => t.href === "/transactions/names")).toBe(false);
+    const tip = thinkAbout({ ...quiet, unclearNames: { count: 4, example: "TST* LA TAQUERIA 0188" } }).tips.find((t) => t.href === "/transactions/names");
+    expect(tip?.text).toContain("4");
+    expect(tip?.text).toContain("TST* LA TAQUERIA 0188");
+  });
+
   it("never tells anyone what they should do", () => {
     const { tips } = thinkAbout({
       ...quiet,
@@ -103,6 +111,7 @@ describe("what Nickel notices", () => {
       latest: { name: "Tartine Bakery", amount: -1_660, date: "2026-11-21" },
       noSpendStreak: 2,
       netWorthChange: 100_000,
+      unclearNames: { count: 5, example: "SQ *TARTINE BAKERY 0423" },
     });
     for (const t of tips) expect(t.text.toLowerCase()).not.toMatch(/\byou should\b|\byou must\b|\bi recommend\b|\binvest in\b/);
   });

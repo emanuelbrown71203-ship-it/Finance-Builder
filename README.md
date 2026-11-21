@@ -35,8 +35,9 @@ Passbook follows the same house style as the owner's other apps (written down in
 | Screen | What it does |
 | --- | --- |
 | Home | What's left to spend this month after bills and savings, what needs a look (bills due, price increases, categories over their limit), what's coming up and the latest activity. |
-| Transactions | Everything from every account, live. Search and filter. Tap one to change its category or add a note. |
-| Bills | Recurring bills, subscriptions and income, found from history. Upcoming due dates, price-increase alerts, "I cancelled this". |
+| Transactions | Everything from every account, live. Search and filter. Tap one to rename it, change its category or add a note. |
+| Names | Bank code that could be clearer, with a suggested name to keep or change, and every name you've given. Reached from Transactions and Settings. |
+| Bills | Recurring bills, subscriptions and income, found from history. Upcoming due dates, price-increase alerts, rename, "I cancelled this". |
 | Budget | Spending by category against monthly limits, month over month, and six months of money in vs money out. |
 | Net worth | What you own minus what you owe over time, by account. Add things no bank reports (a car, a house) by hand. |
 | Savings | Savings balance, monthly saving history, and goals. Each goal with a date gets a **track**: what to put away a month, a week and each payday to make it, whether you're ahead or behind, month-end checkpoints, 25/50/75/100% milestones, and ideas for where the money could come from. |
@@ -51,6 +52,14 @@ Smaller things that make it easier to live with:
 - **Remembered categories.** Move a charge to a category and every charge from that place follows, now
   and in future. One Undo puts it all back.
 - **Slide a transaction left** to change its category in one tap.
+- **Names you'll recognise.** Banks send things like `SQ *TARTINE BAKERY 0423 SAN FRANCISCO CA`.
+  Passbook tidies obvious bank code on its own ("Tartine Bakery") and leaves clear names alone.
+  Rename any transaction or bill: "every charge like this" (past and future, and every branch of
+  the same shop), "only when it's $1,200" (for Venmo, Zelle and the like), or "just this one".
+  The Names screen lists what could be clearer with a one-tap "Keep". Every rename has Undo, the
+  new names are searchable, and what the bank sent always stays in the charge's details. Renames
+  are applied when reading (`src/lib/finance/names.ts`), never written over the bank's text, so
+  bills, remembered categories and the Tasks for Two link keep matching.
 - **Subscription help.** A warning before a yearly charge renews, a note when a known service charges
   for the first time, and where to go to cancel.
 - **A little celebration** when a savings goal is reached (it can be switched off).
@@ -59,8 +68,10 @@ Smaller things that make it easier to live with:
   goes into a goal. Tap him for what he's noticed in your numbers (bills due, price rises, budgets,
   goals behind or ahead, payday, streaks); hold him for options; drag him to the other side.
   He points things out and is clear he isn't a financial advisor. His "brain" is rules over your
-  own numbers (`src/lib/nickel/brain.ts`), so nothing leaves the app; a real AI chat could be
-  added later. Settings: show him, quiet mode, rename him.
+  own numbers (`src/lib/nickel/brain.ts`), so nothing leaves the app. Hold him and pick **Chat with
+  Claude** to open a chat in your own Claude app (on your own Claude plan) with a question ready;
+  Claude reads your numbers through the read-only connector below. Settings: show him, quiet mode,
+  rename him.
 
 ## Connections
 
@@ -167,6 +178,9 @@ Conventions worth knowing before changing things:
   and are excluded from income and spending.
 - Recurring charges are detected on read from transaction history; only the person's
   overrides ("cancelled", "this is a bill") are stored.
+- Names work the same way: `transactions.name` is always the bank's text. A one-off name is
+  `custom_name`; "every charge like this" is a row in `name_rules`, matched on the tidied bank text.
+  Keys for bills, categories and the Tasks link come from the bank's text, never the shown name.
 
 ### Security
 
@@ -234,6 +248,8 @@ To run the tests against real Postgres instead of the in-memory database:
 - Bank sign-ins that redirect on phones (Plaid OAuth redirect). Desktop linking works without it.
 - Investment transaction history (holdings and balances are synced; individual trades are not).
 - Shared households, exports, and push notifications.
+- Nickel (or Claude) making changes for you, like adding a bill or a goal. Claude's connector is
+  read-only by design; letting it write is a decision for the owner.
 - The Tasks for Two link reuses that app's single Claude connector link, so the same link has to be
   pasted in both places. A separate key for Passbook would need a small change in Tasks for Two.
 - The Plaid integration is covered by tests against simulated Plaid responses and has not yet

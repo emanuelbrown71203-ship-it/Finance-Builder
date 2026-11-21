@@ -41,6 +41,8 @@ export type NickelInput = {
   netWorthChange: number;
   priciestDebt: { name: string; apr: number } | null;
   latest: { name: string; amount: number; date: ISODate } | null;
+  /** Places in the last three months still going by bank code, like "SQ *TARTINE 0423". */
+  unclearNames: { count: number; example: string | null };
 };
 
 const money = (cents: number) => {
@@ -117,6 +119,11 @@ export function thinkAbout(input: NickelInput): { mood: Mood; tips: Tip[] } {
   if (input.netWorthChange > 0) say({ key: "worth", priority: 4, mood: "proud", text: `Your net worth is up ${money(input.netWorthChange)} over the last six months. *happy beeps*`, href: "/net-worth", link: "See net worth" });
 
   if (input.priciestDebt && input.priciestDebt.apr >= 15) say({ key: "debt", priority: 4, mood: "curious", text: `${input.priciestDebt.name} charges ${input.priciestDebt.apr.toFixed(2)}% interest, the most of anything you owe. The debt plan shows what a little extra there changes.`, href: "/debt", link: "See debt plan" });
+
+  if (input.unclearNames.count >= 3) {
+    const like = input.unclearNames.example ? `, like “${input.unclearNames.example.slice(0, 40)}”` : "";
+    say({ key: "names", priority: 4, mood: "curious", text: s("names", [`Sniff sniff… ${input.unclearNames.count} names on your statements look like bank code${like}. Want to give them names you’ll recognise?`, `I can’t read ${input.unclearNames.count} of your bank’s names${like}. Even robot dogs need subtitles! Want to tidy them?`]), href: "/transactions/names", link: "Tidy names" });
+  }
 
   if (input.latest) say({ key: `latest-${slug(input.latest.name)}`, priority: 5, mood: "curious", text: `Latest sniff: ${money(input.latest.amount)} ${input.latest.amount < 0 ? "at" : "from"} ${input.latest.name}.`, href: "/transactions", link: "See transactions" });
 

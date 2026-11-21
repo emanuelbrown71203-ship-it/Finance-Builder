@@ -69,5 +69,9 @@ export const MIGRATION_STATEMENTS: string[] = [
   "CREATE TABLE \"goal_deposits\" (\n\t\"id\" text PRIMARY KEY NOT NULL,\n\t\"user_id\" text NOT NULL,\n\t\"goal_id\" text NOT NULL,\n\t\"amount\" bigint NOT NULL,\n\t\"date\" text NOT NULL,\n\t\"created_at\" timestamp with time zone DEFAULT now() NOT NULL\n);",
   "ALTER TABLE \"goal_deposits\" ADD CONSTRAINT \"goal_deposits_user_id_users_id_fk\" FOREIGN KEY (\"user_id\") REFERENCES \"public\".\"users\"(\"id\") ON DELETE cascade ON UPDATE no action;",
   "ALTER TABLE \"goal_deposits\" ADD CONSTRAINT \"goal_deposits_goal_id_goals_id_fk\" FOREIGN KEY (\"goal_id\") REFERENCES \"public\".\"goals\"(\"id\") ON DELETE cascade ON UPDATE no action;",
-  "CREATE INDEX \"goal_deposits_goal_idx\" ON \"goal_deposits\" USING btree (\"user_id\",\"goal_id\",\"date\");"
+  "CREATE INDEX \"goal_deposits_goal_idx\" ON \"goal_deposits\" USING btree (\"user_id\",\"goal_id\",\"date\");",
+  "CREATE TABLE \"name_rules\" (\n\t\"id\" text PRIMARY KEY NOT NULL,\n\t\"user_id\" text NOT NULL,\n\t\"merchant_key\" text NOT NULL,\n\t\"amount\" bigint DEFAULT 0 NOT NULL,\n\t\"name\" text NOT NULL,\n\t\"created_at\" timestamp with time zone DEFAULT now() NOT NULL\n);",
+  "ALTER TABLE \"transactions\" ADD COLUMN \"custom_name\" text;",
+  "ALTER TABLE \"name_rules\" ADD CONSTRAINT \"name_rules_user_id_users_id_fk\" FOREIGN KEY (\"user_id\") REFERENCES \"public\".\"users\"(\"id\") ON DELETE cascade ON UPDATE no action;",
+  "CREATE UNIQUE INDEX \"name_rules_user_merchant_amount_idx\" ON \"name_rules\" USING btree (\"user_id\",\"merchant_key\",\"amount\");"
 ];

@@ -1,6 +1,7 @@
 import { and, eq, inArray, isNull, ne, sql } from "drizzle-orm";
 import { accounts, balanceSnapshots, budgets, categoryRules, debtPlans, goalDeposits, goals, recurringOverrides, transactions, userSettings } from "@/db/schema";
 import { isCategoryKey } from "@/lib/categories";
+import { validName } from "@/lib/finance/names";
 import { merchantKey } from "@/lib/finance/recurring";
 import type { Ctx } from "./auth";
 import { HttpError } from "./http";
@@ -18,7 +19,7 @@ const MAX_RULES = 500;
 export async function updateTransaction(
   ctx: Ctx,
   id: string,
-  patch: { category?: string; note?: string | null; remember?: boolean; restore?: RememberUndo },
+  patch: { category?: string; note?: string | null; name?: string | null; remember?: boolean; restore?: RememberUndo },
 ): Promise<{ moved: number; undo: RememberUndo | null }> {
   if (patch.category !== undefined && !isCategoryKey(patch.category)) throw new HttpError(400, "Unknown category.");
   const [tx] = await ctx.db.select().from(transactions).where(and(eq(transactions.id, id), eq(transactions.userId, ctx.userId))).limit(1);
@@ -27,6 +28,12 @@ export async function updateTransaction(
   const set: Partial<typeof transactions.$inferInsert> = {};
   if (patch.category !== undefined) Object.assign(set, { category: patch.category, categoryLocked: true });
   if (patch.note !== undefined) set.note = patch.note?.trim() || null;
+  // A name for just this transaction. Empty puts back the usual name.
+  if (patch.name !== undefined) {
+    const name = patch.name === null || !patch.name.trim() ? null : validName(patch.name);
+    if (patch.name !== null && patch.name.trim() && !name) throw new HttpError(400, "Give it a name of up to 60 letters.");
+    set.customName = name;
+  }
   if (Object.keys(set).length > 0) await ctx.db.update(transactions).set(set).where(eq(transactions.id, tx.id));
 
   const key = merchantKey(tx.name);

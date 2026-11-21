@@ -151,7 +151,7 @@ describe("bank sync", () => {
 
   it("a later sync applies posted, modified and removed transactions without losing the owner's edits", async () => {
     const pending = (await db.select().from(transactions).where(eq(transactions.plaidTransactionId, "t-coffee-pending")))[0];
-    await updateTransaction(ctx, pending.id, { category: "entertainment", note: "Client meeting" });
+    await updateTransaction(ctx, pending.id, { category: "entertainment", note: "Client meeting", name: "Coffee with Dana" });
 
     const { client, calls } = fakePlaid({
       cardBalance: 325.0,
@@ -175,7 +175,7 @@ describe("bank sync", () => {
     expect(byId["t-rent"]).toBeUndefined();
     expect(byId["t-coffee-pending"]).toBeUndefined();
     // Same row as the pending charge: the owner's category and note survive.
-    expect(byId["t-coffee-posted"]).toMatchObject({ id: pending.id, amount: -725, pending: false, category: "entertainment", note: "Client meeting" });
+    expect(byId["t-coffee-posted"]).toMatchObject({ id: pending.id, amount: -725, pending: false, category: "entertainment", note: "Client meeting", customName: "Coffee with Dana" });
     expect(byId["t-groc"]).toMatchObject({ amount: -8000 });
     const card = (await db.select().from(accounts).where(eq(accounts.plaidAccountId, "p-card")))[0];
     expect(card.balance).toBe(-32500);

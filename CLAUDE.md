@@ -44,6 +44,9 @@ for it to be remembered and used whenever an app is built.
   "you should", never gives investment advice, and says he isn't a financial advisor. His wording
   lives in `src/lib/nickel/brain.ts` and a test checks for advice-like phrasing. A real AI chat
   for him would send data to an outside service: ask the owner first.
+- **Names never overwrite the bank's text.** `transactions.name` stays what the bank sent; shown names
+  come from `custom_name`, `name_rules` and the tidy-up in `src/lib/finance/names.ts`, applied on read.
+  Anything that matches charges (bills, category rules, the Tasks link) keys on the bank's text.
 - **The Claude connector is read-only.** Never add a tool to `src/server/connector.ts` that changes
   anything without asking the owner first.
 - **The Tasks for Two link never runs on sample data or Plaid’s practice banks**, only ticks bills

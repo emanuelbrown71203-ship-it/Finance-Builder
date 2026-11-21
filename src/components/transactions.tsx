@@ -5,7 +5,9 @@ import { CATEGORIES, category } from "@/lib/categories";
 import { formatMedium, formatRelativeDay, type ISODate } from "@/lib/dates";
 import { dollarsExact, signedAmount } from "@/lib/money";
 import type { TxView } from "@/lib/types";
+import { validName } from "@/lib/finance/names";
 import { CategoryIcon } from "./category-icon";
+import { ScopeChoice, renameEvery, renamedMessage, undoRename, type Scope } from "./names";
 import { Button, Dialog, ErrorNote, Field, Input, Select, Tag, cx, toast } from "./ui";
 import { send } from "./use-api";
 
@@ -269,19 +271,56 @@ function TxDialog({ tx, onClose }: { tx: TxView | null; onClose: () => void }) {
 }
 
 function TxForm({ tx, onClose }: { tx: TxView; onClose: () => void }) {
+  const [name, setName] = useState(tx.name);
+  const [scope, setScope] = useState<Scope>(tx.nameSource === "custom" ? "one" : "every");
+  const [exact, setExact] = useState(tx.ruleExact);
   const [categoryKey, setCategoryKey] = useState(tx.category);
   const [note, setNote] = useState(tx.note ?? "");
   const [remember, setRemember] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const changed = categoryKey !== tx.category;
+  const typed = validName(name);
+  const nameChanged = typed !== null && typed !== tx.name;
 
   const save = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!typed) return setError("Give it a name of up to 60 letters.");
     setSaving(true);
     setError(null);
     try {
-      await changeCategory(tx, { category: categoryKey, note, remember: changed && remember });
+      const renamed = nameChanged && scope === "every" ? await renameEvery(tx.id, typed, exact) : null;
+      const body: { category?: string; remember?: boolean; note?: string; name?: string } = {};
+      if (changed) Object.assign(body, { category: categoryKey, remember });
+      if (note.trim() !== (tx.note ?? "")) body.note = note;
+      if (nameChanged && scope === "one") body.name = typed;
+      const result = Object.keys(body).length > 0 ? await send<{ moved: number; undo: UndoInfo | null }>("PATCH", `/api/transactions/${tx.id}`, body) : null;
+
+      const label = category(categoryKey).label;
+      const shown = nameChanged ? typed : tx.name;
+      const parts = [
+        renamed ? renamedMessage(typed, renamed.count) : body.name ? `Renamed this one to ${typed}.` : "",
+        changed ? (result?.undo ? `Every ${shown} charge goes to ${label} now.` : `Moved to ${label}.`) : "",
+        !renamed && !body.name && !changed && body.note !== undefined ? "Note saved" : "",
+      ].filter(Boolean);
+      if (parts.length > 0) {
+        toast(parts.join(" "), {
+          action: {
+            label: "Undo",
+            run: async () => {
+              if (result) {
+                await send("PATCH", `/api/transactions/${tx.id}`, {
+                  ...(body.category !== undefined ? { category: tx.category } : {}),
+                  ...(body.note !== undefined ? { note: tx.note ?? "" } : {}),
+                  ...(body.name !== undefined ? { name: tx.customName } : {}),
+                  ...(result.undo ? { restore: result.undo } : {}),
+                });
+              }
+              if (renamed) await undoRename(renamed.undo);
+            },
+          },
+        });
+      }
       onClose();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Couldn’t save. Try again.");
@@ -289,20 +328,67 @@ function TxForm({ tx, onClose }: { tx: TxView; onClose: () => void }) {
     }
   };
 
+  /** Back to what the bank calls it: drops a one-off name, or stops a saved one. */
+  const backToBankName = async () => {
+    setSaving(true);
+    try {
+      if (tx.nameSource === "custom") {
+        await send("PATCH", `/api/transactions/${tx.id}`, { name: null });
+        toast("Name removed", { action: { label: "Undo", run: () => send("PATCH", `/api/transactions/${tx.id}`, { name: tx.customName }) } });
+      } else if (tx.ruleId) {
+        const { rule } = await send<{ rule: { key: string; amount: number; name: string } }>("DELETE", `/api/names/${tx.ruleId}`);
+        toast(`Stopped calling these “${rule.name}”`, { action: { label: "Undo", run: () => send("POST", "/api/names/restore", rule) } });
+      }
+      onClose();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Couldn’t save. Try again.");
+      setSaving(false);
+    }
+  };
+
+  const nameHint =
+    tx.nameSource === "custom"
+      ? "You named just this one."
+      : tx.nameSource === "rule"
+        ? tx.ruleExact
+          ? `You named every ${dollarsExact(Math.abs(tx.amount))} charge like this.`
+          : "You named every charge like this."
+        : tx.nameSource === "clean"
+          ? "Tidied up from the bank’s code. Change it if it’s not right."
+          : undefined;
+
   return (
     <form onSubmit={save} className="flex flex-col gap-4">
       <div className="flex items-end justify-between gap-4 rounded-control bg-sunk px-4 py-3">
-        <div className="text-small text-ink-2">
+        <div className="min-w-0 text-small text-ink-2">
           <p>{formatMedium(tx.date)}</p>
           <p>
             {tx.accountName}
             {tx.accountMask && <span className="tabular"> ending {tx.accountMask}</span>}
           </p>
-          {tx.rawName && tx.rawName.toLowerCase() !== tx.name.toLowerCase() && <p className="text-ink-3">Statement: {tx.rawName}</p>}
+          {(() => {
+            const statement = tx.rawName || tx.bankName;
+            return statement && statement.toLowerCase() !== tx.name.toLowerCase() ? <p className="break-words text-ink-3">Bank says: {statement}</p> : null;
+          })()}
         </div>
         <Amount cents={tx.amount} neutral={tx.category === "transfer"} className="figure text-title" />
       </div>
       {tx.pending && <p className="text-small text-ink-3">This charge is still pending. The amount can change before it posts.</p>}
+      <div>
+        <Field label="Name" hint={nameChanged ? undefined : nameHint}>
+          {(id) => <Input id={id} value={name} onChange={(e) => setName(e.target.value)} maxLength={60} autoCapitalize="words" enterKeyHint="done" />}
+        </Field>
+        {!nameChanged && (tx.nameSource === "custom" || tx.nameSource === "rule") && (
+          <button type="button" disabled={saving} onClick={backToBankName} className="mt-1 inline-flex min-h-11 items-center text-small font-bold text-accent-text">
+            {tx.nameSource === "custom" ? "Remove this name" : "Stop using this name"}
+          </button>
+        )}
+        {nameChanged && (
+          <div className="mt-3">
+            <ScopeChoice transactionId={tx.id} amount={tx.amount} scope={scope} onScope={setScope} exact={exact} onExact={setExact} />
+          </div>
+        )}
+      </div>
       <Field label="Category" hint={categoryKey === "transfer" ? "Transfers between your own accounts don’t count as income or spending." : undefined}>
         {(id) => (
           <Select id={id} value={categoryKey} onChange={(e) => setCategoryKey(e.target.value)}>

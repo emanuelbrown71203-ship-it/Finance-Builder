@@ -1,6 +1,7 @@
 "use client";
 
-import { Search, SlidersHorizontal } from "lucide-react";
+import { PencilLine, Search, SlidersHorizontal } from "lucide-react";
+import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { TxList } from "@/components/transactions";
@@ -105,7 +106,16 @@ function Transactions() {
 
   return (
     <>
-      <PageHeader title="Transactions" lead="Every charge and deposit, newest first. Tap one to change its category or add a note." />
+      <PageHeader
+        title="Transactions"
+        lead="Every charge and deposit, newest first. Tap one to rename it, change its category or add a note."
+        action={
+          <Link href="/transactions/names" className="inline-flex min-h-10 items-center gap-1.5 rounded-control border border-line bg-sheet px-3.5 text-small font-bold text-ink active:scale-[0.98] active:bg-sunk">
+            <PencilLine size={16} aria-hidden />
+            Names
+          </Link>
+        }
+      />
 
       {/* On a phone: a search box and one Filter button. The choices open in a sheet. */}
       <div className="mb-4 flex gap-2 lg:hidden">

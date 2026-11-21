@@ -1,3 +1,4 @@
+import type { NameSource } from "./finance/names";
 import type { ISODate } from "./dates";
 import type { MonthPlan } from "./finance/plan";
 import type { RecurringSeries } from "./finance/recurring";
@@ -25,6 +26,15 @@ export type TxView = {
   accountName: string;
   accountMask: string | null;
   createdAt: string;
+  /** What the bank calls it (the merchant when known). Renames never change this. */
+  bankName: string;
+  /** A name given to this one transaction only. */
+  customName: string | null;
+  /** Where `name` came from: a one-off name, a name rule, the automatic tidy-up, or the bank as is. */
+  nameSource: NameSource;
+  ruleId: string | null;
+  /** True when that rule only covers this exact amount. */
+  ruleExact: boolean;
 };
 
 export type AccountView = {
@@ -92,6 +102,12 @@ export type RecurringView = RecurringSeries & {
   renewsSoon: boolean;
   /** It first charged within about the last three months. */
   startedRecently: boolean;
+  /** What the bank calls it; `name` is what the owner sees. */
+  bankName: string;
+  /** The saved name rule giving it its name, if any. */
+  ruleId: string | null;
+  /** The latest charge, for renaming it. */
+  sampleId: string;
 };
 
 /** A charge from a known subscription service that hasn't repeated yet: probably a new sign-up or a trial that converted. */
@@ -281,3 +297,11 @@ export const ACCOUNT_TYPE_LABEL: Record<string, string> = {
   credit: "Credit cards",
   loan: "Loans",
 };
+
+/** A saved name: every charge the bank calls something (optionally at one amount) goes by this name. */
+export type NameRuleView = { id: string; name: string; key: string; amount: number; bankNames: string[]; count: number; lastDate: ISODate | null };
+
+/** Bank text that still looks like code, with a tidier name to offer. */
+export type UnclearName = { key: string; bankName: string; suggestion: string; count: number; lastDate: ISODate; sampleId: string; amount: number; category: string };
+
+export type NamesPayload = { rules: NameRuleView[]; unclear: UnclearName[] };

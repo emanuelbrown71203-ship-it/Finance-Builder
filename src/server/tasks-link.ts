@@ -8,6 +8,7 @@ import { isTasksLink, matchPayments, suggestLinks, unpaidDueDates, type TasksBil
 import { merchantKey } from "@/lib/finance/recurring";
 import type { Ctx } from "./auth";
 import { decryptSecret, encryptSecret } from "./crypto";
+import { loadNamer } from "./names";
 import { HttpError } from "./http";
 
 /*
@@ -173,11 +174,14 @@ export async function getTasksLink(ctx: Ctx, fetchImpl: Fetch = fetch): Promise<
   if (ctx.demo || !empty.available) return empty;
   const [row] = await ctx.db.select().from(taskLinks).where(eq(taskLinks.userId, ctx.userId)).limit(1);
   if (!row) return empty;
-  const [links, ticks, merchants] = await Promise.all([
+  const [links, ticks, found, nameFor] = await Promise.all([
     ctx.db.select().from(billLinks).where(eq(billLinks.userId, ctx.userId)),
     ctx.db.select().from(billTicks).where(eq(billTicks.userId, ctx.userId)),
     merchantsFor(ctx.db, ctx.userId, ctx.today),
+    loadNamer(ctx),
   ]);
+  // Shown by the names the owner gave them; still keyed by the bank's text.
+  const merchants = found.map((m) => ({ ...m, name: nameFor(m).name })).sort((a, b) => a.name.localeCompare(b.name));
   const linkMap = new Map(links.map((l) => [l.tasksBillId, l.merchantKey]));
   let bills: TasksBill[] = [];
   let message = row.lastMessage;

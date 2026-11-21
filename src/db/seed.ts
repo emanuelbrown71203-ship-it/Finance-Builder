@@ -39,7 +39,7 @@ export const EVERYDAY: { perDay: number; weekendBoost?: number; merchants: Merch
       { name: "Blue Bottle Coffee", category: "dining", min: 4.5, max: 9.75 },
       { name: "Chipotle", category: "dining", min: 11, max: 16.5 },
       { name: "Sweetgreen", category: "dining", min: 13, max: 18 },
-      { name: "Tartine Bakery", category: "dining", min: 7, max: 24 },
+      { name: "SQ *TARTINE BAKERY 0423 SAN FRANCISCO CA", category: "dining", min: 7, max: 24 },
       { name: "DoorDash", category: "dining", min: 19, max: 47 },
       { name: "Nopa", category: "dining", min: 42, max: 118 },
       { name: "Starbucks", category: "dining", min: 4.25, max: 8.5 },
@@ -52,7 +52,7 @@ export const EVERYDAY: { perDay: number; weekendBoost?: number; merchants: Merch
       { name: "Chevron", category: "transport", min: 36, max: 64 },
     ],
   },
-  { perDay: 0.18, merchants: [{ name: "Clipper Transit Fare", category: "transport", min: 2.9, max: 7.4 }] },
+  { perDay: 0.18, merchants: [{ name: "CLIPPER SERVICE 877-878-8883 CA", category: "transport", min: 2.9, max: 7.4 }] },
   { perDay: 0.07, merchants: [{ name: "Uber", category: "transport", min: 9, max: 34 }] },
   {
     perDay: 0.12,
@@ -68,7 +68,7 @@ export const EVERYDAY: { perDay: number; weekendBoost?: number; merchants: Merch
     weekendBoost: 2,
     merchants: [
       { name: "AMC Theatres", category: "entertainment", min: 14, max: 34 },
-      { name: "Steam Games", category: "entertainment", min: 9.99, max: 59.99 },
+      { name: "STEAMGAMES.COM 4259522985 WA", category: "entertainment", min: 9.99, max: 59.99 },
       { name: "The Fillmore", category: "entertainment", min: 38, max: 96 },
     ],
   },
@@ -208,6 +208,8 @@ export async function seedDemo(db: DB, today: ISODate, now: Date = new Date()): 
     if (dom === 6 && mi <= -4) post(A.card, date, "Hulu", cents(-9.99), "entertainment");
     if (dom === 9) post(A.card, date, "Netflix", mi >= -1 ? cents(-17.99) : cents(-15.49), "entertainment");
     if (dom === 14) post(A.card, date, "Apple iCloud+", cents(-2.99), "other");
+    // Banks don't always send a merchant's name, just their own code for it.
+    if (dom === 11) post(A.card, date, "PATREON* MEMBERSHIP 4155550123 CA", cents(-8), "entertainment");
     if (dom === 21) post(A.card, date, "Adobe Creative Cloud", cents(-22.99), "other");
     if (dom === 27) post(A.card, date, "Spotify", cents(-11.99), "entertainment");
     if (diffDays(date, start) % 28 === 20) post(A.card, date, "The New York Times", cents(-17), "entertainment");
