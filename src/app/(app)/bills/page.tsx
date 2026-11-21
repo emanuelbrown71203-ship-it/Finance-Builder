@@ -102,7 +102,8 @@ function SeriesDialog({ series, onClose: close }: { series: RecurringView | null
           current={series.name}
           amount={series.history[series.history.length - 1]?.amount ?? series.amount}
           bankName={series.bankName}
-          allowExact={series.fixedAmount}
+          allowExact={series.fixedAmount || series.ruleExact}
+          defaultExact={series.ruleExact}
           onDone={onClose}
           onCancel={() => setRenaming(false)}
         />

@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gte, ilike, inArray, lte, ne, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, ilike, inArray, isNull, lte, ne, or, sql } from "drizzle-orm";
 import { accounts, balanceSnapshots, budgets, debtPlans, goalDeposits, goals, holdings, items, recurringOverrides, transactions, userSettings, type Account } from "@/db/schema";
 import { category } from "@/lib/categories";
 import { DEFAULT_TIMEZONE } from "@/lib/config";
@@ -11,7 +11,7 @@ import { FREQUENCY_LABEL, detectRecurring, monthlyEquivalent, seriesKeyFor, upco
 import { cancelHelp, isKnownSubscription } from "@/lib/finance/subscriptions";
 import type { Namer } from "@/lib/finance/names";
 import { HttpError } from "./errors";
-import { loadNamer } from "./names";
+import { bankNames, loadNamer } from "./names";
 import type {
   AccountView,
   AttentionItem,
@@ -117,16 +117,19 @@ export async function getTransactions(
   if (filter.q) {
     const like = `%${filter.q.replace(/[%_\\]/g, (c) => `\\${c}`)}%`;
     const matches = [ilike(transactions.name, like), ilike(transactions.rawName, like), ilike(transactions.note, like), ilike(transactions.customName, like)];
-    // Names given by rules or the tidy-up aren't stored, so search what people actually see too.
+    // Names given by rules or the tidy-up aren't stored, so search what people actually see too:
+    // work out the shown name once per bank text (not per charge) and match on the bank text.
     const q = filter.q.toLowerCase();
-    const all = await ctx.db
-      .select({ id: transactions.id, name: transactions.name, amount: transactions.amount, customName: transactions.customName })
-      .from(transactions)
-      .where(eq(transactions.userId, ctx.userId))
-      .orderBy(desc(transactions.date))
-      .limit(20_000);
-    const seen = all.filter((t) => nameFor(t).name.toLowerCase().includes(q)).map((t) => t.id).slice(0, 5_000);
-    if (seen.length > 0) matches.push(inArray(transactions.id, seen));
+    const places = await bankNames(ctx, { withoutOwnName: true });
+    for (const incoming of [true, false]) {
+      const hits = [...new Set(places.filter((p) => p.incoming === incoming && nameFor.base(p.name, incoming).name.toLowerCase().includes(q)).map((p) => p.name))].slice(0, 1_000);
+      if (hits.length > 0) matches.push(and(isNull(transactions.customName), inArray(transactions.name, hits), incoming ? sql`${transactions.amount} > 0` : sql`${transactions.amount} <= 0`)!);
+    }
+    // Names kept for one exact amount.
+    for (const rule of nameFor.exactRules.filter((r) => r.name.toLowerCase().includes(q)).slice(0, 50)) {
+      const hits = [...new Set(places.filter((p) => nameFor.keyOf(p.name, rule.amount) === rule.key).map((p) => p.name))].slice(0, 200);
+      if (hits.length > 0) matches.push(and(isNull(transactions.customName), inArray(transactions.name, hits), eq(transactions.amount, rule.amount))!);
+    }
     conditions.push(or(...matches)!);
   }
   if (filter.category) conditions.push(eq(transactions.category, filter.category));
@@ -198,6 +201,7 @@ async function loadRecurring(ctx: Ctx): Promise<RecurringBundle> {
     loadNamer(ctx),
   ]);
   const overrideByKey = new Map(overrides.map((o) => [o.seriesKey, o]));
+  const ownName = new Map(raw.map((t) => [t.id, t.customName]));
   const accountName = new Map(accountList.map((a) => [a.id, a.name]));
 
   const series: RecurringView[] = [];
@@ -212,12 +216,15 @@ async function loadRecurring(ctx: Ctx): Promise<RecurringBundle> {
     const untilNext = diffDays(s.nextDate, ctx.today);
     const latest = s.history[s.history.length - 1];
     const named = nameFor({ name: s.name, amount: latest?.amount ?? s.amount });
+    // Renaming the bill starts from its newest charge that has no name of its own.
+    const sample = [...s.history].reverse().find((h) => !ownName.get(h.id)) ?? latest;
     series.push({
       ...s,
       name: named.name,
       bankName: s.name,
       ruleId: named.ruleId,
-      sampleId: latest?.id ?? "",
+      ruleExact: named.exact,
+      sampleId: sample?.id ?? "",
       kind,
       // A cancelled series stops counting toward what’s coming up.
       active,

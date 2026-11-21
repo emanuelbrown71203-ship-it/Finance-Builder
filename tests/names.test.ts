@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cleanName, looksUnclear, nameKey, namer, ruleMatches, validName } from "@/lib/finance/names";
+import { cleanName, looksUnclear, nameKey, namer, ruleKey, validName } from "@/lib/finance/names";
 
 describe("spotting bank code", () => {
   it("flags reference numbers, processor stars and shouting, but not real names", () => {
@@ -19,7 +19,8 @@ describe("tidying a bank's text", () => {
     ["AMZN Mktp US*2K4LT8A93", "Amazon"],
     ["AMAZON PRIME*1J23K4 AMZN.COM/BILL WA", "Amazon Prime"],
     ["APPLE.COM/BILL 866-712-7753 CA", "Apple"],
-    ["GOOGLE *YouTubePremium g.co/helppay#", "YouTube"],
+    ["GOOGLE *YouTubePremium g.co/helppay#", "YouTube Premium"],
+    ["GOOGLE *YOUTUBE TV 650-253-0000 CA", "YouTube TV"],
     ["PAYPAL *EBAY INC 4029357733 CA", "eBay"],
     ["UBER   *TRIP HELP.UBER.COM CA", "Uber"],
     ["UBER *EATS PENDING", "Uber Eats"],
@@ -30,6 +31,21 @@ describe("tidying a bank's text", () => {
     ["CHECKCARD 1102 BLUE BOTTLE COFFEE OAKLAND CA", "Blue Bottle Coffee Oakland"],
     ["ACME WIDGETS LLC", "Acme Widgets"],
     ["CITY OF OAKLAND PARKING", "City of Oakland Parking"],
+    // Well-known names only take over when the rest is code; real words stay.
+    ["AMAZON WEB SERVICES", "Amazon Web Services"],
+    ["AMAZON FRESH 1234 SEATTLE WA", "Amazon Fresh"],
+    ["AMZN DIGITAL*2K4AB1 888-802-3080 WA", "Amazon Digital"],
+    ["MC DONALDS F1234", "McDonald’s"],
+    // Numbers that are part of a name stay; store numbers go.
+    ["24 HOUR FITNESS", "24 Hour Fitness"],
+    ["99 RANCH MARKET #123", "99 Ranch Market"],
+    ["ROUTE 101 DINER", "Route 101 Diner"],
+    ["CHIPOTLE 123 SEATTLE WA", "Chipotle"],
+    ["PAYMENT TO CHASE CARD ENDING IN 1234", "Chase Card ending 1234"],
+    // Money between people keeps who it was.
+    ["ZELLE PAYMENT TO JOHN SMITH 12345678", "Zelle John Smith"],
+    ["VENMO *ROSA M 1188", "Venmo Rosa M"],
+    ["VENMO PAYMENT 1022", "Venmo"],
   ])("%s → %s", (raw, clean) => {
     expect(cleanName(raw)).toBe(clean);
   });
@@ -43,6 +59,7 @@ describe("tidying a bank's text", () => {
   it("falls back to the bank's text when there's nothing readable left", () => {
     expect(cleanName("CHECK 1234")).toBe("Check");
     expect(cleanName("#4471 8812")).toBe("#4471 8812");
+    expect(cleanName("AB*2K4AB1 WA")).toBe("AB*2K4AB1 WA");
   });
 });
 
@@ -53,25 +70,27 @@ describe("matching a rule", () => {
     expect(nameKey("SQ *TARTINE BAKERY 0423 SAN FRANCISCO CA")).toBe("tartine bakery");
   });
 
-  it("can match one exact amount only", () => {
-    const rent = { key: nameKey("VENMO PAYMENT 1022"), amount: -120_000 };
-    expect(ruleMatches(rent, { name: "VENMO PAYMENT 1188", amount: -120_000 })).toBe(true);
-    expect(ruleMatches(rent, { name: "VENMO PAYMENT 1188", amount: -2_500 })).toBe(false);
-    expect(ruleMatches({ ...rent, amount: 0 }, { name: "VENMO PAYMENT 1188", amount: -2_500 })).toBe(true);
+  it("keeps money in and money out apart, and different people apart", () => {
+    expect(ruleKey("ZELLE PAYMENT TO JOHN SMITH 1234", -150_000)).toBe("out:zelle john smith");
+    expect(ruleKey("ZELLE PAYMENT FROM JOHN SMITH 9876", 4_000)).toBe("in:zelle john smith");
+    expect(ruleKey("ZELLE PAYMENT TO JANE DOE 1234", -150_000)).not.toBe(ruleKey("ZELLE PAYMENT TO JOHN SMITH 1234", -150_000));
   });
 });
 
 describe("naming a transaction", () => {
   const name = namer([
-    { id: "r1", key: "venmo", amount: 0, name: "Venmo friends" },
-    { id: "r2", key: "venmo", amount: -120_000, name: "Rent to Rosa" },
-    { id: "r3", key: "tartine bakery", amount: 0, name: "Tartine" },
+    { id: "r1", key: "out:venmo rosa m", amount: 0, name: "Venmo Rosa" },
+    { id: "r2", key: "out:venmo rosa m", amount: -120_000, name: "Rent to Rosa" },
+    { id: "r3", key: "out:tartine bakery", amount: 0, name: "Tartine" },
   ]);
 
   it("uses a one-off name first, then an exact-amount rule, then any-amount rule, then the tidy-up", () => {
     expect(name({ name: "VENMO *ROSA M 1188", amount: -120_000, customName: "June rent" })).toEqual({ name: "June rent", source: "custom", ruleId: null, exact: false });
     expect(name({ name: "VENMO *ROSA M 1188", amount: -120_000 })).toEqual({ name: "Rent to Rosa", source: "rule", ruleId: "r2", exact: true });
-    expect(name({ name: "VENMO *ROSA M 1188", amount: -4_000 })).toEqual({ name: "Venmo friends", source: "rule", ruleId: "r1", exact: false });
+    expect(name({ name: "VENMO *ROSA M 1188", amount: -4_000 })).toEqual({ name: "Venmo Rosa", source: "rule", ruleId: "r1", exact: false });
+    // Money coming back from Rosa isn't covered by a rule for money going to her.
+    expect(name({ name: "VENMO *ROSA M 1188", amount: 4_000 })).toEqual({ name: "Venmo Rosa M", source: "clean", ruleId: null, exact: false });
+    expect(name.base("VENMO *ROSA M 1188", false)).toMatchObject({ name: "Venmo Rosa", ruleId: "r1" });
     expect(name({ name: "SQ *TARTINE BAKERY 0423 SAN FRANCISCO CA", amount: -1_200 })).toMatchObject({ name: "Tartine", ruleId: "r3" });
     expect(name({ name: "TST* LA TAQUERIA 0188 SAN FRANCISCO CA", amount: -1_800 })).toEqual({ name: "LA Taqueria", source: "clean", ruleId: null, exact: false });
     expect(name({ name: "Chipotle", amount: -1_400 })).toEqual({ name: "Chipotle", source: "bank", ruleId: null, exact: false });
@@ -84,5 +103,9 @@ describe("checking a typed name", () => {
     expect(validName("Rent\u202easoR")).toBe("RentasoR");
     expect(validName("   ")).toBeNull();
     expect(validName("x".repeat(61))).toBeNull();
+    // Names that would show as nothing.
+    expect(validName("\u3164\u3164")).toBeNull();
+    expect(validName("\u061c\u200b")).toBeNull();
+    expect(validName("Caf\u00e9 \u2615")).toBe("Caf\u00e9 \u2615");
   });
 });

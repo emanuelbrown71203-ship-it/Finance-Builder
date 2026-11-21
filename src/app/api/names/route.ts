@@ -11,6 +11,8 @@ const Body = z.object({
   name: z.string().max(200),
   /** Only charges of exactly this transaction's amount. */
   onlyThisAmount: z.boolean().optional(),
+  /** Sent from the charge's own sheet: a name given to just that charge makes way. */
+  fromItsSheet: z.boolean().optional(),
 });
 
 export const POST = withUser(async (ctx, request) => createNameRule(ctx, await readBody(request, Body)));

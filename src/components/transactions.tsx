@@ -280,8 +280,10 @@ function TxForm({ tx, onClose }: { tx: TxView; onClose: () => void }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const changed = categoryKey !== tx.category;
-  const typed = validName(name);
-  const nameChanged = typed !== null && typed !== tx.name;
+  // Only a name that was actually changed is checked: a long bank name left as it is still saves.
+  const touched = name !== tx.name;
+  const typed = touched ? validName(name) : tx.name;
+  const nameChanged = touched && typed !== null && typed !== tx.name;
 
   const save = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -289,7 +291,7 @@ function TxForm({ tx, onClose }: { tx: TxView; onClose: () => void }) {
     setSaving(true);
     setError(null);
     try {
-      const renamed = nameChanged && scope === "every" ? await renameEvery(tx.id, typed, exact) : null;
+      const renamed = nameChanged && scope === "every" ? await renameEvery(tx.id, typed, exact, true) : null;
       const body: { category?: string; remember?: boolean; note?: string; name?: string } = {};
       if (changed) Object.assign(body, { category: categoryKey, remember });
       if (note.trim() !== (tx.note ?? "")) body.note = note;

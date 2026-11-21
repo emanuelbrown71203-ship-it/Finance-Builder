@@ -20,9 +20,9 @@ import { merchantKey } from "./recurring";
 
 export type NameRule = {
   id: string;
-  /** nameKey() of the bank's text. */
+  /** ruleKey() of the bank's text: direction plus the tidied name, like "out:tartine bakery". */
   key: string;
-  /** Signed cents. 0 means any amount. */
+  /** Signed cents. 0 means any amount (in the same direction). */
   amount: number;
   name: string;
 };
@@ -36,25 +36,45 @@ export const MAX_NAME_LENGTH = 60;
 
 /* ---------- spotting bank code ---------- */
 
-const NOISE_START = /^(?:pos|dbt|debit|purchase|checkcard|check card|visa|mc|ach|recurring|recur|online|web|mobile|pmt|payment to|preauth(?:orized)?|card|sale|bill pay(?:ment)?|dda)\b[\s:.-]*/i;
+const NOISE_START = /^(?:pos|dbt|debit|purchase|checkcard|check card|visa|ach|recurring|recur|online|web|mobile|pmt|payment to|preauth(?:orized)?|card purchase|sale|bill pay(?:ment)?|dda)\b[\s:.-]*/i;
 const AUTHORIZED_ON = /^(?:purchase\s+)?authorized\s+on\s+\d{1,2}\/\d{1,2}\s*/i;
 const LEADING_DATE = /^\d{1,2}\/\d{1,2}(?:\/\d{2,4})?\s+/;
 /** Card processors that put their code in front of the shop's name. */
-const PROCESSOR = /^(?:sq|sqsp|squ|tst|sp|pp|dd|py|bt|ec|in|par|ckf|tcb|cke|fsp|gpm|pt|wpy|ppl|wf|paypal|google|goog|amzn digital)\s?\*\s*/i;
+const PROCESSOR = /^(?:sq|sqsp|squ|tst|sp|pp|dd|py|bt|ec|in|par|ckf|tcb|cke|fsp|gpm|pt|wpy|ppl|wf|paypal|google|goog)\s?\*\s*/i;
+/** A store number or reference code at the start ("1102 BLUE BOTTLE"), but not "24 HOUR FITNESS". */
+const LEADING_CODE = /^(?:(?:#\S*|\d{4,}\S*)\s+)+/;
+/** Money sent between people: the name after it is the person, so it's kept. */
+const PEOPLE_APPS: [RegExp, string][] = [
+  [/^venmo\b\s*\*?\s*/i, "Venmo"],
+  [/^zelle\b\s*\*?\s*/i, "Zelle"],
+  [/^(?:cash app|square cash|sq \*?cash)\b\s*\*?\s*/i, "Cash App"],
+  [/^apple cash\b\s*/i, "Apple Cash"],
+  [/^paypal\b(?!\s*\*)\s*/i, "PayPal"],
+];
+const PEOPLE_FILLER = /^(?:payments?|pmt|to|from|sent|received|transfer|xfer|inst|id|web|instant|request|cashout)\b\s*/i;
 
 const STATES = new Set(
   "AL AK AZ AR CA CO CT DE FL GA HI ID IL IN IA KS KY LA ME MD MA MI MN MS MO MT NE NV NH NJ NM NY NC ND OH OK OR PA RI SC SD TN TX UT VT VA WA WV WI WY DC PR".split(" "),
 );
+/** State codes that are also everyday words, so never taken off the end of a name. */
+const WORD_STATES = new Set(["IN", "OR", "ME", "OK", "HI"]);
 /** Short names that are written in capitals on purpose. */
 const KEEP_UPPER = new Set(["ATM", "CVS", "REI", "AMC", "BP", "KFC", "HBO", "ESPN", "DMV", "IRS", "USAA", "USPS", "UPS", "IKEA", "TJ", "ACH", "ATT", "AT&T", "H&M", "LA", "NYC", "SF", "US", "USA", "HSA", "FSA", "IRA", "TV", "ABC", "NBC", "BBQ"]);
-const SMALL_WORDS = new Set(["of", "and", "the", "at", "for", "to", "in", "on", "by", "a"]);
+const SMALL_WORDS = new Set(["of", "and", "the", "at", "for", "to", "in", "on", "by", "a", "ending"]);
+/** Words banks add around a well-known name that say nothing about who it was. */
+const CODE_WORDS = new Set(["mktp", "mktpl", "mktplace", "marketplace", "us", "usa", "com", "bill", "billing", "help", "pending", "store", "stores", "inc", "llc", "co", "corp", "payment", "pmt", "recurring", "purchase", "membership", "subscription", "subscr", "sub", "online", "www", "trip", "whse", "pharmacy", "wrls", "wireless", "po", "digital", "services", "svcs", "intl", "ca", "na"]);
 
-/** Well-known names whose bank text varies wildly. Checked only on text that already looks like code. */
+/** Well-known names whose bank text varies wildly. Used only when what follows the name is code. */
 const ALIASES: [RegExp, string][] = [
-  [/^(?:amzn|amazon)\s*(?:prime|prime\s*video)\b|^prime video\b/i, "Amazon Prime"],
-  [/^amzn\b|^amazon\b|^amazon\.com|^amzn\.com/i, "Amazon"],
+  [/^amzn digital|^amazon digital/i, "Amazon Digital"],
+  [/^(?:amzn|amazon)\s*prime\s*video|^prime video/i, "Prime Video"],
+  [/^(?:amzn|amazon)\s*prime/i, "Amazon Prime"],
+  [/^amazon\.com|^amzn\.com|^amzn\b|^amazon\b/i, "Amazon"],
   [/^apple\.com|^apple com\b|^itunes/i, "Apple"],
-  [/youtube/i, "YouTube"],
+  [/^youtube\s*tv/i, "YouTube TV"],
+  [/^youtube\s*premium/i, "YouTube Premium"],
+  [/^youtube\s*music/i, "YouTube Music"],
+  [/^youtube/i, "YouTube"],
   [/^netflix/i, "Netflix"],
   [/^spotify/i, "Spotify"],
   [/^uber\s*\*?\s*eats/i, "Uber Eats"],
@@ -65,9 +85,6 @@ const ALIASES: [RegExp, string][] = [
   [/^wal-?mart|^wm supercenter/i, "Walmart"],
   [/^target\b|^tgt\b/i, "Target"],
   [/^costco/i, "Costco"],
-  [/^venmo\b/i, "Venmo"],
-  [/^zelle\b/i, "Zelle"],
-  [/^paypal\b/i, "PayPal"],
   [/^instacart/i, "Instacart"],
   [/^hulu/i, "Hulu"],
   [/^disney\s*(?:plus|\+)/i, "Disney+"],
@@ -80,7 +97,7 @@ const ALIASES: [RegExp, string][] = [
   [/^shell\s+(?:oil|service)/i, "Shell"],
   [/^patreon/i, "Patreon"],
   [/^steamgames|^steam\s+(?:games|purchase)|^valve\b/i, "Steam"],
-  [/^mcdonald/i, "McDonald’s"],
+  [/^mc\s?donald'?s?/i, "McDonald’s"],
   [/^chick-?fil-?a/i, "Chick-fil-A"],
   [/^cvs/i, "CVS Pharmacy"],
   [/^walgreens/i, "Walgreens"],
@@ -92,6 +109,26 @@ const ALIASES: [RegExp, string][] = [
   [/^openai|^chatgpt/i, "OpenAI"],
   [/^claude\.ai|^anthropic/i, "Claude"],
 ];
+
+const hasCode = (w: string) => /[#*]/.test(w) || (w.match(/\d/g)?.length ?? 0) >= 4 || (/\d/.test(w) && /[a-z]/i.test(w)) || /\.(?:com|net|org|ai|io|co)\b|^\./i.test(w);
+
+/** True when nothing after a well-known name says who it was: only codes, places or filler. */
+function codeTail(rest: string): boolean {
+  for (const raw of rest.split(/\s+/).filter(Boolean)) {
+    if (hasCode(raw) || /^\d+$/.test(raw)) return true; // from here on it's reference code and place names
+    const w = raw.replace(/[^a-z&]/gi, "").toLowerCase();
+    if (w && !CODE_WORDS.has(w) && !STATES.has(w.toUpperCase())) return false;
+  }
+  return true;
+}
+
+function aliasFor(s: string): string | null {
+  for (const [pattern, alias] of ALIASES) {
+    const m = pattern.exec(s);
+    if (m && codeTail(s.slice(m.index + m[0].length))) return alias;
+  }
+  return null;
+}
 
 /**
  * True when a name looks like bank code rather than something a person would
@@ -124,6 +161,23 @@ function titleWord(word: string, first: boolean): string {
   return lower.replace(/(^|[-/(])([a-z])/g, (_, sep: string, ch: string) => sep + ch.toUpperCase()).replace(/'([a-z]{2,})/g, (_, rest: string) => `'${rest[0].toUpperCase()}${rest.slice(1)}`);
 }
 
+const titleCase = (words: string[]) => words.map((w, i) => titleWord(w, i === 0)).join(" ");
+
+/** Where the name ends and the store number, phone number, reference code or place begins. */
+function cutAt(words: string[]): number {
+  return words.findIndex((w, i) => {
+    if (i === 0) return false;
+    if (hasCode(w)) return true;
+    // A short plain number is a store number when it ends the text or comes before a place ("123 SEATTLE WA"),
+    // but part of the name in "ROUTE 101 DINER".
+    if (/^\d{1,3}$/.test(w)) {
+      const tail = words.slice(i + 1);
+      return tail.length === 0 || STATES.has(tail[tail.length - 1].toUpperCase());
+    }
+    return false;
+  });
+}
+
 /**
  * A readable version of a bank's text. Clear names come back unchanged, so
  * this is safe to apply to every name, any number of times.
@@ -135,52 +189,74 @@ export function cleanName(name: string): string {
   let s = original.replace(AUTHORIZED_ON, "").replace(LEADING_DATE, "");
   for (let i = 0; i < 4; i++) {
     const before = s;
-    s = s.replace(NOISE_START, "").replace(PROCESSOR, "").replace(/^(?:[\d#]+\s+)+/, "").trim();
+    s = s.replace(NOISE_START, "").replace(LEADING_CODE, "").trim();
+    if (!PEOPLE_APPS.some(([p]) => p.test(s))) s = s.replace(PROCESSOR, "").trim();
     if (s === before) break;
   }
 
-  for (const [pattern, alias] of ALIASES) if (pattern.test(s)) return alias;
+  // Money to or from a person: "ZELLE PAYMENT TO JOHN SMITH 1234" is "Zelle John Smith".
+  for (const [pattern, label] of PEOPLE_APPS) {
+    if (!pattern.test(s)) continue;
+    let rest = s.replace(pattern, "");
+    for (let i = 0; i < 4; i++) rest = rest.replace(PEOPLE_FILLER, "");
+    const words = rest.split(/[\s*]+/).filter(Boolean);
+    const cut = words.findIndex((w) => hasCode(w) || /^\d+$/.test(w));
+    const who = (cut === -1 ? words : words.slice(0, cut)).slice(0, 3);
+    return who.length > 0 && who.join("").replace(/[^a-z]/gi, "").length >= 2 ? `${label} ${titleCase(who)}`.slice(0, MAX_NAME_LENGTH) : label;
+  }
 
+  const alias = aliasFor(s);
+  if (alias) return alias;
+
+  const masked = /\bending\s+in\s+(\d{2,4})\b/i.exec(s);
   // Anything after a processor star is a reference code.
   if (s.includes("*")) s = s.split("*")[0].trim() || s.replace(/\*/g, " ");
   s = s.replace(/\bwww\./gi, "").replace(/\.(?:com|net|org)\b.*$/i, "");
 
-  // Cut at the first store number, phone number or reference code.
   const words = s.split(/\s+/).filter(Boolean);
-  const cut = words.findIndex((w, i) => i > 0 && /[0-9#]/.test(w));
+  const cut = cutAt(words);
   let kept = cut === -1 ? words : words.slice(0, cut);
-  if (kept.length === 1 && /\d/.test(kept[0]) && words.length > 1) kept = words.filter((w) => !/\d/.test(w)).slice(0, 3);
 
   // A state at the end ("... OAKLAND CA") is the bank saying where, not who.
-  while (kept.length > 1 && STATES.has(kept[kept.length - 1].toUpperCase()) && kept[kept.length - 1].length === 2) kept = kept.slice(0, -1);
-  while (kept.length > 1 && /^(?:llc|inc|corp|co|ltd)\.?$/i.test(kept[kept.length - 1])) kept = kept.slice(0, -1);
+  const last = () => kept[kept.length - 1];
+  while (kept.length > 1 && last().length === 2 && STATES.has(last().toUpperCase()) && !WORD_STATES.has(last().toUpperCase())) kept = kept.slice(0, -1);
+  while (kept.length > 1 && /^(?:llc|inc|corp|co|ltd)\.?$/i.test(last())) kept = kept.slice(0, -1);
+  // "CARD ENDING IN 1234" keeps its last four digits, which is how people tell cards apart.
+  if (masked) {
+    while (kept.length > 1 && /^(?:ending|in)$/i.test(last())) kept = kept.slice(0, -1);
+    kept = [...kept, "ending", masked[1]];
+  }
 
-  const tidy = kept
-    .join(" ")
-    .replace(/[\s\-–:,./]+$/g, "")
-    .replace(/^[\s\-–:,./]+/g, "")
-    .trim();
-  if (!tidy || !/[A-Za-z]/.test(tidy)) return original;
-  return tidy
-    .split(" ")
-    .map((w, i) => titleWord(w, i === 0))
-    .join(" ")
-    .slice(0, MAX_NAME_LENGTH);
+  const tidy = kept.join(" ").replace(/[\s\-–:,./]+$/g, "").replace(/^[\s\-–:,./]+/g, "").trim();
+  const letters = tidy.replace(/[^A-Za-z]/g, "");
+  // Too little left to be a name (a lone code or a state): better to show what the bank sent.
+  if (letters.length < 3 || STATES.has(tidy.toUpperCase()) || (kept.length === 1 && /\d/.test(kept[0]))) return original;
+  return titleCase(tidy.split(" ")).slice(0, MAX_NAME_LENGTH);
 }
 
-/**
- * What a name rule matches on: the tidied bank text, boiled down. So
- * "SQ *BLUE BOTTLE 0423 OAKLAND CA" and "SQ *BLUE BOTTLE 1102 SAN JOSE CA"
- * count as the same place.
- */
+/** The tidied bank text boiled down: "SQ *BLUE BOTTLE 0423 OAKLAND CA" and "… 1102 SAN JOSE CA" match. */
 export function nameKey(bankName: string): string {
   return merchantKey(cleanName(bankName)) || merchantKey(bankName);
 }
 
+/** What a name rule matches on: money in or out, plus the tidied bank text. */
+export function ruleKey(bankName: string, amount: number): string {
+  const key = nameKey(bankName);
+  return key ? `${amount > 0 ? "in" : "out"}:${key}` : "";
+}
+
+/** The shape every stored rule key has. */
+export const RULE_KEY_PATTERN = /^(?:in|out):[a-z& ]{1,200}$/;
+
 /** Checks a name someone typed. Returns the tidied name, or null when it can't be used. */
 export function validName(input: string): string | null {
-  const s = input.replace(/[\t\n\r]/g, " ").replace(/[\u0000-\u001f\u007f\u200b-\u200f\u202a-\u202e\u2066-\u2069]/g, "").replace(/\s+/g, " ").trim();
-  if (!s || s.length > MAX_NAME_LENGTH) return null;
+  const s = input
+    .replace(/[\t\n\r]/g, " ")
+    // Control and formatting characters (including text-direction tricks) and characters that look like nothing.
+    .replace(/[\p{Cc}\p{Cf}ᅟᅠㅤﾠ⠀]/gu, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!s || s.length > MAX_NAME_LENGTH || !/[\p{L}\p{N}]/u.test(s)) return null;
   return s;
 }
 
@@ -196,27 +272,36 @@ export function namer(rules: NameRule[]) {
     else byKey.set(r.key, [r]);
   }
   const cache = new Map<string, { key: string; clean: string }>();
-  const look = (bankName: string) => {
-    let hit = cache.get(bankName);
+  const look = (bankName: string, amount: number) => {
+    const id = `${amount > 0 ? "+" : "-"}${bankName}`;
+    let hit = cache.get(id);
     if (!hit) {
-      hit = { key: nameKey(bankName), clean: cleanName(bankName) };
-      cache.set(bankName, hit);
+      const clean = cleanName(bankName);
+      const key = merchantKey(clean) || merchantKey(bankName);
+      hit = { key: key ? `${amount > 0 ? "in" : "out"}:${key}` : "", clean };
+      cache.set(id, hit);
     }
     return hit;
   };
-  return (t: { name: string; amount: number; customName?: string | null }): ResolvedName => {
+  const resolve = (t: { name: string; amount: number; customName?: string | null }): ResolvedName => {
     if (t.customName) return { name: t.customName, source: "custom", ruleId: null, exact: false };
-    const { key, clean } = look(t.name);
+    const { key, clean } = look(t.name, t.amount);
     const list = byKey.get(key);
     const rule = list?.find((r) => r.amount !== 0 && r.amount === t.amount) ?? list?.find((r) => r.amount === 0);
     if (rule) return { name: rule.name, source: "rule", ruleId: rule.id, exact: rule.amount !== 0 };
     return { name: clean, source: clean === t.name ? "bank" : "clean", ruleId: null, exact: false };
   };
+  return Object.assign(resolve, {
+    /** The name for a bank text in one direction, ignoring rules that only cover one amount. */
+    base: (bankName: string, incoming: boolean): ResolvedName => {
+      const { key, clean } = look(bankName, incoming ? 1 : -1);
+      const rule = byKey.get(key)?.find((r) => r.amount === 0);
+      if (rule) return { name: rule.name, source: "rule", ruleId: rule.id, exact: false };
+      return { name: clean, source: clean === bankName ? "bank" : "clean", ruleId: null, exact: false };
+    },
+    keyOf: (bankName: string, amount: number) => look(bankName, amount).key,
+    exactRules: rules.filter((r) => r.amount !== 0),
+  });
 }
 
 export type Namer = ReturnType<typeof namer>;
-
-/** True when a rule applies to a transaction (used to count and preview what a rule changes). */
-export function ruleMatches(rule: { key: string; amount: number }, t: { name: string; amount: number }): boolean {
-  return nameKey(t.name) === rule.key && (rule.amount === 0 || rule.amount === t.amount);
-}

@@ -12,19 +12,30 @@ import { send, useApi } from "./use-api";
  * rule, past and future) or "just this one".
  */
 
-export type NameUndo = { ruleId: string; previousName: string | null; transactionId: string; customName: string | null };
+export type NameUndo = {
+  ruleId: string;
+  key: string;
+  previousName: string | null;
+  transactionId: string;
+  customName: string | null;
+  replaced: { amount: number; name: string } | null;
+};
 
 export type Scope = "every" | "one";
 
-/** Saves a name for every charge like this transaction. */
-export function renameEvery(transactionId: string, name: string, onlyThisAmount: boolean) {
-  return send<{ ruleId: string; count: number; undo: NameUndo }>("POST", "/api/names", { transactionId, name, onlyThisAmount });
+/**
+ * Saves a name for every charge like this transaction. `fromItsSheet` when
+ * renaming from the charge itself, so a name it had on its own makes way.
+ */
+export function renameEvery(transactionId: string, name: string, onlyThisAmount: boolean, fromItsSheet = false) {
+  return send<{ ruleId: string; count: number; undo: NameUndo }>("POST", "/api/names", { transactionId, name, onlyThisAmount, fromItsSheet });
 }
 
 /** Puts things back exactly as they were before `renameEvery`. */
 export async function undoRename(undo: NameUndo) {
   if (undo.previousName === null) await send("DELETE", `/api/names/${undo.ruleId}`);
   else await send("PATCH", `/api/names/${undo.ruleId}`, { name: undo.previousName });
+  if (undo.replaced) await send("POST", "/api/names/restore", { key: undo.key, amount: undo.replaced.amount, name: undo.replaced.name });
   if (undo.customName) await send("PATCH", `/api/transactions/${undo.transactionId}`, { name: undo.customName });
 }
 

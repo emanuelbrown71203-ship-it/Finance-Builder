@@ -106,7 +106,9 @@ export type RecurringView = RecurringSeries & {
   bankName: string;
   /** The saved name rule giving it its name, if any. */
   ruleId: string | null;
-  /** The latest charge, for renaming it. */
+  /** True when that rule only covers one exact amount. */
+  ruleExact: boolean;
+  /** The latest charge without a name of its own, for renaming the bill. */
   sampleId: string;
 };
 
