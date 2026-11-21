@@ -334,7 +334,7 @@ describe("the Claude connector", () => {
     const goal = await call("add_savings_goal", { name: "Bike", target: 900, target_date: "2027-06-30" });
     expect(goal.data.what_changed[0]).toBe("Added a savings goal: Bike, $900.00 by Jun 30.");
     const put = await call("update_savings_goal", { goal: "bike", add_money: 50, monthly_amount: 75 });
-    expect(put.data.what_changed).toEqual(["Changed the goal Bike: $75.00 a month.", "Put $50.00 toward Bike. (A note in Passbook: no money moved at the bank.)"]);
+    expect(put.data.what_changed).toEqual(["Changed the goal Bike: $75.00 a month.", "Put $50.00 toward Bike. No money moved at the bank."]);
     const renamed = await call("rename_charges", { current_name: "city light", new_name: "Electric" });
     expect(renamed.data.what_changed[0]).toBe("Renamed a charge to Electric. New ones will be too.");
 

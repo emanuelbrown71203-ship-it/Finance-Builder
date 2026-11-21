@@ -175,7 +175,7 @@ export async function addToGoal(ctx: Ctx, actor: Agent, goalId: string, amount: 
   const [goal] = await ctx.db.select({ id: goals.id, name: goals.name }).from(goals).where(and(eq(goals.id, goalId), eq(goals.userId, ctx.userId))).limit(1);
   if (!goal) throw new HttpError(404, "Goal not found.");
   const { depositId } = await updateGoal(ctx, goal.id, { add: amount });
-  const summary = `Put ${money(amount)} toward ${goal.name}. (A note in Passbook: no money moved at the bank.)`;
+  const summary = `Put ${money(amount)} toward ${goal.name}. No money moved at the bank.`;
   const activityId = await record(ctx, actor, summary, { type: "deposit.remove", goalId: goal.id, depositId: depositId! });
   return { activityId, summary, href: `/savings/goal?id=${encodeURIComponent(goal.id)}` };
 }
