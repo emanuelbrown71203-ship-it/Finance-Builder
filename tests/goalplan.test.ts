@@ -45,6 +45,11 @@ describe("the track to a goal", () => {
     expect(short.checkpoints[0].met).toBe(false);
   });
 
+  it("always lists goal day, even for goals more than ten years away", () => {
+    const plan = goalPlan({ ...base, targetDate: "2040-06-30" });
+    expect(plan.checkpoints.at(-1)).toMatchObject({ date: "2040-06-30", amount: 300_000 });
+  });
+
   it("knows when a goal is reached, has no date, or its date has passed", () => {
     expect(goalPlan({ ...base, saved: 300_000 }).status).toBe("reached");
     expect(goalPlan({ ...base, saved: 300_000 }).perMonth).toBeNull();

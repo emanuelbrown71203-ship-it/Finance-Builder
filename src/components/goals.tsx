@@ -135,7 +135,7 @@ function GoalForm({ goal, today, onClose, onDeleted }: { goal: GoalView | null; 
     const startCents = saved.trim() ? parseDollarsToCents(saved) : 0;
     const monthlyCents = monthly.trim() ? parseDollarsToCents(monthly) : (suggested ?? 0);
     if (startCents === null || monthlyCents === null) return setError("Amounts should be numbers, like 250.");
-    if (targetDate && targetDate <= today) return setError("Pick a date after today.");
+    if (targetDate && targetDate <= today && targetDate !== (goal?.targetDate ?? "")) return setError("Pick a date after today.");
     const body = { name, target: targetCents, monthlyContribution: monthlyCents, targetDate: targetDate || null };
     setBusy(true);
     try {

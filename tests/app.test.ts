@@ -233,6 +233,40 @@ describe("sample household", () => {
     expect((await getGoals(ctx)).goals[0].saved).toBe(goal.saved);
   });
 
+  it("never lets Undo or two changes at once make money appear or vanish on paper", async () => {
+    const goal = (await getGoals(ctx)).goals[0];
+    const add = await updateGoal(ctx, goal.id, { add: 50_000 });
+    const out = await updateGoal(ctx, goal.id, { add: -99_999_999 });
+    // Undoing the add now would take $500 off a goal with nothing in it: refused, nothing changes.
+    await expect(deleteDeposit(ctx, goal.id, add.depositId!)).rejects.toThrow("already been taken out");
+    expect((await getGoals(ctx)).goals[0].saved).toBe(0);
+    // Undo the take-out, then the add: back exactly where it started.
+    await deleteDeposit(ctx, goal.id, out.depositId!);
+    await deleteDeposit(ctx, goal.id, add.depositId!);
+    const back = (await getGoal(ctx, goal.id));
+    expect(back.goal.saved).toBe(goal.saved);
+    expect(back.startSaved).toBe((await getGoal(ctx, goal.id)).startSaved);
+
+    // Two take-outs at once: what's saved and the deposit list still agree.
+    const results = await Promise.all([updateGoal(ctx, goal.id, { add: -goal.saved }), updateGoal(ctx, goal.id, { add: -goal.saved })]);
+    const after = await getGoal(ctx, goal.id);
+    expect(after.goal.saved).toBe(0);
+    const taken = after.deposits.filter((d) => results.some((r) => r.depositId === d.id)).reduce((s, d) => s + d.amount, 0);
+    expect(taken).toBe(-goal.saved);
+    for (const r of results) if (r.depositId) await deleteDeposit(ctx, goal.id, r.depositId);
+    expect((await getGoals(ctx)).goals[0].saved).toBe(goal.saved);
+  });
+
+  it("starts the plan today for a goal made before deposits were recorded", async () => {
+    const { goals: goalTable } = await import("@/db/schema");
+    await db.insert(goalTable).values({ id: "legacy-goal", userId: DEMO_USER_ID, name: "Old goal", target: 1_000_000, saved: 500_000, monthlyContribution: 0, targetDate: "2027-05-19", createdAt: new Date("2026-05-19T15:00:00Z") });
+    const legacy = await getGoal(ctx, "legacy-goal");
+    expect(legacy.startDate).toBe(today);
+    expect(legacy.goal.status).toBe("on_track");
+    const { eq } = await import("drizzle-orm");
+    await db.delete(goalTable).where(eq(goalTable.id, "legacy-goal"));
+  });
+
   it("saves budget limits, goal deposits and cancelled subscriptions", async () => {
     await setBudget(ctx, "travel", 30000);
     expect((await getBudget(ctx, "2026-11")).rows.find((r) => r.category === "travel")?.limit).toBe(30000);

@@ -53,7 +53,7 @@ export function GoalScreen() {
   const status = goalStatus(goal);
   const done = goal.saved >= goal.target;
   const ratio = Math.min(1, goal.saved / goal.target);
-  const trackEnd = goal.targetDate ?? (goal.projectedDate && goal.projectedDate > today ? goal.projectedDate : addMonths(today, 6));
+  const trackEnd = goal.targetDate ? (goal.targetDate > today ? goal.targetDate : today) : goal.projectedDate && goal.projectedDate > today ? goal.projectedDate : addMonths(today, 6);
   const upcoming = data.checkpoints.filter((c) => c.met === null);
   const past = data.checkpoints.filter((c) => c.met !== null);
 

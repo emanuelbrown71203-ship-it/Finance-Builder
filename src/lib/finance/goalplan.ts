@@ -149,6 +149,8 @@ export function goalPlan(input: GoalPlanInput): GoalPlan {
       const amount = date === targetDate ? target : upToDollar(planned(input, startSaved, date));
       checkpoints.push({ date, amount, met: date < today ? savedOn(date) >= amount - tolerance : null });
     }
+    // Very long goals stop listing month ends after ten years, but goal day itself is always there.
+    if (checkpoints.at(-1)?.date !== targetDate) checkpoints.push({ date: targetDate, amount: target, met: targetDate < today ? saved >= target : null });
   }
 
   const milestones: Milestone[] = ([25, 50, 75, 100] as const).map((percent) => {

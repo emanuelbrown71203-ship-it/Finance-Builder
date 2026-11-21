@@ -60,7 +60,7 @@ const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0,
 export function thinkAbout(input: NickelInput): { mood: Mood; tips: Tip[] } {
   const { today } = input;
   const tips: Tip[] = [];
-  const say = (tip: Omit<Tip, "id"> & { key: string }) => tips.push({ ...tip, id: `${tip.key}:${today}` });
+  const say = ({ key, ...tip }: Omit<Tip, "id"> & { key: string }) => tips.push({ ...tip, id: `${key}:${today}` });
   const s = (key: string, options: string[]) => pick(options, `${key}:${today}`);
 
   if (!input.demo && !input.linked) {

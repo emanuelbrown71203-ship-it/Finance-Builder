@@ -353,7 +353,10 @@ export function Toaster() {
               className="-my-2 min-h-11 shrink-0 font-extrabold underline underline-offset-2"
               onClick={() => {
                 dismissToast(t.id);
-                void t.action!.run();
+                // If Undo can't be done (say the money was already taken out), say so rather than failing quietly.
+                Promise.resolve()
+                  .then(() => t.action!.run())
+                  .catch((e: unknown) => toast(e instanceof Error ? e.message : "Couldn’t undo that. Try again.", { tone: "error" }));
               }}
             >
               {t.action.label}

@@ -122,32 +122,43 @@ const MAX_DEPOSITS = 2000;
  */
 export async function updateGoal(ctx: Ctx, id: string, patch: Partial<GoalInput> & { add?: number }): Promise<{ depositId: string | null }> {
   const { add, ...fields } = patch;
-  const [goal] = await ctx.db.select({ id: goals.id, saved: goals.saved }).from(goals).where(and(eq(goals.id, id), eq(goals.userId, ctx.userId))).limit(1);
-  if (!goal) throw new HttpError(404, "Goal not found.");
-  const set: Record<string, unknown> = { ...fields };
-  // Never below zero: taking out more than is there takes out what is there.
-  const change = add ? Math.max(-goal.saved, add) : 0;
-  if (change) set.saved = sql`greatest(0, ${goals.saved} + ${change})`;
-  if (Object.keys(set).length > 0) await ctx.db.update(goals).set(set).where(and(eq(goals.id, goal.id), eq(goals.userId, ctx.userId)));
-  if (!change) return { depositId: null };
-  const [{ count }] = await ctx.db.select({ count: sql<number>`count(*)::int` }).from(goalDeposits).where(eq(goalDeposits.userId, ctx.userId));
-  if (count >= MAX_DEPOSITS * 10) throw new HttpError(400, "That’s more deposits than Passbook keeps. Delete an old goal first.");
-  const depositId = crypto.randomUUID();
-  await ctx.db.insert(goalDeposits).values({ id: depositId, userId: ctx.userId, goalId: goal.id, amount: change, date: ctx.today });
-  return { depositId };
+  // One transaction with the goal locked, so two changes at once (two phones, a double tap) can't
+  // both read the same amount: what's saved and the list of deposits always agree.
+  return ctx.db.transaction(async (tx) => {
+    const [goal] = await tx.select({ id: goals.id, saved: goals.saved }).from(goals).where(and(eq(goals.id, id), eq(goals.userId, ctx.userId))).for("update").limit(1);
+    if (!goal) throw new HttpError(404, "Goal not found.");
+    // Never below zero: taking out more than is there takes out what is there.
+    const change = add ? Math.max(-goal.saved, add) : 0;
+    if (change) {
+      const [{ count }] = await tx.select({ count: sql<number>`count(*)::int` }).from(goalDeposits).where(eq(goalDeposits.userId, ctx.userId));
+      if (count >= MAX_DEPOSITS * 10) throw new HttpError(400, "That’s more deposits than Passbook keeps. Delete an old goal first.");
+    }
+    const set: Record<string, unknown> = { ...fields };
+    if (change) set.saved = goal.saved + change;
+    if (Object.keys(set).length > 0) await tx.update(goals).set(set).where(and(eq(goals.id, goal.id), eq(goals.userId, ctx.userId)));
+    if (!change) return { depositId: null };
+    const depositId = crypto.randomUUID();
+    await tx.insert(goalDeposits).values({ id: depositId, userId: ctx.userId, goalId: goal.id, amount: change, date: ctx.today });
+    return { depositId };
+  });
 }
 
-/** Removes one deposit (what Undo does) and takes its amount back off the goal. */
+/**
+ * Removes one deposit (what Undo does) and takes its amount back off the goal.
+ * Refused if that money has since been taken out, so Undo can never make
+ * money appear on paper.
+ */
 export async function deleteDeposit(ctx: Ctx, goalId: string, depositId: string) {
-  const [deposit] = await ctx.db
-    .delete(goalDeposits)
-    .where(and(eq(goalDeposits.id, depositId), eq(goalDeposits.goalId, goalId), eq(goalDeposits.userId, ctx.userId)))
-    .returning({ amount: goalDeposits.amount });
-  if (!deposit) throw new HttpError(404, "That deposit wasn’t found.");
-  await ctx.db
-    .update(goals)
-    .set({ saved: sql`greatest(0, ${goals.saved} - ${deposit.amount})` })
-    .where(and(eq(goals.id, goalId), eq(goals.userId, ctx.userId)));
+  await ctx.db.transaction(async (tx) => {
+    const [goal] = await tx.select({ saved: goals.saved }).from(goals).where(and(eq(goals.id, goalId), eq(goals.userId, ctx.userId))).for("update").limit(1);
+    const [deposit] = goal
+      ? await tx.select({ amount: goalDeposits.amount }).from(goalDeposits).where(and(eq(goalDeposits.id, depositId), eq(goalDeposits.goalId, goalId), eq(goalDeposits.userId, ctx.userId))).limit(1)
+      : [];
+    if (!goal || !deposit) throw new HttpError(404, "That deposit wasn’t found.");
+    if (goal.saved - deposit.amount < 0) throw new HttpError(409, "That money has already been taken out of the goal, so there’s nothing to undo.");
+    await tx.delete(goalDeposits).where(and(eq(goalDeposits.id, depositId), eq(goalDeposits.userId, ctx.userId)));
+    await tx.update(goals).set({ saved: goal.saved - deposit.amount }).where(and(eq(goals.id, goalId), eq(goals.userId, ctx.userId)));
+  });
 }
 
 export async function deleteGoal(ctx: Ctx, id: string) {

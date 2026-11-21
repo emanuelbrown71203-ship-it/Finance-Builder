@@ -348,9 +348,18 @@ export async function getNetWorth(ctx: Ctx, range: string): Promise<NetWorthPayl
 type GoalRow = typeof goals.$inferSelect;
 type DepositRow = typeof goalDeposits.$inferSelect;
 
-/** The day a goal was made, in the person's time zone: where its plan line starts. */
-const goalStart = (g: GoalRow, today: ISODate): ISODate => {
+/** Deposits have been written down since this day. Goals older than that have no history to draw. */
+const DEPOSITS_RECORDED_SINCE = "2026-11-22";
+
+/**
+ * Where a goal's plan line starts: the day it was made, in the person's time
+ * zone. A goal made before deposits were recorded, with none since, starts
+ * today instead: its saved amount built up with no record of when, and
+ * drawing it all on the first day would wrongly show it as behind.
+ */
+const goalStart = (g: GoalRow, today: ISODate, deposits: DepositRow[] = []): ISODate => {
   const d = todayIn(DEFAULT_TIMEZONE, g.createdAt);
+  if (d < DEPOSITS_RECORDED_SINCE && deposits.length === 0 && g.saved > 0) return today;
   return d > today ? today : d;
 };
 
@@ -360,7 +369,7 @@ function planFor(g: GoalRow, deposits: DepositRow[], today: ISODate, paydays: IS
     saved: g.saved,
     targetDate: g.targetDate,
     today,
-    startDate: goalStart(g, today),
+    startDate: goalStart(g, today, deposits),
     deposits: deposits.map((d) => ({ date: d.date, amount: d.amount })),
     monthlyContribution: g.monthlyContribution,
     paydays,
@@ -413,13 +422,14 @@ export async function getGoal(ctx: Ctx, id: string): Promise<GoalDetailPayload> 
     getBudget(ctx, monthOf(ctx.today)),
     getOverview(ctx),
   ]);
-  const pay = paydaysFrom(bundle, ctx.today, g.targetDate ?? addMonths(ctx.today, 24));
+  // The same horizon as the goals list, so "each payday" matches on both screens.
+  const pay = paydaysFrom(bundle, ctx.today, addMonths(ctx.today, 60));
   const plan = planFor(g, deposits, ctx.today, pay.dates);
   const need = plan.perMonth ?? (plan.status === "no_date" ? g.monthlyContribution : null);
   return {
     today: ctx.today,
     goal: goalView(g, plan),
-    startDate: goalStart(g, ctx.today),
+    startDate: goalStart(g, ctx.today, deposits),
     startSaved: plan.startSaved,
     history: plan.history,
     expectedNow: plan.expectedNow,

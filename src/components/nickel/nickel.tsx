@@ -68,6 +68,7 @@ export function Nickel() {
   const [menu, setMenu] = useState(false);
   const [drag, setDrag] = useState<{ x: number; y: number } | null>(null);
   const [wide, setWide] = useState(false);
+  const [screenH, setScreenH] = useState(800);
 
   const root = useRef<HTMLDivElement>(null);
   const lastActive = useRef(0);
@@ -78,7 +79,10 @@ export function Nickel() {
   const taps = useRef<number[]>([]);
   const press = useRef<{ x: number; y: number; t: number; timer: number; moved: boolean; held: boolean } | null>(null);
   const bubbleTimer = useRef(0);
-  const today = data?.tips[0]?.id.split(":").pop() ?? "";
+  // Anything unexpected from the server counts as "nothing to say", never a broken screen.
+  const tips = useMemo(() => (Array.isArray(data?.tips) ? data.tips : []), [data]);
+  const today = tips[0]?.id?.split(":").pop() ?? "";
+  const introShown = useRef(false);
 
   const mood: Mood = asleep ? "sleepy" : (override ?? data?.mood ?? "happy");
   const look = LOOK[mood];
@@ -112,7 +116,6 @@ export function Nickel() {
 
   /** The next thing worth saying: unseen tips first (most important first), then small talk. */
   const nextLine = useCallback((): Bubble => {
-    const tips = data?.tips ?? [];
     const seen = today ? seenToday(today) : new Set<string>();
     const fresh = tips.find((t) => !shownThisVisit.current.has(t.id) && !seen.has(t.id)) ?? tips.find((t) => !shownThisVisit.current.has(t.id));
     if (fresh) {
@@ -121,7 +124,7 @@ export function Nickel() {
     }
     shownThisVisit.current.clear();
     return { text: SMALL_TALK[Math.floor(Math.random() * SMALL_TALK.length)], sticky: false, kind: "talk" };
-  }, [data, today]);
+  }, [tips, today]);
 
   /* ---------- life: blinking, idle habits, dozing ---------- */
 
@@ -187,7 +190,9 @@ export function Nickel() {
       const dx = x - (r.left + r.width / 2);
       const dy = y - (r.top + r.height * 0.35);
       const len = Math.hypot(dx, dy) || 1;
-      setGaze({ x: (dx / len) * 2.8, y: (dy / len) * 2.2 });
+      const next = { x: Math.round((dx / len) * 2.8 * 2) / 2, y: Math.round((dy / len) * 2.2 * 2) / 2 };
+      // Only redraw when where he's looking actually changes.
+      setGaze((g) => (g.x === next.x && g.y === next.y ? g : next));
       window.clearTimeout(reset);
       reset = window.setTimeout(() => setGaze({ x: 0, y: 0 }), 2600);
     };
@@ -201,7 +206,8 @@ export function Nickel() {
     const onScroll = () => {
       const dy = window.scrollY - lastY;
       lastY = window.scrollY;
-      setGaze({ x: 0, y: dy > 0 ? 2.2 : -2.2 });
+      const y = dy > 0 ? 2 : -2;
+      setGaze((g) => (g.x === 0 && g.y === y ? g : { x: 0, y }));
       window.clearTimeout(reset);
       reset = window.setTimeout(() => setGaze({ x: 0, y: 0 }), 900);
       lastActive.current = Date.now();
@@ -242,15 +248,18 @@ export function Nickel() {
   // Says hello the first time, and speaks up on his own about something important, now and then.
   useEffect(() => {
     if (!visible || !data) return;
+    if (!settings.introDone && introShown.current) return;
     const t = window.setTimeout(() => {
       if (!settings.introDone) {
+        // Once per visit: closing the hello never brings it straight back.
+        introShown.current = true;
         act("hop");
         say({ text: INTRO.replace("Nickel", settings.name), sticky: true, kind: "intro" });
         return;
       }
       if (!settings.chatty || bubble || Date.now() - lastUnprompted.current < UNPROMPTED_GAP) return;
       const seen = seenToday(today);
-      const urgent = data.tips.find((tip: Tip) => tip.priority <= 2 && !seen.has(tip.id));
+      const urgent = tips.find((tip: Tip) => tip.priority <= 2 && !seen.has(tip.id));
       if (!urgent) return;
       lastUnprompted.current = Date.now();
       act(urgent.mood === "excited" ? "spin" : urgent.mood === "worried" ? "wiggle" : "bark");
@@ -259,7 +268,7 @@ export function Nickel() {
       shownThisVisit.current.add(urgent.id);
     }, 2500);
     return () => window.clearTimeout(t);
-  }, [visible, data, settings.introDone, settings.chatty, settings.name, bubble, today, act, pop, say]);
+  }, [visible, data, tips, settings.introDone, settings.chatty, settings.name, bubble, today, act, pop, say]);
 
   // Things that happen elsewhere in the app.
   useEffect(() => {
@@ -286,12 +295,17 @@ export function Nickel() {
 
   useEffect(() => {
     const mq = window.matchMedia("(min-width: 1024px)");
-    const update = () => setWide(mq.matches);
+    const update = () => {
+      setWide(mq.matches);
+      setScreenH(window.innerHeight);
+    };
     const t = window.setTimeout(update, 0);
     mq.addEventListener("change", update);
+    window.addEventListener("resize", update);
     return () => {
       window.clearTimeout(t);
       mq.removeEventListener("change", update);
+      window.removeEventListener("resize", update);
     };
   }, []);
 
@@ -368,24 +382,28 @@ export function Nickel() {
     say(line);
   };
 
+  // Where he sat is re-checked against today's screen, so turning an iPad never leaves him off the edge.
+  const lift = Math.min(settings.lift, Math.max(0, screenH - 300));
+  // Up high, his bubble opens below him instead of off the top of the screen.
+  const bubbleBelow = lift > screenH / 2 - 120;
   const sideStyle = useMemo(() => {
     const bottomBase = wide ? 20 : 80;
     if (drag) return { left: drag.x - 38, top: drag.y - 40 };
     return {
       [settings.side]: wide ? 24 : 10,
-      bottom: `calc(${bottomBase + settings.lift}px + ${wide ? "0px" : "env(safe-area-inset-bottom)"})`,
+      bottom: `calc(${bottomBase + lift}px + ${wide ? "0px" : "env(safe-area-inset-bottom)"})`,
     };
-  }, [drag, settings.side, settings.lift, wide]);
+  }, [drag, settings.side, lift, wide]);
 
   if (!visible) return null;
 
   const eyes: Eyes = blink && look.eyes !== "sleepy" && look.eyes !== "happy" ? "sleepy" : look.eyes;
 
   return (
-    <div ref={root} className={cx("nk-root fixed z-30 select-none", drag && "nk-dragging")} style={sideStyle}>
+    <div ref={root} data-no-pull className={cx("nk-root fixed z-30 select-none", drag && "nk-dragging")} style={sideStyle}>
       {/* What he says */}
       {(bubble || menu) && !drag && (
-        <div className={cx("nk-bubble absolute bottom-[86px] w-[min(19rem,calc(100vw-1.5rem))]", settings.side === "right" ? "right-0" : "left-0")}>
+        <div className={cx("nk-bubble absolute w-[min(19rem,calc(100vw-1.5rem))]", bubbleBelow ? "top-[86px]" : "bottom-[86px]", settings.side === "right" ? "right-0" : "left-0")}>
           <div role="status" aria-live="polite" className="rounded-[18px] border border-line bg-sheet p-3.5 text-small text-ink shadow-float">
             <div className="flex items-start justify-between gap-2">
               <p className="text-micro font-extrabold uppercase tracking-wide text-accent-text">{settings.name}</p>
@@ -431,7 +449,7 @@ export function Nickel() {
               )
             )}
           </div>
-          <span aria-hidden className={cx("absolute -bottom-[7px] size-4 rotate-45 border-b border-r border-line bg-sheet", settings.side === "right" ? "right-8" : "left-8")} />
+          <span aria-hidden className={cx("absolute size-4 rotate-45 border-line bg-sheet", bubbleBelow ? "-top-[7px] border-l border-t" : "-bottom-[7px] border-b border-r", settings.side === "right" ? "right-8" : "left-8")} />
         </div>
       )}
 
