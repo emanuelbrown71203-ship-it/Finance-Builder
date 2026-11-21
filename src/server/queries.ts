@@ -11,6 +11,7 @@ import { FREQUENCY_LABEL, detectRecurring, monthlyEquivalent, seriesKeyFor, upco
 import { cancelHelp, isKnownSubscription } from "@/lib/finance/subscriptions";
 import type { Namer } from "@/lib/finance/names";
 import { HttpError } from "./errors";
+import { listManualBills, manualSeries } from "./manual-bills";
 import { bankNames, loadNamer } from "./names";
 import type {
   AccountView,
@@ -193,12 +194,13 @@ function helpFor(bankName: string, shown: string) {
 }
 
 async function loadRecurring(ctx: Ctx): Promise<RecurringBundle> {
-  const [raw, overrides, accountList, nameFor] = await Promise.all([
+  const [raw, overrides, accountList, nameFor, added] = await Promise.all([
     // Two years back, so a charge that only comes once a year is seen twice.
     analysisRows(ctx, addMonths(ctx.today, -26)),
     ctx.db.select().from(recurringOverrides).where(eq(recurringOverrides.userId, ctx.userId)),
     listAccounts(ctx),
     loadNamer(ctx),
+    listManualBills(ctx),
   ]);
   const overrideByKey = new Map(overrides.map((o) => [o.seriesKey, o]));
   const ownName = new Map(raw.map((t) => [t.id, t.customName]));
@@ -225,6 +227,7 @@ async function loadRecurring(ctx: Ctx): Promise<RecurringBundle> {
       ruleId: named.ruleId,
       ruleExact: named.exact,
       sampleId: sample?.id ?? "",
+      manual: null,
       kind,
       // A cancelled series stops counting toward what’s coming up.
       active,
@@ -236,6 +239,10 @@ async function loadRecurring(ctx: Ctx): Promise<RecurringBundle> {
       startedRecently: active && kind === "subscription" && diffDays(ctx.today, s.firstDate) <= 100,
     });
   }
+
+  // Bills added by hand sit alongside the ones found in the history.
+  for (const bill of added) series.push(manualSeries(bill, ctx.today));
+  series.sort((a, b) => (a.nextDate < b.nextDate ? -1 : a.nextDate > b.nextDate ? 1 : a.name.localeCompare(b.name)));
 
   // A recent charge from a well-known subscription service that hasn't repeated yet.
   const known = new Set(detected.map((s) => s.key));

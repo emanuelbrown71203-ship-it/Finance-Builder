@@ -8,6 +8,8 @@ import { loadRules } from "@/server/rules";
 import { countUnclear, createNameRule, deleteNameRule, getNames, previewNameRule, renameRule, restoreNameRule } from "@/server/names";
 import { transactions as transactionsTable } from "@/db/schema";
 import { eq as eqOp } from "drizzle-orm";
+import { addBill, addGoal, addToGoal, changeGoal, changeLoan, findCharge, findDebt, findGoal, listActivity, renameCharges, undoActivity } from "@/server/actions";
+import { createManualBill, deleteManualBill, nextDue, restoreManualBill, updateManualBill } from "@/server/manual-bills";
 import { getAccounts, getBudget, getDebt, getGoal, getGoals, getInvestments, getNetWorth, getOverview, getRecap, getRecurring, getTransactions } from "@/server/queries";
 
 /** End-to-end over the real SQL: seed the sample household into PGlite, then read it back. */
@@ -435,5 +437,125 @@ describe("names", () => {
     expect((await getNames(stranger)).rules).toEqual([]);
     expect((await previewNameRule(ctx, transactions[0].id, false)).count).toBe(transactions.length);
     await deleteNameRule(ctx, ruleId);
+  });
+});
+
+describe("changes Nickel and Claude make when asked", () => {
+  it("adds a repeating bill that shows in Bills, what's coming up and the month plan, and Undo takes it away", async () => {
+    const before = await getOverview(ctx);
+    const done = await addBill(ctx, "nickel", { name: "Gym", amount: 4_500, frequency: "monthly", date: "2026-11-28" });
+    expect(done.summary).toBe("Added a bill: Gym, $45.00 every month, next on Nov 28.");
+    const r = await getRecurring(ctx);
+    const gym = r.series.find((s) => s.name === "Gym")!;
+    expect(gym).toMatchObject({ kind: "bill", amount: -4_500, frequency: "monthly", nextDate: "2026-11-28", active: true, manual: { addedBy: "nickel" } });
+    expect(r.upcoming.find((u) => u.name === "Gym")?.date).toBe("2026-11-28");
+    const after = await getOverview(ctx);
+    expect(after.plan.billsExpected).toBe(before.plan.billsExpected + 4_500);
+    expect(after.plan.leftToSpend).toBe(before.plan.leftToSpend - 4_500);
+
+    const [item] = await listActivity(ctx);
+    expect(item).toMatchObject({ id: done.activityId, actor: "nickel", canUndo: true, undone: false });
+    await undoActivity(ctx, done.activityId);
+    expect((await getRecurring(ctx)).series.some((s) => s.name === "Gym")).toBe(false);
+    expect((await listActivity(ctx))[0]).toMatchObject({ undone: true, canUndo: false });
+    await expect(undoActivity(ctx, done.activityId)).rejects.toMatchObject({ status: 409 });
+  });
+
+  it("adds a one-off bill that is due once and then drops off", async () => {
+    const done = await addBill(ctx, "claude", { name: "Car registration", amount: 18_000, frequency: "once", date: "2026-12-12" });
+    expect(done.summary).toBe("Added an upcoming bill: Car registration, $180.00 due Dec 12.");
+    const r = await getRecurring(ctx);
+    expect(r.upcoming.filter((u) => u.name === "Car registration").map((u) => u.date)).toEqual(["2026-12-12"]);
+    // After its date it no longer counts as coming up.
+    const later = await getRecurring({ ...ctx, today: "2026-12-20" });
+    expect(later.series.find((s) => s.name === "Car registration")?.active).toBe(false);
+    expect(later.upcoming.some((u) => u.name === "Car registration")).toBe(false);
+    await undoActivity(ctx, done.activityId);
+  });
+
+  it("works out a repeating bill's next date from when it started", () => {
+    expect(nextDue({ frequency: "monthly", startDate: "2026-01-31" }, "2026-11-21")).toBe("2026-11-30");
+    expect(nextDue({ frequency: "weekly", startDate: "2024-01-05" }, "2026-11-21")).toBe("2026-11-27");
+    expect(nextDue({ frequency: "yearly", startDate: "2025-03-03" }, "2026-11-21")).toBe("2027-03-03");
+    expect(nextDue({ frequency: "once", startDate: "2026-10-01" }, "2026-11-21")).toBe("2026-10-01");
+  });
+
+  it("adds and changes goals, puts money toward them, and each Undo puts things back", async () => {
+    const goal = await addGoal(ctx, "claude", { name: "New roof", target: 1_200_000, targetDate: "2028-06-30" });
+    const id = new URLSearchParams(goal.href.split("?")[1]).get("id")!;
+    expect((await getGoals(ctx)).goals.find((g) => g.id === id)).toMatchObject({ name: "New roof", target: 1_200_000, targetDate: "2028-06-30" });
+
+    const changed = await changeGoal(ctx, "claude", id, { target: 1_500_000, monthlyContribution: 30_000 });
+    expect(changed.summary).toBe("Changed the goal New roof: target $15,000.00, $300.00 a month.");
+    await undoActivity(ctx, changed.activityId);
+    expect((await getGoals(ctx)).goals.find((g) => g.id === id)).toMatchObject({ target: 1_200_000, monthlyContribution: 0 });
+
+    const deposit = await addToGoal(ctx, "nickel", id, 25_000);
+    expect((await getGoals(ctx)).goals.find((g) => g.id === id)?.saved).toBe(25_000);
+    // With money in it, undoing the goal itself is refused rather than losing track of that money.
+    await expect(undoActivity(ctx, goal.activityId)).rejects.toMatchObject({ status: 409 });
+    await undoActivity(ctx, deposit.activityId);
+    expect((await getGoals(ctx)).goals.find((g) => g.id === id)?.saved).toBe(0);
+    await undoActivity(ctx, goal.activityId);
+    expect((await getGoals(ctx)).goals.some((g) => g.id === id)).toBe(false);
+  });
+
+  it("finds goals and loans by name, and asks when it's not clear", async () => {
+    expect((await findGoal(ctx, "emergency")).name).toBe("Emergency fund");
+    expect((await findGoal(ctx, "japan")).name).toBe("Two weeks in Japan");
+    await expect(findGoal(ctx, "boat")).rejects.toMatchObject({ status: 400, message: expect.stringContaining("No goal called “boat”") });
+    expect((await findDebt(ctx, "student loan")).name).toBe("Student Loan");
+    await expect(findDebt(ctx, "loan")).rejects.toMatchObject({ status: 400, message: expect.stringContaining("More than one") });
+  });
+
+  it("changes a loan's rate and payment, and Undo puts the old ones back", async () => {
+    const loan = await findDebt(ctx, "student loan");
+    const before = (await getDebt(ctx)).debts.find((d) => d.id === loan.id)!;
+    const done = await changeLoan(ctx, "nickel", loan.id, { aprPercent: 3.9, monthlyPayment: 30_000 });
+    expect(done.summary).toBe("Changed Student Loan: interest 3.9%, payment $300.00 a month.");
+    expect((await getDebt(ctx)).debts.find((d) => d.id === loan.id)).toMatchObject({ aprPercent: 3.9, payment: 30_000 });
+    await undoActivity(ctx, done.activityId);
+    expect((await getDebt(ctx)).debts.find((d) => d.id === loan.id)).toMatchObject({ aprPercent: before.aprPercent, payment: before.payment });
+    await expect(changeLoan(ctx, "nickel", loan.id, { aprPercent: 120 })).rejects.toMatchObject({ status: 400 });
+  });
+
+  it("renames charges by what they're called, and Undo puts the names back", async () => {
+    const charge = await findCharge(ctx, "clipper service");
+    const done = await renameCharges(ctx, "claude", charge.id, "Muni");
+    expect(done.summary).toMatch(/^Renamed \d+ charges to Muni\. New ones will be too\.$/);
+    expect((await getTransactions(ctx, { limit: 5, offset: 0, q: "Muni" })).transactions[0]?.name).toBe("Muni");
+    await undoActivity(ctx, done.activityId);
+    expect((await getTransactions(ctx, { limit: 5, offset: 0, q: "Clipper" })).transactions[0]?.name).toBe("Clipper Service");
+  });
+
+  it("checks bills before saving them", async () => {
+    await expect(createManualBill(ctx, { name: "Rent", amount: 0, frequency: "monthly", startDate: "2026-12-01" }, "you")).rejects.toMatchObject({ status: 400 });
+    await expect(createManualBill(ctx, { name: " ", amount: 100, frequency: "monthly", startDate: "2026-12-01" }, "you")).rejects.toMatchObject({ status: 400 });
+    await expect(createManualBill(ctx, { name: "Rent", amount: 100, frequency: "daily" as never, startDate: "2026-12-01" }, "you")).rejects.toMatchObject({ status: 400 });
+    await expect(createManualBill(ctx, { name: "Rent", amount: 100, frequency: "monthly", startDate: "2046-12-01" }, "you")).rejects.toMatchObject({ status: 400 });
+    const bill = await createManualBill(ctx, { name: "Water", amount: 6_000, frequency: "quarterly", startDate: "2026-12-15", kind: "bill", category: "utilities" }, "you");
+    const { before } = await updateManualBill(ctx, bill.id, { amount: 6_500, cancelled: true });
+    expect(before.amount).toBe(-6_000);
+    expect((await getRecurring(ctx)).series.find((s) => s.manual?.id === bill.id)).toMatchObject({ amount: -6_500, cancelled: true, active: false });
+    const removed = await deleteManualBill(ctx, bill.id);
+    await restoreManualBill(ctx, removed);
+    expect((await getRecurring(ctx)).series.some((s) => s.manual?.id === bill.id)).toBe(true);
+    await deleteManualBill(ctx, bill.id);
+  });
+
+  it("never reaches someone else's goals, loans, bills or activity", async () => {
+    const stranger: Ctx = { ...ctx, userId: "someone-else", user: { id: "someone-else", name: "Pat", email: "pat@example.com" }, demo: false };
+    const done = await addBill(ctx, "nickel", { name: "Cable", amount: 9_000, frequency: "monthly", date: "2026-12-02" });
+    await expect(undoActivity(stranger, done.activityId)).rejects.toMatchObject({ status: 404 });
+    expect(await listActivity(stranger)).toEqual([]);
+    const goal = await findGoal(ctx, "emergency");
+    await expect(addToGoal(stranger, "claude", goal.id, 100)).rejects.toMatchObject({ status: 404 });
+    await expect(changeGoal(stranger, "claude", goal.id, { target: 100_00 })).rejects.toMatchObject({ status: 404 });
+    const loan = await findDebt(ctx, "auto loan");
+    await expect(changeLoan(stranger, "claude", loan.id, { aprPercent: 1 })).rejects.toMatchObject({ status: 404 });
+    await expect(findGoal(stranger, goal.id)).rejects.toMatchObject({ status: 400 });
+    const bill = (await getRecurring(ctx)).series.find((s) => s.name === "Cable")!;
+    await expect(deleteManualBill(stranger, bill.manual!.id)).rejects.toMatchObject({ status: 404 });
+    await undoActivity(ctx, done.activityId);
   });
 });

@@ -163,7 +163,7 @@ export function ClaudeSection() {
 
   return (
     <Sheet id="claude" className="scroll-mt-24">
-      <SheetHeader title="Ask Claude about your money" hint="“How much did we spend eating out last month?” Claude answers from your real numbers, on your own Claude plan. It can look, and it can’t change anything. Once it’s set up, hold Nickel and pick “Chat with Claude” to start a chat." />
+      <SheetHeader title="Ask Claude about your money" hint="“How much did we spend eating out last month?” Claude answers from your real numbers, on your own Claude plan. When you ask, it can also add bills and goals, change a loan’s details or rename charges; each change shows under Activity with Undo. It can’t delete anything or move money. Once it’s set up, hold Nickel and pick “Chat with Claude”." />
       {!data ? null : shownKey ? (
         <div className="text-ink-2">
           {data.sampleKey ? (
@@ -184,7 +184,7 @@ export function ClaudeSection() {
             <li>
               Tap <span className="font-bold text-ink">Add custom connector</span>, name it <span className="font-bold text-ink">Passbook</span>, paste the link, and tap Add.
             </li>
-            <li>That’s it. It also works in the Claude app on your phone. In a chat, make sure Passbook is switched on in the tools menu.</li>
+            <li>That’s it. It also works in the Claude app on your phone. In a chat, make sure Passbook is switched on in the tools menu. Claude asks you before it changes anything.</li>
           </ol>
           {key && (
             <Button className="mt-4 w-full" onClick={() => setKey(null)}>
@@ -377,7 +377,7 @@ export function NickelSection() {
         <span aria-hidden className="shrink-0">
           <RoboDog eyes="happy" mouth="smile" antenna="var(--good)" cheeks tongue gaze={{ x: 0, y: 0 }} size={56} />
         </span>
-        <SheetHeader title={`${settings.name}, your robo dog`} hint="He sits in the corner, notices things in your numbers and tells you about them. Tap him to hear what he’s found, hold him for options, drag him if he’s in the way." />
+        <SheetHeader title={`${settings.name}, your robo dog`} hint="He sits in the corner, notices things in your numbers and tells you about them. Tap him to hear what he’s found. Hold him to tell him what to add or change (a bill, an upcoming bill, a goal, a loan) or to chat with Claude. Drag him if he’s in the way." />
       </div>
       <div className="divide-y divide-line-soft border-y border-line-soft">
         <div className="flex min-h-14 items-center justify-between gap-4 py-2">

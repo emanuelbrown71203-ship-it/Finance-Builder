@@ -15,6 +15,7 @@ import { accounts, billTicks, taskLinks, transactions, users } from "@/db/schema
 import { isTasksLink, matchPayments, matchWindow, paidDueDates, suggestLinks, unpaidDueDates, type TasksBill } from "@/lib/finance/billmatch";
 import type { Ctx } from "@/server/auth";
 import { contextForKey, createConnectorKey, handleRpc, revokeConnectorKey } from "@/server/connector";
+import { listActivity, undoActivity } from "@/server/actions";
 import { connectorTokens } from "@/db/schema";
 import { checkBills, connectTasks, getTasksLink, setBillLink } from "@/server/tasks-link";
 
@@ -307,13 +308,59 @@ describe("the Claude connector", () => {
     await ctx.db.delete(transactions).where(eq(transactions.id, "tx-memo"));
   });
 
-  it("speaks the protocol Claude expects and only offers read-only tools", async () => {
-    const init = (await handleRpc({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18" } }, ctx)) as { result: { protocolVersion: string; serverInfo: { name: string } } };
+  it("speaks the protocol Claude expects: reading tools, and a few marked changes that never delete", async () => {
+    const init = (await handleRpc({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18" } }, ctx)) as { result: { protocolVersion: string; serverInfo: { name: string }; instructions: string } };
     expect(init.result).toMatchObject({ protocolVersion: "2025-06-18", serverInfo: { name: "passbook" } });
+    expect(init.result.instructions).toContain("only when the user has clearly asked");
     expect(await handleRpc({ jsonrpc: "2.0", method: "notifications/initialized" }, ctx)).toBeNull();
-    const list = (await handleRpc({ jsonrpc: "2.0", id: 2, method: "tools/list" }, ctx)) as { result: { tools: { name: string; annotations: { readOnlyHint: boolean } }[] } };
-    expect(list.result.tools.map((t) => t.name)).toEqual(["get_money_overview", "list_transactions", "get_spending", "list_bills", "get_net_worth", "list_goals", "get_investments", "get_debt_plan", "get_weekly_recap"]);
-    expect(list.result.tools.every((t) => t.annotations.readOnlyHint)).toBe(true);
+    const list = (await handleRpc({ jsonrpc: "2.0", id: 2, method: "tools/list" }, ctx)) as { result: { tools: { name: string; annotations: { readOnlyHint: boolean; destructiveHint?: boolean } }[] } };
+    const reading = list.result.tools.filter((t) => t.annotations.readOnlyHint).map((t) => t.name);
+    const changing = list.result.tools.filter((t) => !t.annotations.readOnlyHint);
+    expect(reading).toEqual(["get_money_overview", "list_transactions", "get_spending", "list_bills", "get_net_worth", "list_goals", "get_investments", "get_debt_plan", "get_weekly_recap"]);
+    expect(changing.map((t) => t.name)).toEqual(["add_bill", "add_savings_goal", "update_savings_goal", "update_loan", "rename_charges"]);
+    expect(changing.every((t) => t.annotations.destructiveHint === false)).toBe(true);
+    expect(list.result.tools.some((t) => /delete|remove|unlink|disconnect|password|passkey|key/i.test(t.name))).toBe(false);
+  });
+
+  it("makes the changes it's asked for, logs each one for Undo, and explains what went wrong in plain words", async () => {
+    const call = async (name: string, args: Record<string, unknown> = {}) => {
+      const out = (await handleRpc({ jsonrpc: "2.0", id: 4, method: "tools/call", params: { name, arguments: args } }, ctx)) as { result: { content: { text: string }[]; isError?: boolean } };
+      return { error: out.result.isError ? out.result.content[0].text : null, data: out.result.isError ? null : JSON.parse(out.result.content[0].text) };
+    };
+    const bill = await call("add_bill", { name: "Streaming", amount: 12.99, how_often: "monthly", next_due: "2026-12-03", kind: "subscription" });
+    expect(bill.data).toMatchObject({ done: true, what_changed: ["Added a subscription: Streaming, $12.99 every month, next on Dec 3."] });
+    const once = await call("add_bill", { name: "Vet", amount: "250", how_often: "once", next_due: "2026-11-27" });
+    expect(once.data.what_changed[0]).toBe("Added an upcoming bill: Vet, $250.00 due Nov 27.");
+    const goal = await call("add_savings_goal", { name: "Bike", target: 900, target_date: "2027-06-30" });
+    expect(goal.data.what_changed[0]).toBe("Added a savings goal: Bike, $900.00 by Jun 30.");
+    const put = await call("update_savings_goal", { goal: "bike", add_money: 50, monthly_amount: 75 });
+    expect(put.data.what_changed).toEqual(["Changed the goal Bike: $75.00 a month.", "Put $50.00 toward Bike. (A note in Passbook: no money moved at the bank.)"]);
+    const renamed = await call("rename_charges", { current_name: "city light", new_name: "Electric" });
+    expect(renamed.data.what_changed[0]).toBe("Renamed a charge to Electric. New ones will be too.");
+
+    const items = await listActivity(ctx);
+    expect(items.slice(0, 5).map((i) => i.actor)).toEqual(["claude", "claude", "claude", "claude", "claude"]);
+    for (const item of items.filter((i) => i.actor === "claude" && !i.undone)) await undoActivity(ctx, item.id);
+    expect((await call("list_bills")).data.subscriptions.some((s: { name: string }) => s.name === "Streaming")).toBe(false);
+    expect((await call("list_transactions", { search: "city light" })).data.transactions[0].name).toBe("City Light & Power");
+
+    // Mistakes come back as short, useful messages, never a stack trace.
+    expect((await call("add_bill", { name: "X", amount: -5, how_often: "monthly", next_due: "2026-12-01" })).error).toBe("amount must be the bill's cost in dollars, like 15.99.");
+    expect((await call("add_bill", { name: "X", amount: 5, how_often: "daily", next_due: "2026-12-01" })).error).toMatch(/^how_often must be one of/);
+    expect((await call("update_savings_goal", { goal: "boat", add_money: 5 })).error).toMatch(/^No goal called “boat”/);
+    expect((await call("update_loan", { loan: "mortgage", interest_rate_percent: 5 })).error).toMatch(/^No loan or card called “mortgage”/);
+  });
+
+  it("caps how many changes can be made in an hour", async () => {
+    const results: (string | null)[] = [];
+    for (let i = 0; i < 42; i++) {
+      const out = (await handleRpc({ jsonrpc: "2.0", id: 5, method: "tools/call", params: { name: "add_bill", arguments: { name: "X", amount: 0, how_often: "monthly", next_due: "2026-12-01" } } }, ctx)) as { result: { content: { text: string }[] } };
+      results.push(out.result.content[0].text);
+    }
+    expect(results.at(-1)).toBe("Too many attempts. Wait a few minutes and try again.");
+    // Reading still works.
+    const read = (await handleRpc({ jsonrpc: "2.0", id: 6, method: "tools/call", params: { name: "get_net_worth", arguments: {} } }, ctx)) as { result: { isError?: boolean } };
+    expect(read.result.isError).toBeUndefined();
   });
 
   it("answers in dollars from the owner's own data, and keeps errors short", async () => {

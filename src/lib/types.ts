@@ -110,6 +110,8 @@ export type RecurringView = RecurringSeries & {
   ruleExact: boolean;
   /** The latest charge without a name of its own, for renaming the bill. */
   sampleId: string;
+  /** Set for a bill added by hand (by the owner, Nickel or Claude) rather than found in the history. */
+  manual: { id: string; addedBy: "you" | "nickel" | "claude"; startDate: ISODate } | null;
 };
 
 /** A charge from a known subscription service that hasn't repeated yet: probably a new sign-up or a trial that converted. */
@@ -307,3 +309,6 @@ export type NameRuleView = { id: string; name: string; key: string; amount: numb
 export type UnclearName = { key: string; bankName: string; suggestion: string; count: number; lastDate: ISODate; sampleId: string; amount: number; category: string };
 
 export type NamesPayload = { rules: NameRuleView[]; unclear: UnclearName[] };
+
+/** Something Nickel or Claude changed for the owner, with Undo. */
+export type ActivityItem = { id: string; actor: "nickel" | "claude"; summary: string; createdAt: string; undone: boolean; canUndo: boolean };

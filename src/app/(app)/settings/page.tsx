@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronRight, KeyRound, Landmark, LogOut, PencilLine } from "lucide-react";
+import { ChevronRight, History, KeyRound, Landmark, LogOut, PencilLine } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 import { ChangePasswordDialog } from "@/components/reauth";
@@ -69,6 +69,19 @@ export default function SettingsPage() {
             <span className="flex-1">
               <span className="block font-bold">Bills and charges you’ve renamed</span>
               <span className="block text-small text-ink-3">And bank code that could use a clearer name</span>
+            </span>
+            <ChevronRight size={18} className="text-ink-3" />
+          </Link>
+        </Sheet>
+        <Sheet>
+          <SheetHeader title="Activity" />
+          <Link href="/settings/activity" className="-mx-1 flex min-h-[60px] items-center gap-3 rounded-2xl px-1 active:bg-sunk">
+            <span aria-hidden className="inline-flex size-10 items-center justify-center rounded-xl bg-sunk text-ink-2">
+              <History size={19} />
+            </span>
+            <span className="flex-1">
+              <span className="block font-bold">What Nickel and Claude changed</span>
+              <span className="block text-small text-ink-3">Bills, goals and loans they added or changed for you, with Undo</span>
             </span>
             <ChevronRight size={18} className="text-ink-3" />
           </Link>

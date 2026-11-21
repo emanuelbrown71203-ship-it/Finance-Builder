@@ -114,10 +114,12 @@ export async function setBudget(ctx: Ctx, category: string, monthlyLimit: number
 
 type GoalInput = { name: string; target: number; saved: number; monthlyContribution: number; targetDate: string | null };
 
-export async function createGoal(ctx: Ctx, input: GoalInput) {
+export async function createGoal(ctx: Ctx, input: GoalInput): Promise<string> {
   const [{ count }] = await ctx.db.select({ count: sql<number>`count(*)::int` }).from(goals).where(eq(goals.userId, ctx.userId));
   if (count >= 50) throw new HttpError(400, "That’s the most goals Passbook keeps. Delete one you’ve finished first.");
-  await ctx.db.insert(goals).values({ id: crypto.randomUUID(), userId: ctx.userId, ...input });
+  const id = crypto.randomUUID();
+  await ctx.db.insert(goals).values({ id, userId: ctx.userId, ...input });
+  return id;
 }
 
 const MAX_DEPOSITS = 2000;

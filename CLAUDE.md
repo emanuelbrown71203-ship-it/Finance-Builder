@@ -42,13 +42,18 @@ for it to be remembered and used whenever an app is built.
 - Bank access tokens are stored encrypted. The app can read accounts and can never move money.
 - **Nickel (the robo dog) only points things out** from the person's own numbers. He never says
   "you should", never gives investment advice, and says he isn't a financial advisor. His wording
-  lives in `src/lib/nickel/brain.ts` and a test checks for advice-like phrasing. A real AI chat
-  for him would send data to an outside service: ask the owner first.
+  lives in `src/lib/nickel/brain.ts` and a test checks for advice-like phrasing. His instructions
+  are understood on the device by rules (`src/lib/nickel/commands.ts`); "Chat with Claude" opens the
+  owner's own Claude app. A built-in AI chat would send data to an outside service: ask the owner first.
 - **Names never overwrite the bank's text.** `transactions.name` stays what the bank sent; shown names
   come from `custom_name`, `name_rules` and the tidy-up in `src/lib/finance/names.ts`, applied on read.
   Anything that matches charges (bills, category rules, the Tasks link) keys on the bank's text.
-- **The Claude connector is read-only.** Never add a tool to `src/server/connector.ts` that changes
-  anything without asking the owner first.
+- **The Claude connector only makes the changes the owner approved** (add a bill or one-off bill, add
+  or change a savings goal and record money toward it, change a loan's rate or payment, rename charges).
+  Every change goes through `src/server/actions.ts`, is written to the activity list with Undo, and is
+  rate limited. It never deletes anything, moves money, or touches bank connections, sign-in, passkeys
+  or keys. Anything beyond that list needs the owner's OK first. Nickel's "Tell me what to do" uses the
+  same actions.
 - **The Tasks for Two link never runs on sample data or Plaid’s practice banks**, only ticks bills
   the owner has linked to a merchant, only on settled payments, and writes each tick down before
   sending it. It accepts only a connector address on the one Tasks for Two server in

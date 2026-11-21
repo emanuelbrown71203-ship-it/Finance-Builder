@@ -5,7 +5,8 @@ import { addDays, addMonths, dayOfMonth, daysInMonth, diffDays, type ISODate } f
  * paychecks) by looking at transaction history. Pure: same input, same output.
  */
 
-export type Frequency = "weekly" | "biweekly" | "monthly" | "quarterly" | "yearly";
+/** "semiannual" and "once" only come from bills added by hand; detection finds the others. */
+export type Frequency = "weekly" | "biweekly" | "monthly" | "quarterly" | "semiannual" | "yearly" | "once";
 export type RecurringKind = "bill" | "subscription" | "income";
 
 export type TxLike = {
@@ -173,8 +174,10 @@ function nextOccurrence(last: ISODate, frequency: Frequency, txs: TxLike[]): ISO
   return stepFrom(last, frequency, usualDay(txs));
 }
 
-function stepFrom(date: ISODate, frequency: Frequency, monthlyDay?: number): ISODate {
+export function stepFrom(date: ISODate, frequency: Frequency, monthlyDay?: number): ISODate {
   switch (frequency) {
+    case "once":
+      return "9999-12-31";
     case "weekly":
       return addDays(date, 7);
     case "biweekly":
@@ -187,6 +190,8 @@ function stepFrom(date: ISODate, frequency: Frequency, monthlyDay?: number): ISO
     }
     case "quarterly":
       return addMonths(date, 3);
+    case "semiannual":
+      return addMonths(date, 6);
     case "yearly":
       return addMonths(date, 12);
   }
@@ -210,7 +215,7 @@ export function upcomingBetween(series: RecurringSeries, from: ISODate, to: ISOD
 
 /** What the series costs (or pays) per month, for comparing across schedules. */
 export function monthlyEquivalent(series: RecurringSeries): number {
-  const perYear = { weekly: 52, biweekly: 26, monthly: 12, quarterly: 4, yearly: 1 }[series.frequency];
+  const perYear = { weekly: 52, biweekly: 26, monthly: 12, quarterly: 4, semiannual: 2, yearly: 1, once: 0 }[series.frequency];
   return Math.round((series.amount * perYear) / 12);
 }
 
@@ -219,5 +224,7 @@ export const FREQUENCY_LABEL: Record<Frequency, string> = {
   biweekly: "Every 2 weeks",
   monthly: "Every month",
   quarterly: "Every 3 months",
+  semiannual: "Every 6 months",
   yearly: "Every year",
+  once: "Just once",
 };

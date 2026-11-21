@@ -151,4 +151,4 @@ export const SMALL_TALK = [
 ];
 
 /** Said once, the first time he meets someone. */
-export const INTRO = "Hi, I’m Nickel! I sniff through your numbers and tell you what I notice. I’m a robot dog, not a financial advisor, so my ideas are just ideas. Tap me any time. Hold me for options.";
+export const INTRO = "Hi, I’m Nickel! I sniff through your numbers and tell you what I notice. I’m a robot dog, not a financial advisor, so my ideas are just ideas. Tap me any time. Hold me to tell me what to add, like a bill or a goal.";

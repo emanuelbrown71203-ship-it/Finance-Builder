@@ -5,10 +5,13 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { INTRO, SMALL_TALK, type Mood, type Tip } from "@/lib/nickel/brain";
 import { CLAUDE_PREFIX, CLAUDE_QUESTIONS, claudeLink } from "@/lib/nickel/claude";
+import { parseCommand, type Command } from "@/lib/nickel/commands";
+import { BillForm, type BillDraft } from "../bill-form";
+import { GoalDialog } from "../goals";
 import { dollars } from "@/lib/money";
 import type { NickelPayload } from "@/server/nickel";
-import { cx, toast } from "../ui";
-import { useApi, useNow } from "../use-api";
+import { Dialog, Input, cx, toast } from "../ui";
+import { send, useApi, useNow } from "../use-api";
 import { RoboDog, type Eyes, type Mouth } from "./robo-dog";
 import { markSeen, nickelSettings, seenToday, useNickelSettings, type NickelEvent } from "./store";
 
@@ -28,7 +31,7 @@ import { markSeen, nickelSettings, seenToday, useNickelSettings, type NickelEven
 
 type Action = "hop" | "spin" | "shake" | "sniff" | "bark" | "stretch" | "look" | "wiggle";
 type Effect = "hearts" | "bang" | "question" | "sparkle";
-type Bubble = { text: string; href?: string; link?: string; tipId?: string; sticky: boolean; kind: "tip" | "intro" | "talk" | "event" };
+type Bubble = { text: string; href?: string; link?: string; tipId?: string; sticky: boolean; kind: "tip" | "intro" | "talk" | "event" | "done"; undo?: string };
 
 const LOOK: Record<Mood, { eyes: Eyes; mouth: Mouth; wag: string; antenna: string; cheeks: boolean; ears: "" | "perk" | "down" }> = {
   happy: { eyes: "open", mouth: "smile", wag: "0.7s", antenna: "var(--good)", cheeks: true, ears: "" },
@@ -68,6 +71,9 @@ export function Nickel() {
   const [bubble, setBubble] = useState<Bubble | null>(null);
   const [menu, setMenu] = useState(false);
   const [asking, setAsking] = useState(false);
+  const [doing, setDoing] = useState(false);
+  const [billDraft, setBillDraft] = useState<Partial<BillDraft> | null>(null);
+  const [newGoal, setNewGoal] = useState(false);
   const [drag, setDrag] = useState<{ x: number; y: number } | null>(null);
   const [wide, setWide] = useState(false);
   const [screenH, setScreenH] = useState(800);
@@ -409,14 +415,32 @@ export function Nickel() {
           <div role="status" aria-live="polite" className="rounded-[18px] border border-line bg-sheet p-3.5 text-small text-ink shadow-float">
             <div className="flex items-start justify-between gap-2">
               <p className="text-micro font-extrabold uppercase tracking-wide text-accent-text">{settings.name}</p>
-              <button type="button" onClick={() => (bubble?.kind === "intro" ? (nickelSettings.finishIntro(), setBubble(null)) : (setBubble(null), setMenu(false), setAsking(false)))} aria-label="Close" className="-mr-2 -mt-2 inline-flex size-9 items-center justify-center rounded-full text-ink-3 active:bg-sunk">
+              <button type="button" onClick={() => (bubble?.kind === "intro" ? (nickelSettings.finishIntro(), setBubble(null)) : (setBubble(null), setMenu(false), setAsking(false), setDoing(false)))} aria-label="Close" className="-mr-2 -mt-2 inline-flex size-9 items-center justify-center rounded-full text-ink-3 active:bg-sunk">
                 <X size={16} />
               </button>
             </div>
             {menu && asking ? (
               <AskClaude onDone={() => (setMenu(false), setAsking(false))} />
+            ) : menu && doing && data ? (
+              <NickelDo
+                today={data.today}
+                goals={data.goals ?? []}
+                loans={data.loans ?? []}
+                onDone={(done) => {
+                  setMenu(false);
+                  setDoing(false);
+                  act("hop");
+                  pop("sparkle");
+                  feel("excited", 6000);
+                  say({ kind: "done", text: `Done! ${done.summary}`, href: done.href, link: "See it", undo: done.activityId, sticky: true });
+                }}
+                onBill={(draft) => (setMenu(false), setDoing(false), setBillDraft(draft))}
+                onGoal={() => (setMenu(false), setDoing(false), setNewGoal(true))}
+                onLeave={() => (setMenu(false), setDoing(false))}
+              />
             ) : menu ? (
               <ul className="-mx-1 mt-1 flex flex-col">
+                <MenuItem onClick={() => setDoing(true)}>Tell me what to do</MenuItem>
                 <MenuItem onClick={() => (setMenu(false), act("bark"), say(nextLine()))}>Tell me something</MenuItem>
                 <MenuItem onClick={() => setAsking(true)}>Chat with Claude about my money</MenuItem>
                 <MenuItem onClick={() => (setMenu(false), nickelSettings.napFor(60 * 60_000))}>Nap for an hour</MenuItem>
@@ -442,6 +466,24 @@ export function Nickel() {
                             {bubble.link ?? "Show me"}
                           </Link>
                         )}
+                        {bubble.undo && (
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              const id = bubble.undo!;
+                              try {
+                                await send("POST", `/api/activity/${id}/undo`);
+                                act("shake");
+                                say({ kind: "talk", text: "Undone. It’s back the way it was.", sticky: false }, 5000);
+                              } catch (e) {
+                                say({ kind: "talk", text: e instanceof Error ? e.message : "I couldn’t undo that. It’s under Settings, Activity.", sticky: true });
+                              }
+                            }}
+                            className="inline-flex min-h-10 items-center rounded-full px-3 text-small font-bold text-ink-2 underline underline-offset-2 active:bg-sunk"
+                          >
+                            Undo
+                          </button>
+                        )}
                         {bubble.kind === "tip" && (
                           <button type="button" onClick={() => (act("bark"), say(nextLine()))} className="inline-flex min-h-10 items-center rounded-full px-3 text-small font-bold text-ink-2 active:bg-sunk">
                             Anything else?
@@ -457,6 +499,25 @@ export function Nickel() {
           <span aria-hidden className={cx("absolute size-4 rotate-45 border-line bg-sheet", bubbleBelow ? "-top-[7px] border-l border-t" : "-bottom-[7px] border-b border-r", settings.side === "right" ? "right-8" : "left-8")} />
         </div>
       )}
+
+      {data && (
+        <Dialog open={billDraft !== null} onClose={() => setBillDraft(null)} title={billDraft?.frequency === "once" ? "Add an upcoming bill" : "Add a bill"}>
+          {billDraft && (
+            <BillForm
+              today={data.today}
+              draft={billDraft}
+              via="nickel"
+              onDone={() => {
+                setBillDraft(null);
+                act("hop");
+                feel("excited", 5000);
+              }}
+              onCancel={() => setBillDraft(null)}
+            />
+          )}
+        </Dialog>
+      )}
+      {data && newGoal && <GoalDialog sheet={{ kind: "new" }} today={data.today} onClose={() => setNewGoal(false)} />}
 
       <button
         type="button"
@@ -520,6 +581,97 @@ export function Nickel() {
           </span>
         )}
       </button>
+    </div>
+  );
+}
+
+type Done = { activityId: string; summary: string; href: string };
+
+const EXAMPLES = ["add rent $2,150 on the 1st", "upcoming vet bill $250 next friday", "new goal Japan $4,500 by June", "add $200 to the emergency fund", "student loan rate 4.5%"];
+
+/** The body Nickel sends for an instruction that has everything it needs, or what to ask for when it doesn't. */
+function plan(c: Command, loans: { name: string }[]): { body: Record<string, unknown> } | { ask: string } | { form: Partial<BillDraft> } {
+  switch (c.kind) {
+    case "bill":
+    case "upcoming":
+      if (!c.name || !c.amount || !c.date) return { form: { name: c.name ?? "", amount: c.amount, frequency: c.kind === "upcoming" ? "once" : c.frequency, startDate: c.date, kind: "bill" } };
+      return { body: c.kind === "upcoming" ? { kind: "upcoming", name: c.name, amount: c.amount, date: c.date } : { kind: "bill", name: c.name, amount: c.amount, frequency: c.frequency, date: c.date } };
+    case "goal":
+      if (!c.name) return { ask: "What’s the goal called? Like “new goal Japan $4,500 by June”." };
+      if (!c.target) return { ask: `How much does “${c.name}” need? Like “new goal ${c.name} $3,000 by June”.` };
+      return { body: { kind: "goal", name: c.name, target: c.target, date: c.date } };
+    case "deposit":
+      if (!c.goal) return { ask: "Which goal?" };
+      if (!c.amount) return { ask: `How much should I put toward “${c.goal}”? Like “add $100 to ${c.goal}”.` };
+      return { body: { kind: "deposit", goal: c.goal, amount: c.amount } };
+    case "loan":
+      if (!c.loan) return { ask: loans.length ? `Which one? ${loans.map((l) => l.name).join(", ")}.` : "I don’t see any loans or cards to change." };
+      if (c.aprPercent === null && c.payment === null) return { ask: `What should change on ${c.loan}? A rate like “4.5%” or a payment like “$300 a month”.` };
+      return { body: { kind: "loan", loan: c.loan, aprPercent: c.aprPercent, payment: c.payment } };
+    case "rename":
+      if (!c.from || !c.to) return { ask: "Rename what to what? Like “rename SQ *TARTINE to Tartine”." };
+      return { body: { kind: "rename", from: c.from, to: c.to } };
+  }
+}
+
+/**
+ * "Tell me what to do": Nickel takes an instruction in plain words, does it,
+ * and reports back with Undo. The words are understood right here on the
+ * phone (no AI service); when something's missing he asks for just that, or
+ * opens the bill form with what he understood filled in.
+ */
+function NickelDo({ today, goals, loans, onDone, onBill, onGoal, onLeave }: { today: string; goals: { name: string }[]; loans: { name: string }[]; onDone: (d: Done) => void; onBill: (draft: Partial<BillDraft>) => void; onGoal: () => void; onLeave: () => void }) {
+  const [text, setText] = useState("");
+  const [hint, setHint] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const command = parseCommand(text, { today, goals: goals.map((g) => g.name), loans: loans.map((l) => l.name) });
+    if (!command) return setHint(`I didn’t catch that. Try “${EXAMPLES[0]}” or “${EXAMPLES[2]}”.`);
+    const next = plan(command, loans);
+    if ("ask" in next) return setHint(next.ask);
+    if ("form" in next) return onBill(next.form);
+    setBusy(true);
+    setHint(null);
+    try {
+      onDone(await send<Done>("POST", "/api/nickel/do", next.body));
+    } catch (err) {
+      setHint(err instanceof Error ? err.message : "That didn’t work. Try again.");
+      setBusy(false);
+    }
+  };
+
+  const chip = "inline-flex min-h-10 items-center rounded-full border border-line px-3 text-small font-bold text-ink-2 active:bg-sunk";
+  return (
+    <div className="mt-1">
+      <p className="leading-relaxed">What should I add or change? Say it like you’d tell a friend.</p>
+      <form onSubmit={submit} className="mt-2 flex gap-2">
+        <Input value={text} onChange={(e) => setText(e.target.value)} autoFocus enterKeyHint="go" maxLength={300} aria-label={`What should Nickel do?`} placeholder="Add Netflix $15.99 on the 5th" className="min-w-0 flex-1" />
+        <button type="submit" disabled={busy || !text.trim()} className="min-h-12 shrink-0 rounded-control bg-accent px-4 font-bold text-on-accent active:scale-[0.97] disabled:opacity-50">
+          {busy ? "…" : "Go"}
+        </button>
+      </form>
+      {hint && (
+        <p role="status" className="mt-2 leading-relaxed text-ink-2">
+          {hint}
+        </p>
+      )}
+      <div className="mt-2.5 flex flex-wrap gap-2">
+        <button type="button" className={chip} onClick={() => onBill({})}>
+          Add a bill
+        </button>
+        <button type="button" className={chip} onClick={() => onBill({ frequency: "once" })}>
+          Upcoming bill
+        </button>
+        <button type="button" className={chip} onClick={onGoal}>
+          New goal
+        </button>
+        <Link href="/debt" onClick={onLeave} className={chip}>
+          Loans
+        </Link>
+      </div>
+      <p className="mt-2.5 text-micro text-ink-3">Like: {EXAMPLES.slice(1).map((x) => `“${x}”`).join(", ")}. Everything I do shows under Settings, Activity, with Undo.</p>
     </div>
   );
 }

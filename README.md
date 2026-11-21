@@ -37,7 +37,7 @@ Passbook follows the same house style as the owner's other apps (written down in
 | Home | What's left to spend this month after bills and savings, what needs a look (bills due, price increases, categories over their limit), what's coming up and the latest activity. |
 | Transactions | Everything from every account, live. Search and filter. Tap one to rename it, change its category or add a note. |
 | Names | Bank code that could be clearer, with a suggested name to keep or change, and every name you've given. Reached from Transactions and Settings. |
-| Bills | Recurring bills, subscriptions and income, found from history. Upcoming due dates, price-increase alerts, rename, "I cancelled this". |
+| Bills | Recurring bills, subscriptions and income, found from history, plus any you add by hand (repeating or a one-off coming up). Upcoming due dates, price-increase alerts, rename, "I cancelled this". |
 | Budget | Spending by category against monthly limits, month over month, and six months of money in vs money out. |
 | Net worth | What you own minus what you owe over time, by account. Add things no bank reports (a car, a house) by hand. |
 | Savings | Savings balance, monthly saving history, and goals. Each goal with a date gets a **track**: what to put away a month, a week and each payday to make it, whether you're ahead or behind, month-end checkpoints, 25/50/75/100% milestones, and ideas for where the money could come from. |
@@ -45,7 +45,8 @@ Passbook follows the same house style as the owner's other apps (written down in
 | Debt payoff | When the loans will be paid off at today's payments, and what a little extra each month changes. |
 | Weekly recap | Last week in money: spent against the week before, money in, bills paid, no-spend days. |
 | Accounts | Linked banks, their status, and linking or removing one. |
-| Settings | Light or dark, Face ID sign-in, Connect to Claude, Tasks for Two, remembered categories, your account, version. |
+| Settings | Light or dark, Face ID sign-in, Connect to Claude, Tasks for Two, Names, Activity, remembered categories, your account, version. |
+| Activity | What Nickel and Claude changed when asked, newest first, each with Undo for 30 days. |
 
 Smaller things that make it easier to live with:
 
@@ -68,18 +69,26 @@ Smaller things that make it easier to live with:
   goes into a goal. Tap him for what he's noticed in your numbers (bills due, price rises, budgets,
   goals behind or ahead, payday, streaks); hold him for options; drag him to the other side.
   He points things out and is clear he isn't a financial advisor. His "brain" is rules over your
-  own numbers (`src/lib/nickel/brain.ts`), so nothing leaves the app. Hold him and pick **Chat with
-  Claude** to open a chat in your own Claude app (on your own Claude plan) with a question ready;
-  Claude reads your numbers through the read-only connector below. Settings: show him, quiet mode,
-  rename him.
+  own numbers (`src/lib/nickel/brain.ts`), so nothing leaves the app. Hold him for options:
+  - **Tell me what to do**: type it the way you'd say it ("add Netflix $15.99 on the 5th",
+    "upcoming vet bill $250 next friday", "new goal Japan $4,500 by June", "add $200 to the
+    emergency fund", "student loan rate 4.5%", "rename SQ *TARTINE to Tartine"). He understands it
+    on the phone with plain rules (`src/lib/nickel/commands.ts`, no AI service), does it, and reports
+    back with Undo. If something's missing he asks for just that, or opens the bill form filled in.
+  - **Chat with Claude** opens a chat in your own Claude app (on your own Claude plan) with a question
+    ready; Claude reads your numbers through the connector below.
+  Settings: show him, quiet mode, rename him.
 
 ## Connections
 
 - **Sign in with Face ID** (a passkey). Set a device up in Settings, then sign in with your face or
   fingerprint and no password.
 - **Ask Claude about your money.** Settings gives you a private link to add to Claude as a custom
-  connector. Claude can then answer questions from your real numbers. The link is read-only: nothing
-  can be changed through it. In sample-data mode there is a try-it link that reads the sample household.
+  connector. Claude can then answer questions from your real numbers, and, when you ask, add a bill or
+  a one-off bill, add or change a savings goal (and note money put toward it), change a loan's rate or
+  payment, and rename charges. Each change is logged under Settings, Activity, with Undo, and limited to
+  40 an hour. It can't delete anything, move money, or touch bank connections or sign-in. In sample-data
+  mode there is a try-it link that works on the sample household.
 - **Tasks for Two bills tick themselves off.** Paste your Tasks for Two connector link into Settings
   and say which merchant pays each bill. When the bank shows a settled payment to that merchant near
   the due date, the bill is ticked off in Tasks for Two. It never runs on sample data.
@@ -248,8 +257,8 @@ To run the tests against real Postgres instead of the in-memory database:
 - Bank sign-ins that redirect on phones (Plaid OAuth redirect). Desktop linking works without it.
 - Investment transaction history (holdings and balances are synced; individual trades are not).
 - Shared households, exports, and push notifications.
-- Nickel (or Claude) making changes for you, like adding a bill or a goal. Claude's connector is
-  read-only by design; letting it write is a decision for the owner.
+- A bill you add by hand isn't matched to the bank's payment for it, so if the bank later shows the
+  same bill too, remove the hand-added one.
 - The Tasks for Two link reuses that app's single Claude connector link, so the same link has to be
   pasted in both places. A separate key for Passbook would need a small change in Tasks for Two.
 - The Plaid integration is covered by tests against simulated Plaid responses and has not yet

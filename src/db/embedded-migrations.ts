@@ -73,5 +73,11 @@ export const MIGRATION_STATEMENTS: string[] = [
   "CREATE TABLE \"name_rules\" (\n\t\"id\" text PRIMARY KEY NOT NULL,\n\t\"user_id\" text NOT NULL,\n\t\"merchant_key\" text NOT NULL,\n\t\"amount\" bigint DEFAULT 0 NOT NULL,\n\t\"name\" text NOT NULL,\n\t\"created_at\" timestamp with time zone DEFAULT now() NOT NULL\n);",
   "ALTER TABLE \"transactions\" ADD COLUMN \"custom_name\" text;",
   "ALTER TABLE \"name_rules\" ADD CONSTRAINT \"name_rules_user_id_users_id_fk\" FOREIGN KEY (\"user_id\") REFERENCES \"public\".\"users\"(\"id\") ON DELETE cascade ON UPDATE no action;",
-  "CREATE UNIQUE INDEX \"name_rules_user_merchant_amount_idx\" ON \"name_rules\" USING btree (\"user_id\",\"merchant_key\",\"amount\");"
+  "CREATE UNIQUE INDEX \"name_rules_user_merchant_amount_idx\" ON \"name_rules\" USING btree (\"user_id\",\"merchant_key\",\"amount\");",
+  "CREATE TABLE \"activity_log\" (\n\t\"id\" text PRIMARY KEY NOT NULL,\n\t\"user_id\" text NOT NULL,\n\t\"actor\" text NOT NULL,\n\t\"summary\" text NOT NULL,\n\t\"undo\" jsonb NOT NULL,\n\t\"undone_at\" timestamp with time zone,\n\t\"created_at\" timestamp with time zone DEFAULT now() NOT NULL\n);",
+  "CREATE TABLE \"manual_bills\" (\n\t\"id\" text PRIMARY KEY NOT NULL,\n\t\"user_id\" text NOT NULL,\n\t\"name\" text NOT NULL,\n\t\"amount\" bigint NOT NULL,\n\t\"frequency\" text NOT NULL,\n\t\"start_date\" text NOT NULL,\n\t\"kind\" text DEFAULT 'bill' NOT NULL,\n\t\"category\" text DEFAULT 'other' NOT NULL,\n\t\"cancelled\" boolean DEFAULT false NOT NULL,\n\t\"added_by\" text DEFAULT 'you' NOT NULL,\n\t\"created_at\" timestamp with time zone DEFAULT now() NOT NULL\n);",
+  "ALTER TABLE \"activity_log\" ADD CONSTRAINT \"activity_log_user_id_users_id_fk\" FOREIGN KEY (\"user_id\") REFERENCES \"public\".\"users\"(\"id\") ON DELETE cascade ON UPDATE no action;",
+  "ALTER TABLE \"manual_bills\" ADD CONSTRAINT \"manual_bills_user_id_users_id_fk\" FOREIGN KEY (\"user_id\") REFERENCES \"public\".\"users\"(\"id\") ON DELETE cascade ON UPDATE no action;",
+  "CREATE INDEX \"activity_user_created_idx\" ON \"activity_log\" USING btree (\"user_id\",\"created_at\");",
+  "CREATE INDEX \"manual_bills_user_idx\" ON \"manual_bills\" USING btree (\"user_id\");"
 ];

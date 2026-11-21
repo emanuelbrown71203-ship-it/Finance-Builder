@@ -1,7 +1,8 @@
 "use client";
 
-import { ExternalLink, PencilLine } from "lucide-react";
+import { ExternalLink, PencilLine, Plus } from "lucide-react";
 import { useState } from "react";
+import { BillForm, type SavedBill } from "@/components/bill-form";
 import { BillRow } from "@/components/bills";
 import { CategoryIcon } from "@/components/category-icon";
 import { BankSays, RenameForm } from "@/components/names";
@@ -23,6 +24,8 @@ function Stat({ label, value, note, tone }: { label: string; value: string; note
   );
 }
 
+const WHO = { you: "you", nickel: "Nickel", claude: "Claude" } as const;
+
 function SeriesRow({ series, today, onOpen }: { series: RecurringView; today: string; onOpen: () => void }) {
   const change = series.priceChange;
   return (
@@ -36,10 +39,14 @@ function SeriesRow({ series, today, onOpen }: { series: RecurringView; today: st
             {series.renewsSoon && <Tag tone="canary">Renews {formatDistance(series.nextDate, today)}</Tag>}
             {series.startedRecently && !series.renewsSoon && <Tag tone="sky">New since {formatShort(series.firstDate)}</Tag>}
             {series.cancelled && <Tag>Marked cancelled</Tag>}
+            {series.manual && <Tag tone="plain">Added by {WHO[series.manual.addedBy]}</Tag>}
           </span>
           <span className="block truncate text-small text-ink-3">
-            {FREQUENCY_LABEL[series.frequency]}
-            {series.active ? `, next ${series.nextDate.slice(0, 4) === series.lastDate.slice(0, 4) || series.frequency !== "yearly" ? formatShort(series.nextDate) : formatMedium(series.nextDate)}` : `, last charged ${formatShort(series.lastDate)}`}
+            {series.manual
+              ? series.frequency === "once"
+                ? `Just once, ${series.active ? "due" : "was due"} ${formatShort(series.nextDate)}`
+                : `${FREQUENCY_LABEL[series.frequency]}${series.active ? `, next ${formatShort(series.nextDate)}` : ""}`
+              : `${FREQUENCY_LABEL[series.frequency]}${series.active ? `, next ${series.nextDate.slice(0, 4) === series.lastDate.slice(0, 4) || series.frequency !== "yearly" ? formatShort(series.nextDate) : formatMedium(series.nextDate)}` : `, last charged ${formatShort(series.lastDate)}`}`}
           </span>
         </span>
         <span className="text-right">
@@ -67,7 +74,7 @@ function CancelHelpBox({ name, help }: { name: string; help: CancelHelp }) {
   );
 }
 
-function SeriesDialog({ series, onClose: close }: { series: RecurringView | null; onClose: () => void }) {
+function SeriesDialog({ series, today, onClose: close }: { series: RecurringView | null; today: string; onClose: () => void }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [renaming, setRenaming] = useState(false);
@@ -75,6 +82,7 @@ function SeriesDialog({ series, onClose: close }: { series: RecurringView | null
     setRenaming(false);
     close();
   };
+  if (series?.manual) return <ManualBillDialog key={series.key} series={series} today={today} onClose={onClose} />;
 
   const update = async (patch: { kind?: "bill" | "subscription" | "ignore"; cancelled?: boolean }, done: string) => {
     if (!series) return;
@@ -179,9 +187,91 @@ function SeriesDialog({ series, onClose: close }: { series: RecurringView | null
   );
 }
 
+/** A bill added by hand: change it, say it's cancelled, or remove it (with Undo). */
+function ManualBillDialog({ series, today, onClose }: { series: RecurringView; today: string; onClose: () => void }) {
+  const manual = series.manual!;
+  const [editing, setEditing] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const once = series.frequency === "once";
+
+  const run = async (work: () => Promise<void>) => {
+    setBusy(true);
+    setError(null);
+    try {
+      await work();
+      onClose();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Couldn’t save. Try again.");
+      setBusy(false);
+    }
+  };
+  const cancel = (cancelled: boolean) =>
+    run(async () => {
+      await send("PATCH", `/api/bills/${manual.id}`, { cancelled });
+      toast(cancelled ? `${series.name} marked as cancelled` : `${series.name} is back in your bills`, { action: { label: "Undo", run: () => send("PATCH", `/api/bills/${manual.id}`, { cancelled: !cancelled }) } });
+    });
+  const remove = () =>
+    run(async () => {
+      const { bill } = await send<{ bill: SavedBill }>("DELETE", `/api/bills/${manual.id}`);
+      toast(`${series.name} removed`, { action: { label: "Undo", run: () => send("POST", "/api/bills/restore", bill) } });
+    });
+
+  return (
+    <Dialog open onClose={onClose} title={editing ? `Change ${series.name}` : series.name}>
+      {editing ? (
+        <BillForm
+          today={today}
+          editing={{ id: manual.id, name: series.name, amount: Math.abs(series.amount), frequency: series.frequency as "monthly", startDate: series.nextDate, kind: series.kind === "subscription" ? "subscription" : "bill" }}
+          onDone={onClose}
+          onCancel={() => setEditing(false)}
+        />
+      ) : (
+        <div className="flex flex-col gap-5">
+          <div className="grid grid-cols-2 gap-3 text-small">
+            <div className="rounded-control bg-sunk px-3 py-2">
+              <p className="text-ink-3">{once ? "Amount" : "Each time"}</p>
+              <p className="tabular text-lead font-semibold">{dollarsExact(Math.abs(series.amount))}</p>
+            </div>
+            <div className="rounded-control bg-sunk px-3 py-2">
+              <p className="text-ink-3">{once ? "Due" : "Per year"}</p>
+              <p className="tabular text-lead font-semibold">{once ? formatShort(series.nextDate) : dollars(series.monthly * 12)}</p>
+            </div>
+          </div>
+          <p className="text-small text-ink-2">
+            {once ? "Just once. " : `${FREQUENCY_LABEL[series.frequency]}. `}
+            {series.cancelled ? "You marked this as cancelled, so it no longer counts toward what’s coming up." : series.active ? `${once ? "Due" : "Next due"} ${formatMedium(series.nextDate)}.` : `It was due ${formatMedium(series.nextDate)}.`} Added by {WHO[manual.addedBy]}, so it isn’t from the bank: it counts as planned, not paid.
+          </p>
+          {error && <ErrorNote message={error} />}
+          <div className="flex flex-wrap gap-2 border-t border-line-soft pt-4">
+            <Button size="sm" disabled={busy} onClick={() => setEditing(true)}>
+              <PencilLine size={16} aria-hidden />
+              Change
+            </Button>
+            {!once &&
+              (series.cancelled ? (
+                <Button size="sm" disabled={busy} onClick={() => cancel(false)}>
+                  Still paying for this
+                </Button>
+              ) : (
+                <Button size="sm" disabled={busy} onClick={() => cancel(true)}>
+                  I cancelled this
+                </Button>
+              ))}
+            <Button size="sm" variant="danger" disabled={busy} onClick={remove}>
+              Remove
+            </Button>
+          </div>
+        </div>
+      )}
+    </Dialog>
+  );
+}
+
 export default function BillsPage() {
   const { data, error, mutate } = useApi<RecurringPayload>("/api/recurring", { refreshInterval: 30_000 });
   const [openKey, setOpenKey] = useState<string | null>(null);
+  const [adding, setAdding] = useState(false);
 
   if (error && !data) return <ErrorNote message={error.message} onRetry={() => mutate()} />;
   if (!data) {
@@ -218,7 +308,16 @@ export default function BillsPage() {
 
   return (
     <>
-      <PageHeader title="Bills" lead="Bills and subscriptions, found on their own from charges that repeat. Tap one to rename it, see past charges or say you cancelled it." />
+      <PageHeader
+        title="Bills"
+        lead="Bills and subscriptions, found on their own from charges that repeat. Tap one to rename it, see past charges or say you cancelled it. Add any the bank can’t show yet."
+        action={
+          <Button size="sm" onClick={() => setAdding(true)}>
+            <Plus size={16} aria-hidden />
+            Add
+          </Button>
+        }
+      />
 
       <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-3 [&>*:last-child]:col-span-2 sm:[&>*:last-child]:col-span-1">
         <Stat label="Bills a month" value={dollars(data.monthlyBills)} note={`${bills.length} regular bills`} tone="bg-pink text-pink-ink" />
@@ -309,7 +408,10 @@ export default function BillsPage() {
         </div>
       </div>
 
-      <SeriesDialog series={data.series.find((s) => s.key === openKey) ?? null} onClose={() => setOpenKey(null)} />
+      <SeriesDialog series={data.series.find((s) => s.key === openKey) ?? null} today={data.today} onClose={() => setOpenKey(null)} />
+      <Dialog open={adding} onClose={() => setAdding(false)} title="Add a bill">
+        {adding && <BillForm today={data.today} onDone={() => setAdding(false)} onCancel={() => setAdding(false)} />}
+      </Dialog>
     </>
   );
 }

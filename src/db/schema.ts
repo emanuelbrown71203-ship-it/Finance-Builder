@@ -1,4 +1,4 @@
-import { bigint, boolean, doublePrecision, index, pgTable, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
+import { bigint, boolean, doublePrecision, index, jsonb, pgTable, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
 
 /**
  * Conventions
@@ -240,6 +240,54 @@ export const nameRules = pgTable(
     createdAt: createdAt(),
   },
   (t) => [uniqueIndex("name_rules_user_merchant_amount_idx").on(t.userId, t.merchantKey, t.amount)],
+);
+
+/**
+ * Bills the owner (or Nickel or Claude, when asked) added by hand: ones the
+ * bank can't show yet, like a new subscription, a bill paid by check, or a
+ * one-off coming up. Shown with the bills found in the history.
+ */
+export const manualBills = pgTable(
+  "manual_bills",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    /** Signed cents: a bill is negative (money out). */
+    amount: cents("amount").notNull(),
+    /** once | weekly | biweekly | monthly | quarterly | semiannual | yearly */
+    frequency: text("frequency").notNull(),
+    /** The first (or only) date it's due. Later dates follow from the frequency. */
+    startDate: text("start_date").notNull(),
+    /** bill | subscription */
+    kind: text("kind").notNull().default("bill"),
+    category: text("category").notNull().default("other"),
+    cancelled: boolean("cancelled").notNull().default(false),
+    /** you | nickel | claude */
+    addedBy: text("added_by").notNull().default("you"),
+    createdAt: createdAt(),
+  },
+  (t) => [index("manual_bills_user_idx").on(t.userId)],
+);
+
+/**
+ * What Nickel and Claude changed for the owner, newest first, each with what
+ * it takes to put it back (Undo).
+ */
+export const activityLog = pgTable(
+  "activity_log",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    /** nickel | claude */
+    actor: text("actor").notNull(),
+    summary: text("summary").notNull(),
+    /** How to reverse it; see src/server/actions.ts. */
+    undo: jsonb("undo").notNull(),
+    undoneAt: timestamp("undone_at", { withTimezone: true }),
+    createdAt: createdAt(),
+  },
+  (t) => [index("activity_user_created_idx").on(t.userId, t.createdAt)],
 );
 
 export const debtPlans = pgTable("debt_plans", {

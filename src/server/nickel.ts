@@ -11,6 +11,10 @@ export type NickelPayload = {
   /** The newest transaction, so he can perk up when a new one arrives. */
   latest: { id: string; name: string; amount: number; createdAt: string } | null;
   demo: boolean;
+  /** For understanding instructions on the phone: today, and the goals and loans he can be told about. */
+  today: string;
+  goals: { id: string; name: string }[];
+  loans: { id: string; name: string }[];
 };
 
 /** Gathers what Nickel looks at from the person's own numbers. Read-only. */
@@ -51,5 +55,13 @@ export async function getNickel(ctx: Ctx): Promise<NickelPayload> {
     latest: latest ? { name: latest.name, amount: latest.amount, date: latest.date } : null,
     unclearNames,
   });
-  return { mood, tips, latest: latest ? { id: latest.id, name: latest.name, amount: latest.amount, createdAt: latest.createdAt } : null, demo: ctx.demo };
+  return {
+    mood,
+    tips,
+    latest: latest ? { id: latest.id, name: latest.name, amount: latest.amount, createdAt: latest.createdAt } : null,
+    demo: ctx.demo,
+    today: ctx.today,
+    goals: goals.goals.map((g) => ({ id: g.id, name: g.name })),
+    loans: allAccounts.filter((a) => a.balance < 0 && (a.type === "loan" || a.type === "credit")).map((a) => ({ id: a.id, name: a.name })),
+  };
 }
