@@ -1,9 +1,9 @@
 import { and, asc, eq, sql } from "drizzle-orm";
 import { manualBills } from "@/db/schema";
 import { isCategoryKey } from "@/lib/categories";
-import { addDays, dayOfMonth, diffDays, type ISODate } from "@/lib/dates";
+import { addDays, diffDays, type ISODate } from "@/lib/dates";
 import { validName } from "@/lib/finance/names";
-import { monthlyEquivalent, stepFrom, type Frequency, type RecurringSeries } from "@/lib/finance/recurring";
+import { firstOnOrAfter, merchantKey, monthlyEquivalent, nthDate, type Frequency, type RecurringSeries } from "@/lib/finance/recurring";
 import { cancelHelp } from "@/lib/finance/subscriptions";
 import type { RecurringView } from "@/lib/types";
 import type { Ctx } from "./auth";
@@ -106,6 +106,8 @@ export async function restoreManualBill(ctx: Ctx, bill: Pick<ManualBill, "id" | 
   const checked = checkBill({ name: bill.name, amount: Math.abs(bill.amount), frequency: bill.frequency as BillFrequencyChoice, startDate: bill.startDate, kind: bill.kind as "bill" | "subscription", category: bill.category }, ctx.today) as ManualBillInput;
   const addedBy = (["you", "nickel", "claude"] as const).find((a) => a === bill.addedBy) ?? "you";
   if (typeof bill.id !== "string" || !/^[0-9a-f-]{36}$/.test(bill.id)) throw new HttpError(400, "That bill can’t be put back.");
+  const [{ count }] = await ctx.db.select({ count: sql<number>`count(*)::int` }).from(manualBills).where(eq(manualBills.userId, ctx.userId));
+  if (count >= MAX_MANUAL_BILLS) throw new HttpError(400, "That’s the most added bills Passbook keeps. Remove some you no longer pay first.");
   await ctx.db
     .insert(manualBills)
     .values({ id: bill.id, userId: ctx.userId, name: checked.name, amount: -checked.amount, frequency: checked.frequency, startDate: checked.startDate, kind: checked.kind ?? "bill", category: checked.category ?? "other", cancelled: Boolean(bill.cancelled), addedBy })
@@ -118,25 +120,49 @@ export async function listManualBills(ctx: Ctx): Promise<ManualBill[]> {
 
 /** The next time a hand-added bill is due, today or later. A one-off keeps its date even once it has passed. */
 export function nextDue(bill: Pick<ManualBill, "frequency" | "startDate">, today: ISODate): ISODate {
-  const frequency = bill.frequency as Frequency;
-  if (frequency === "once" || bill.startDate >= today) return bill.startDate;
-  const day = dayOfMonth(bill.startDate);
-  let d = bill.startDate;
-  // Jump close first so a weekly bill started years ago doesn't take thousands of steps.
-  if (frequency === "weekly" || frequency === "biweekly") {
-    const step = frequency === "weekly" ? 7 : 14;
-    d = addDays(d, Math.floor(diffDays(today, d) / step) * step);
-  }
-  for (let i = 0; i < 1000 && d < today; i++) d = stepFrom(d, frequency, frequency === "monthly" ? day : undefined);
-  return d;
+  return firstOnOrAfter(bill.startDate, bill.frequency as Frequency, today).date;
+}
+
+export type BankMatch = { paid: { id: string; date: ISODate; amount: number } | null; seenAs: string | null };
+
+/**
+ * What the bank shows about a hand-added bill, so it's never counted twice:
+ *  - `seenAs`: the bank's own repeating charge for it, once Passbook finds one
+ *    (from then on that one counts and this copy stands aside);
+ *  - `paid`: a payment like it (same name, within 10% of the amount) in the 12
+ *    days before it's due, so it counts as paid rather than still to come.
+ */
+export function bankMatch(
+  bill: Pick<ManualBill, "name" | "amount" | "frequency" | "startDate">,
+  today: ISODate,
+  charges: { id: string; date: ISODate; amount: number; names: string[] }[],
+  found: { name: string; bankName: string; active: boolean; kind: string }[],
+): BankMatch {
+  const key = merchantKey(bill.name);
+  if (key.replace(/ /g, "").length < 3) return { paid: null, seenAs: null };
+  const same = (name: string) => {
+    const k = merchantKey(name);
+    return k === key || (k.length >= 4 && key.length >= 4 && (k.startsWith(`${key} `) || key.startsWith(`${k} `) || k.endsWith(` ${key}`)));
+  };
+  const seen = found.find((s) => s.active && s.kind !== "income" && (same(s.name) || same(s.bankName)));
+  if (seen) return { paid: null, seenAs: seen.name };
+  const due = nextDue(bill, today);
+  const from = addDays(due, -12);
+  const near = (a: number) => Math.abs(Math.abs(a) - Math.abs(bill.amount)) <= Math.abs(bill.amount) * 0.1;
+  const paid = charges
+    .filter((c) => c.amount < 0 && c.date >= from && c.date <= today && c.date <= due && near(c.amount) && c.names.some(same))
+    .sort((a, b) => (a.date < b.date ? 1 : -1))[0];
+  return { paid: paid ? { id: paid.id, date: paid.date, amount: paid.amount } : null, seenAs: null };
 }
 
 /** A hand-added bill dressed as a recurring series, so every screen and the month plan treat it the same. */
-export function manualSeries(bill: ManualBill, today: ISODate): RecurringView {
+export function manualSeries(bill: ManualBill, today: ISODate, bank: BankMatch = { paid: null, seenAs: null }): RecurringView {
   const frequency = bill.frequency as Frequency;
-  const next = nextDue(bill, today);
   const once = frequency === "once";
-  const active = !bill.cancelled && (!once || next >= today);
+  const due = firstOnOrAfter(bill.startDate, frequency, today);
+  // Paid early at the bank: that one's done, and a repeating bill moves on to the next date.
+  const next = bank.paid && !once ? nthDate(bill.startDate, frequency, due.k + 1) : due.date;
+  const active = !bill.cancelled && !bank.seenAs && (!once || (next >= today && !bank.paid));
   const base: RecurringSeries = {
     key: `manual:${bill.id}`,
     name: bill.name,
@@ -145,14 +171,15 @@ export function manualSeries(bill: ManualBill, today: ISODate): RecurringView {
     frequency,
     amount: bill.amount,
     fixedAmount: true,
-    lastDate: bill.startDate,
+    lastDate: bank.paid?.date ?? bill.startDate,
     nextDate: next,
     accountId: "",
     active,
     priceChange: null,
-    history: [],
+    history: bank.paid ? [bank.paid] : [],
     firstDate: bill.startDate,
-    count: 0,
+    count: bank.paid ? 1 : 0,
+    anchor: bill.startDate,
   };
   const untilNext = diffDays(next, today);
   return {
@@ -167,6 +194,6 @@ export function manualSeries(bill: ManualBill, today: ISODate): RecurringView {
     ruleId: null,
     ruleExact: false,
     sampleId: "",
-    manual: { id: bill.id, addedBy: (bill.addedBy as Actor) ?? "you", startDate: bill.startDate },
+    manual: { id: bill.id, addedBy: (bill.addedBy as Actor) ?? "you", startDate: bill.startDate, seenAtBank: bank.seenAs, paidOn: bank.paid?.date ?? null },
   };
 }

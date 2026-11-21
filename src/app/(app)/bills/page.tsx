@@ -40,6 +40,7 @@ function SeriesRow({ series, today, onOpen }: { series: RecurringView; today: st
             {series.startedRecently && !series.renewsSoon && <Tag tone="sky">New since {formatShort(series.firstDate)}</Tag>}
             {series.cancelled && <Tag>Marked cancelled</Tag>}
             {series.manual && <Tag tone="plain">Added by {WHO[series.manual.addedBy]}</Tag>}
+            {series.manual?.seenAtBank && <Tag tone="sky">The bank shows it now</Tag>}
           </span>
           <span className="block truncate text-small text-ink-3">
             {series.manual
@@ -240,7 +241,11 @@ function ManualBillDialog({ series, today, onClose }: { series: RecurringView; t
           </div>
           <p className="text-small text-ink-2">
             {once ? "Just once. " : `${FREQUENCY_LABEL[series.frequency]}. `}
-            {series.cancelled ? "You marked this as cancelled, so it no longer counts toward what’s coming up." : series.active ? `${once ? "Due" : "Next due"} ${formatMedium(series.nextDate)}.` : `It was due ${formatMedium(series.nextDate)}.`} Added by {WHO[manual.addedBy]}, so it isn’t from the bank: it counts as planned, not paid.
+            {manual.seenAtBank
+              ? `Passbook now finds this in your bank history as “${manual.seenAtBank}”, so that one counts and this copy doesn’t. You can remove this one.`
+              : series.cancelled
+                ? "You marked this as cancelled, so it no longer counts toward what’s coming up."
+                : `${manual.paidOn ? `The bank shows it paid on ${formatMedium(manual.paidOn)}. ` : ""}${series.active ? `${once ? "Due" : "Next due"} ${formatMedium(series.nextDate)}.` : once && manual.paidOn ? "" : `It was due ${formatMedium(series.nextDate)}.`} Added by ${WHO[manual.addedBy]}: it counts as planned until the bank shows it paid.`}
           </p>
           {error && <ErrorNote message={error} />}
           <div className="flex flex-wrap gap-2 border-t border-line-soft pt-4">

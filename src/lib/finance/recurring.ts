@@ -40,6 +40,11 @@ export type RecurringSeries = {
   /** The first charge we have on record, and how many there have been. */
   firstDate: ISODate;
   count: number;
+  /**
+   * For bills added by hand: the date every later one is counted from, so a
+   * bill due on the 31st comes back to the 31st after a short month.
+   */
+  anchor?: ISODate;
 };
 
 const FREQUENCIES: { frequency: Frequency; days: number; min: number; max: number; minCount: number }[] = [
@@ -201,8 +206,50 @@ export function stepFrom(date: ISODate, frequency: Frequency, monthlyDay?: numbe
  * Projected dates for a series inside [from, to], counting only occurrences
  * that haven’t happened yet (after the last one we saw).
  */
+/** The k-th date of a schedule counted from its first date (0 is the first date itself). */
+export function nthDate(anchor: ISODate, frequency: Frequency, k: number): ISODate {
+  switch (frequency) {
+    case "once":
+      return k === 0 ? anchor : "9999-12-31";
+    case "weekly":
+      return addDays(anchor, 7 * k);
+    case "biweekly":
+      return addDays(anchor, 14 * k);
+    case "monthly":
+      return addMonths(anchor, k);
+    case "quarterly":
+      return addMonths(anchor, 3 * k);
+    case "semiannual":
+      return addMonths(anchor, 6 * k);
+    case "yearly":
+      return addMonths(anchor, 12 * k);
+  }
+}
+
+/** The first date of a schedule on or after `date`, and which one it is. */
+export function firstOnOrAfter(anchor: ISODate, frequency: Frequency, date: ISODate): { k: number; date: ISODate } {
+  if (anchor >= date || frequency === "once") return { k: 0, date: anchor };
+  const approx = { weekly: 7, biweekly: 14, monthly: 30.44, quarterly: 91.3, semiannual: 182.6, yearly: 365.25 }[frequency];
+  let k = Math.max(0, Math.floor(diffDays(date, anchor) / approx) - 1);
+  for (let i = 0; i < 400; i++, k++) {
+    const d = nthDate(anchor, frequency, k);
+    if (d >= date) return { k, date: d };
+  }
+  return { k, date: nthDate(anchor, frequency, k) };
+}
+
 export function upcomingBetween(series: RecurringSeries, from: ISODate, to: ISODate): ISODate[] {
   if (!series.active) return [];
+  if (series.anchor) {
+    const out: ISODate[] = [];
+    let { k } = firstOnOrAfter(series.anchor, series.frequency, series.nextDate);
+    for (let i = 0; i < 60; i++, k++) {
+      const d = nthDate(series.anchor, series.frequency, k);
+      if (d > to) break;
+      if (d >= from) out.push(d);
+    }
+    return out;
+  }
   const out: ISODate[] = [];
   const monthlyDay = series.frequency === "monthly" ? dayOfMonth(series.nextDate) : undefined;
   let d = series.nextDate;

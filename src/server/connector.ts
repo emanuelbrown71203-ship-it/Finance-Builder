@@ -181,8 +181,9 @@ const dateFrom = (value: unknown) => (typeof value === "string" && /^\d{4}-\d{2}
 const changed = (done: Done[]) => ({ done: true, what_changed: done.map((d) => d.summary), undo: "The user can undo this in Passbook under Settings, Activity." });
 
 async function callWriteTool(name: string, args: Record<string, unknown>, ctx: Ctx): Promise<unknown> {
-  // A ceiling on changes per hour, so a runaway chat can't flood the account.
+  // A ceiling on changes per hour and per day, so a runaway chat (or a lost link) can't flood the account.
   await limitKey("connector-write", ctx.userId, 40, 3_600_000);
+  await limitKey("connector-write-day", ctx.userId, 150, 86_400_000);
   switch (name) {
     case "add_bill": {
       const amount = centsFrom(args.amount);
@@ -231,7 +232,7 @@ async function callWriteTool(name: string, args: Record<string, unknown>, ctx: C
       const only = args.only_at_amount === undefined ? null : centsFrom(args.only_at_amount);
       if (args.only_at_amount !== undefined && only === null) throw new HttpError(400, "only_at_amount must be dollars, like 1200.");
       const charge = await findCharge(ctx, text(args.current_name), only ?? undefined);
-      return changed([await renameCharges(ctx, "claude", charge.id, text(args.new_name), only !== null)]);
+      return changed([await renameCharges(ctx, "claude", charge.id, text(args.new_name), only !== null || charge.exact)]);
     }
   }
   throw new Error(`Unknown tool: ${name}`);
@@ -429,7 +430,7 @@ export async function handleRpc(msg: Msg, ctx: Ctx): Promise<unknown | null> {
         // Passbook's own "that didn't work because…" messages (a missing goal, a bad amount) are safe and useful.
         const known = (e instanceof Error && e.message.startsWith("Unknown tool")) || (e instanceof HttpError && e.status < 500);
         if (!known) console.error("Connector tool failed:", describeError(e));
-        return ok({ content: [{ type: "text", text: known ? (e as Error).message : "That couldn’t be done just now. Try again." }], isError: true });
+        return ok({ content: [{ type: "text", text: known ? String(tidy((e as Error).message)) : "That couldn’t be done just now. Try again." }], isError: true });
       }
     case "resources/list":
       return ok({ resources: [] });

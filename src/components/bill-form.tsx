@@ -44,7 +44,9 @@ export function BillForm({ today, draft, editing, via = "you", onDone, onCancel 
     setError(null);
     try {
       if (editing) {
-        const { before } = await send<{ before: SavedBill }>("PATCH", `/api/bills/${editing.id}`, { name, amount: cents, frequency, startDate: date, kind });
+        // The date shown is the next one due; sending it only when it was changed keeps the day the bill was
+        // first set for (a bill on the 31st stays on the 31st).
+        const { before } = await send<{ before: SavedBill }>("PATCH", `/api/bills/${editing.id}`, { name, amount: cents, frequency, kind, ...(date !== editing.startDate || frequency !== editing.frequency ? { startDate: date } : {}) });
         toast("Bill saved", { action: { label: "Undo", run: () => send("PATCH", `/api/bills/${editing.id}`, { name: before.name, amount: Math.abs(before.amount), frequency: before.frequency, startDate: before.startDate, kind: before.kind }) } });
       } else if (via === "nickel") {
         const done = await send<{ activityId: string; summary: string }>("POST", "/api/nickel/do", frequency === "once" ? { kind: "upcoming", name, amount: cents, date } : { kind: "bill", name, amount: cents, frequency, date, billKind: kind });

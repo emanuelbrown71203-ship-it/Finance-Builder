@@ -11,7 +11,7 @@ import { FREQUENCY_LABEL, detectRecurring, monthlyEquivalent, seriesKeyFor, upco
 import { cancelHelp, isKnownSubscription } from "@/lib/finance/subscriptions";
 import type { Namer } from "@/lib/finance/names";
 import { HttpError } from "./errors";
-import { listManualBills, manualSeries } from "./manual-bills";
+import { bankMatch, listManualBills, manualSeries } from "./manual-bills";
 import { bankNames, loadNamer } from "./names";
 import type {
   AccountView,
@@ -241,7 +241,9 @@ async function loadRecurring(ctx: Ctx): Promise<RecurringBundle> {
   }
 
   // Bills added by hand sit alongside the ones found in the history.
-  for (const bill of added) series.push(manualSeries(bill, ctx.today));
+  const found = series.map((s) => ({ name: s.name, bankName: s.bankName, active: s.active, kind: s.kind }));
+  const charges = raw.filter((t) => t.amount < 0 && t.date >= addDays(ctx.today, -60)).map((t) => ({ id: t.id, date: t.date, amount: t.amount, names: [t.name, nameFor(t).name] }));
+  for (const bill of added) series.push(manualSeries(bill, ctx.today, bankMatch(bill, ctx.today, charges, found)));
   series.sort((a, b) => (a.nextDate < b.nextDate ? -1 : a.nextDate > b.nextDate ? 1 : a.name.localeCompare(b.name)));
 
   // A recent charge from a well-known subscription service that hasn't repeated yet.
@@ -607,7 +609,7 @@ export async function getOverview(ctx: Ctx): Promise<Overview> {
   }
   for (const s of bundle.series) {
     if (s.renewsSoon) {
-      attention.push({ kind: "renewal", title: `${s.name} renews ${formatDistance(s.nextDate, ctx.today)}`, detail: `${dollarsExact(-s.amount)}, ${s.frequency === "yearly" ? "once a year" : "every 3 months"}. Cancel before then if you don’t want it.`, href: "/bills" });
+      attention.push({ kind: "renewal", title: `${s.name} renews ${formatDistance(s.nextDate, ctx.today)}`, detail: `${dollarsExact(-s.amount)}, ${s.frequency === "yearly" ? "once a year" : s.frequency === "semiannual" ? "every 6 months" : "every 3 months"}. Cancel before then if you don’t want it.`, href: "/bills" });
     }
   }
   for (const p of bundle.possible) {

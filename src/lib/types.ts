@@ -111,7 +111,15 @@ export type RecurringView = RecurringSeries & {
   /** The latest charge without a name of its own, for renaming the bill. */
   sampleId: string;
   /** Set for a bill added by hand (by the owner, Nickel or Claude) rather than found in the history. */
-  manual: { id: string; addedBy: "you" | "nickel" | "claude"; startDate: ISODate } | null;
+  manual: {
+    id: string;
+    addedBy: "you" | "nickel" | "claude";
+    startDate: ISODate;
+    /** The bank's own repeating charge for it, once found: from then on that one counts instead. */
+    seenAtBank: string | null;
+    /** When the bank showed this one paid ahead of its date. */
+    paidOn: ISODate | null;
+  } | null;
 };
 
 /** A charge from a known subscription service that hasn't repeated yet: probably a new sign-up or a trial that converted. */

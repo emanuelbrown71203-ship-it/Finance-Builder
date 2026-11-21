@@ -13,7 +13,7 @@ const Body = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("goal"), name: z.string().max(200), target: cents, date: date.nullable() }),
   z.object({ kind: z.literal("deposit"), goal: z.string().max(200), amount: cents }),
   z.object({ kind: z.literal("loan"), loan: z.string().max(200), aprPercent: z.number().min(0).max(99).nullable(), payment: cents.nullable() }),
-  z.object({ kind: z.literal("rename"), from: z.string().max(200), to: z.string().max(200), onlyThisAmount: z.boolean().optional() }),
+  z.object({ kind: z.literal("rename"), from: z.string().max(200), to: z.string().max(200), onlyAmount: cents.nullable().optional() }),
 ]);
 
 /** Nickel does what he was asked and says what he did; it lands in the activity list with Undo. */
@@ -30,7 +30,9 @@ export const POST = withUser(async (ctx, request) => {
       return addToGoal(ctx, "nickel", (await findGoal(ctx, c.goal)).id, c.amount);
     case "loan":
       return changeLoan(ctx, "nickel", (await findDebt(ctx, c.loan)).id, { ...(c.aprPercent !== null ? { aprPercent: c.aprPercent } : {}), ...(c.payment !== null ? { monthlyPayment: c.payment } : {}) });
-    case "rename":
-      return renameCharges(ctx, "nickel", (await findCharge(ctx, c.from)).id, c.to, c.onlyThisAmount);
+    case "rename": {
+      const charge = await findCharge(ctx, c.from, c.onlyAmount ?? undefined);
+      return renameCharges(ctx, "nickel", charge.id, c.to, Boolean(c.onlyAmount) || charge.exact);
+    }
   }
 });

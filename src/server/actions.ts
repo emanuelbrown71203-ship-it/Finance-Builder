@@ -1,5 +1,5 @@
-import { and, desc, eq, inArray, isNull, lt, sql } from "drizzle-orm";
-import { accounts, activityLog, debtPlans, goalDeposits, goals, transactions } from "@/db/schema";
+import { and, asc, desc, eq, inArray, isNotNull, isNull, lt, or, sql } from "drizzle-orm";
+import { accounts, activityLog, debtPlans, goalDeposits, goals, nameRules, transactions } from "@/db/schema";
 import { formatShort, type ISODate } from "@/lib/dates";
 import { validName } from "@/lib/finance/names";
 import { FREQUENCY_LABEL, type Frequency } from "@/lib/finance/recurring";
@@ -23,13 +23,18 @@ import { createNameRule, deleteNameRule, loadNamer, renameRule, restoreNameRule,
 
 export type Agent = "nickel" | "claude";
 
+/** A field that was changed: what it was, and what it was set to. Undo only puts it back if it's still `to`. */
+type Change<T> = { from: T; to: T };
+type GoalChanges = Partial<{ name: Change<string>; target: Change<number>; targetDate: Change<string | null>; monthlyContribution: Change<number> }>;
+type LoanChanges = Partial<{ aprPercent: Change<number | null>; monthlyPayment: Change<number | null> }>;
+
 type Undo =
   | { type: "bill.remove"; billId: string }
   | { type: "goal.remove"; goalId: string }
-  | { type: "goal.restore"; goalId: string; fields: { name: string; target: number; targetDate: string | null; monthlyContribution: number } }
+  | { type: "goal.restore"; goalId: string; changes: GoalChanges }
   | { type: "deposit.remove"; goalId: string; depositId: string }
-  | { type: "loan.restore"; accountId: string; aprPercent: number | null; monthlyPayment: number | null }
-  | { type: "name.undo"; undo: NameUndo };
+  | { type: "loan.restore"; accountId: string; changes: LoanChanges }
+  | { type: "name.undo"; undo: NameUndo; name: string };
 
 export type Done = { activityId: string; summary: string; href: string };
 
@@ -40,11 +45,18 @@ const UNDO_DAYS = 30;
 async function record(ctx: Ctx, actor: Agent, summary: string, undo: Undo): Promise<string> {
   const id = crypto.randomUUID();
   await ctx.db.insert(activityLog).values({ id, userId: ctx.userId, actor, summary: summary.slice(0, 300), undo });
-  // Keep the list from growing for ever: the oldest entries go.
+  // Keep the list from growing for ever, but never drop a change that can still be undone:
+  // only entries past their 30 days, or already undone, go.
   const [{ count }] = await ctx.db.select({ count: sql<number>`count(*)::int` }).from(activityLog).where(eq(activityLog.userId, ctx.userId));
   if (count > MAX_ACTIVITY) {
-    const old = await ctx.db.select({ id: activityLog.id }).from(activityLog).where(eq(activityLog.userId, ctx.userId)).orderBy(desc(activityLog.createdAt)).offset(MAX_ACTIVITY);
-    if (old.length > 0) await ctx.db.delete(activityLog).where(and(eq(activityLog.userId, ctx.userId), inArray(activityLog.id, old.map((o) => o.id).slice(0, 500))));
+    const cutoff = new Date(Date.now() - UNDO_DAYS * 86_400_000);
+    const old = await ctx.db
+      .select({ id: activityLog.id })
+      .from(activityLog)
+      .where(and(eq(activityLog.userId, ctx.userId), or(lt(activityLog.createdAt, cutoff), isNotNull(activityLog.undoneAt))))
+      .orderBy(asc(activityLog.createdAt))
+      .limit(Math.min(500, count - MAX_ACTIVITY));
+    if (old.length > 0) await ctx.db.delete(activityLog).where(and(eq(activityLog.userId, ctx.userId), inArray(activityLog.id, old.map((o) => o.id))));
   }
   return id;
 }
@@ -102,7 +114,9 @@ export async function findCharge(ctx: Ctx, said: string, amount?: number) {
   const exact = pool.find((t) => matches(t).includes(s));
   const partial = exact ?? pool.find((t) => matches(t).some((n) => n.includes(s)));
   if (!partial) throw new HttpError(400, `No charge called “${said.slice(0, 40)}”${amount !== undefined ? ` for ${money(amount)}` : ""} turned up.`);
-  return { ...partial, shown: nameFor(partial).name };
+  const named = nameFor(partial);
+  // A charge named for one amount only ("Rent" for Venmo payments of $1,200) is renamed at that amount only.
+  return { ...partial, shown: named.name, exact: named.exact };
 }
 
 /* ---------- the changes ---------- */
@@ -166,7 +180,12 @@ export async function changeGoal(
   if (said.length === 0) throw new HttpError(400, "What should change about the goal?");
   await updateGoal(ctx, goal.id, fields);
   const summary = `Changed the goal ${goal.name}: ${said.join(", ")}.`;
-  const activityId = await record(ctx, actor, summary, { type: "goal.restore", goalId: goal.id, fields: { name: goal.name, target: goal.target, targetDate: goal.targetDate, monthlyContribution: goal.monthlyContribution } });
+  const changes: GoalChanges = {};
+  if (fields.name !== undefined) changes.name = { from: goal.name, to: fields.name };
+  if (fields.target !== undefined) changes.target = { from: goal.target, to: fields.target };
+  if (fields.targetDate !== undefined) changes.targetDate = { from: goal.targetDate, to: fields.targetDate };
+  if (fields.monthlyContribution !== undefined) changes.monthlyContribution = { from: goal.monthlyContribution, to: fields.monthlyContribution };
+  const activityId = await record(ctx, actor, summary, { type: "goal.restore", goalId: goal.id, changes });
   return { activityId, summary, href: `/savings/goal?id=${encodeURIComponent(goal.id)}` };
 }
 
@@ -190,7 +209,10 @@ export async function changeLoan(ctx: Ctx, actor: Agent, accountId: string, patc
   await setDebtPlan(ctx, account.id, patch);
   const said = [patch.aprPercent !== undefined && patch.aprPercent !== null ? `interest ${patch.aprPercent}%` : "", patch.monthlyPayment ? `payment ${money(patch.monthlyPayment)} a month` : ""].filter(Boolean);
   const summary = `Changed ${account.name}: ${said.join(", ")}.`;
-  const activityId = await record(ctx, actor, summary, { type: "loan.restore", accountId: account.id, aprPercent: plan?.aprPercent ?? null, monthlyPayment: plan?.monthlyPayment ?? null });
+  const changes: LoanChanges = {};
+  if (patch.aprPercent !== undefined) changes.aprPercent = { from: plan?.aprPercent ?? null, to: patch.aprPercent };
+  if (patch.monthlyPayment !== undefined) changes.monthlyPayment = { from: plan?.monthlyPayment ?? null, to: patch.monthlyPayment };
+  const activityId = await record(ctx, actor, summary, { type: "loan.restore", accountId: account.id, changes });
   return { activityId, summary, href: "/debt" };
 }
 
@@ -198,7 +220,7 @@ export async function renameCharges(ctx: Ctx, actor: Agent, transactionId: strin
   const result = await createNameRule(ctx, { transactionId, name, onlyThisAmount });
   const clean = validName(name)!;
   const summary = `Renamed ${result.count === 1 ? "a charge" : `${result.count} charges`} to ${clean}${onlyThisAmount ? " (only at that amount)" : ""}. New ones will be too.`;
-  const activityId = await record(ctx, actor, summary, { type: "name.undo", undo: result.undo });
+  const activityId = await record(ctx, actor, summary, { type: "name.undo", undo: result.undo, name: clean });
   return { activityId, summary, href: "/transactions/names" };
 }
 
@@ -231,6 +253,10 @@ export async function undoActivity(ctx: Ctx, id: string): Promise<{ summary: str
   return { summary: row.summary };
 }
 
+/**
+ * Puts back what one change did, and only that: a field the owner has changed
+ * again since is left as they set it.
+ */
 async function reverse(ctx: Ctx, undo: Undo) {
   switch (undo.type) {
     case "bill.remove":
@@ -245,21 +271,42 @@ async function reverse(ctx: Ctx, undo: Undo) {
       await ctx.db.delete(goals).where(and(eq(goals.id, undo.goalId), eq(goals.userId, ctx.userId)));
       return;
     }
-    case "goal.restore":
-      await updateGoal(ctx, undo.goalId, undo.fields);
+    case "goal.restore": {
+      const [goal] = await ctx.db.select().from(goals).where(and(eq(goals.id, undo.goalId), eq(goals.userId, ctx.userId))).limit(1);
+      if (!goal) throw new HttpError(404, "That goal isn’t there any more.");
+      const back: Record<string, unknown> = {};
+      for (const [field, change] of Object.entries(undo.changes) as [keyof GoalChanges, Change<unknown>][]) {
+        if (change && goal[field] === change.to) back[field] = change.from;
+      }
+      if (Object.keys(back).length === 0) throw new HttpError(409, "That goal has been changed again since, so there’s nothing to put back.");
+      await updateGoal(ctx, goal.id, back);
       return;
+    }
     case "deposit.remove":
       await deleteDeposit(ctx, undo.goalId, undo.depositId);
       return;
-    case "loan.restore":
-      await setDebtPlan(ctx, undo.accountId, { aprPercent: undo.aprPercent, monthlyPayment: undo.monthlyPayment });
+    case "loan.restore": {
+      const [plan] = await ctx.db.select().from(debtPlans).where(and(eq(debtPlans.accountId, undo.accountId), eq(debtPlans.userId, ctx.userId))).limit(1);
+      const back: { aprPercent?: number | null; monthlyPayment?: number | null } = {};
+      if (undo.changes.aprPercent && (plan?.aprPercent ?? null) === undo.changes.aprPercent.to) back.aprPercent = undo.changes.aprPercent.from;
+      if (undo.changes.monthlyPayment && (plan?.monthlyPayment ?? null) === undo.changes.monthlyPayment.to) back.monthlyPayment = undo.changes.monthlyPayment.from;
+      if (Object.keys(back).length === 0) throw new HttpError(409, "That loan has been changed again since, so there’s nothing to put back.");
+      await setDebtPlan(ctx, undo.accountId, back);
       return;
+    }
     case "name.undo": {
       const u = undo.undo;
-      if (u.previousName === null) await deleteNameRule(ctx, u.ruleId).catch(() => {});
-      else await renameRule(ctx, u.ruleId, u.previousName);
-      if (u.replaced) await restoreNameRule(ctx, { key: u.key, amount: u.replaced.amount, name: u.replaced.name });
-      if (u.customName) await ctx.db.update(transactions).set({ customName: u.customName }).where(and(eq(transactions.id, u.transactionId), eq(transactions.userId, ctx.userId)));
+      const [rule] = await ctx.db.select({ name: nameRules.name }).from(nameRules).where(and(eq(nameRules.id, u.ruleId), eq(nameRules.userId, ctx.userId))).limit(1);
+      // A name the owner has changed again since stays as they set it.
+      if (rule && rule.name === undo.name) {
+        if (u.previousName === null) await deleteNameRule(ctx, u.ruleId);
+        else await renameRule(ctx, u.ruleId, u.previousName);
+      }
+      if (u.replaced) {
+        const [taken] = await ctx.db.select({ id: nameRules.id }).from(nameRules).where(and(eq(nameRules.userId, ctx.userId), eq(nameRules.merchantKey, u.key), eq(nameRules.amount, u.replaced.amount))).limit(1);
+        if (!taken) await restoreNameRule(ctx, { key: u.key, amount: u.replaced.amount, name: u.replaced.name });
+      }
+      if (u.customName) await ctx.db.update(transactions).set({ customName: u.customName }).where(and(eq(transactions.id, u.transactionId), eq(transactions.userId, ctx.userId), isNull(transactions.customName)));
       return;
     }
   }

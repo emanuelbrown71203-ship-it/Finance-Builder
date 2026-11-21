@@ -17,7 +17,7 @@ export type Command =
   | { kind: "goal"; name: string | null; target: number | null; date: ISODate | null }
   | { kind: "deposit"; goal: string | null; amount: number | null }
   | { kind: "loan"; loan: string | null; aprPercent: number | null; payment: number | null }
-  | { kind: "rename"; from: string | null; to: string | null };
+  | { kind: "rename"; from: string | null; to: string | null; onlyAmount: number | null };
 
 export type CommandContext = { today: ISODate; goals: string[]; loans: string[] };
 
@@ -38,14 +38,25 @@ class Words {
   }
 }
 
-/** "$15.99", "15.99", "2,150", "1.5k", "$40 dollars" → cents. */
+/**
+ * "$15.99", "15.99", "2,150", "1.5k", "40 dollars" → cents. A "$" amount wins
+ * over a bare number anywhere in the text, and dates are read first, so a
+ * year or a day of the month is never taken for the amount.
+ */
 function takeAmount(w: Words): number | null {
-  const m = w.take(/(?:^|\s)(?:\$\s?(\d[\d,]*(?:\.\d{1,2})?)(k)?|(\d[\d,]*(?:\.\d{1,2})?)(k)?\s*(?:dollars|bucks|usd)|(\d[\d,]*\.\d{1,2})|(\d{1,3}(?:,\d{3})+|\d{2,})(k)?)(?=\s|$|[.,!?])/i);
-  if (!m) return null;
-  const raw = (m[1] ?? m[3] ?? m[5] ?? m[6] ?? "").replace(/,/g, "");
-  const k = m[2] ?? m[4] ?? m[7];
-  const value = Number(raw) * (k ? 1000 : 1);
-  return Number.isFinite(value) && value > 0 && value < 100_000_000 ? Math.round(value * 100) : null;
+  const tries = [
+    /(?:^|\s)\$\s?(\d[\d,]*(?:\.\d{1,2})?)(k)?(?=\s|$|[.,!?])/i,
+    /(?:^|\s)(\d[\d,]*(?:\.\d{1,2})?)(k)?\s*(?:dollars|bucks|usd)\b/i,
+    /(?:^|\s)(\d[\d,]*\.\d{1,2})()(?=\s|$|[.,!?])/,
+    /(?:^|\s)(\d{1,3}(?:,\d{3})+|\d{2,})(k)?(?=\s|$|[.,!?])/i,
+  ];
+  for (const re of tries) {
+    const m = w.take(re);
+    if (!m) continue;
+    const value = Number(m[1].replace(/,/g, "")) * (m[2] ? 1000 : 1);
+    return Number.isFinite(value) && value > 0 && value < 100_000_000 ? Math.round(value * 100) : null;
+  }
+  return null;
 }
 
 function takePercent(w: Words): number | null {
@@ -65,14 +76,19 @@ function takeFrequency(w: Words): BillFrequency | null {
   return null;
 }
 
-/** The next time a day of the month comes round, today included. */
+/**
+ * The next time a day of the month comes round, today included. "The 31st"
+ * means a month that has a 31st, so a monthly bill keeps that day (it falls on
+ * the last day in shorter months) instead of drifting to the 30th for good.
+ */
 function nextDayOfMonth(today: ISODate, day: number): ISODate {
-  const [y, m] = today.split("-").map(Number);
-  const thisMonth = iso(y, m, day);
-  if (thisMonth >= today) return thisMonth;
-  const next = addMonths(`${today.slice(0, 7)}-01`, 1);
-  const [ny, nm] = next.split("-").map(Number);
-  return iso(ny, nm, day);
+  for (let i = 0; i < 13; i++) {
+    const [y, m] = addMonths(`${today.slice(0, 7)}-01`, i).split("-").map(Number);
+    if (day > daysInMonth(y, m)) continue;
+    const d = iso(y, m, day);
+    if (d >= today) return d;
+  }
+  return today;
 }
 
 /** "on the 5th", "Dec 12", "12/5", "tomorrow", "next friday", "in 2 weeks", "by June", "by June 2027". */
@@ -147,39 +163,62 @@ function nameFrom(rest: string, filler: RegExp = FILLER): string | null {
   return name.slice(0, 60);
 }
 
+const plain = (s: string) => s.toLowerCase().replace(/[^\p{L}\p{N} ]/gu, " ").replace(/\s+/g, " ").trim();
+/** Words too common to point at one goal or loan on their own. */
+const COMMON = new Set(["fund", "goal", "loan", "card", "account", "savings", "weeks", "payment", "down", "trip", "money", "bill", "plan", "new", "visa", "cashback"]);
+/** The words of a name that are specific enough to recognise it by. */
+const keyWords = (name: string) => plain(name).split(" ").filter((x) => x.length >= 4 && !COMMON.has(x));
+
 /** The known name (a goal, a loan) that the text mentions, if any. Longest match wins. */
 function mention(text: string, names: string[]): string | null {
-  const t = ` ${text.toLowerCase().replace(/[^\p{L}\p{N} ]/gu, " ").replace(/\s+/g, " ")} `;
+  const t = ` ${plain(text)} `;
   const hits = names.filter((n) => {
-    const key = n.toLowerCase().replace(/[^\p{L}\p{N} ]/gu, " ").replace(/\s+/g, " ").trim();
+    const key = plain(n);
     if (key && t.includes(` ${key} `)) return true;
-    // "the emergency fund" for "Emergency fund", "auto loan" for "Auto Loan", "japan" for "Two weeks in Japan".
-    const words = key.split(" ").filter((x) => x.length >= 4 && !["fund", "goal", "loan", "card", "account", "savings", "weeks"].includes(x));
-    return words.length > 0 && words.some((x) => t.includes(` ${x} `));
+    // "the emergency fund" for "Emergency fund", "japan" for "Two weeks in Japan".
+    return keyWords(n).some((x) => t.includes(` ${x} `));
   });
   return hits.sort((a, b) => b.length - a.length)[0] ?? null;
 }
+
+/** "…to the emergency fund", "…toward Japan": money aimed at that goal, not just the goal's name somewhere. */
+function aimedAt(text: string, goal: string): boolean {
+  const options = [plain(goal), ...keyWords(goal)].filter(Boolean).map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  return new RegExp(`\\b(?:to|toward|towards|into|in|for|on)\\s+(?:the\\s+|my\\s+|our\\s+)?(?:\\S+\\s+){0,2}?(?:${options.join("|")})\\b`, "i").test(plain(text));
+}
+
+/** Words that mean a bill is being talked about, not money into a goal. */
+const BILL_WORDS = /\b(?:bill|bills|subscription|insurance|payment|rent|membership|due|every|monthly|weekly|yearly|annually|quarterly|upcoming|one[- ]time|one[- ]off)\b/i;
 
 export function parseCommand(input: string, ctx: CommandContext): Command | null {
   const text = input.replace(/\s+/g, " ").trim().slice(0, 300);
   if (!text) return null;
   const lower = text.toLowerCase();
 
-  // Rename: "rename SQ *TARTINE to Tartine", "call PGANDE Electric bill".
+  // Rename: "rename SQ *TARTINE to Tartine", "rename Venmo to Rent only at $1,200".
   const m = /^(?:please\s+)?(?:rename|change the name of)\s+(.+?)\s+(?:to|as|into)\s+(.+)$/i.exec(text) ?? /^(?:please\s+)?call\s+(.+?)\s+(?:instead\s+)?["“](.+)["”]$/i.exec(text);
-  if (m) return { kind: "rename", from: m[1].replace(/^["“]|["”]$/g, "").trim() || null, to: m[2].replace(/^["“]|["”]$/g, "").trim().slice(0, 60) || null };
-  if (/^rename\b/i.test(text)) return { kind: "rename", from: text.replace(/^rename\s*/i, "").trim() || null, to: null };
+  if (m) {
+    const only = /\s+only\s+(?:at|for|when\s+it'?s|if\s+it'?s|when)\s+\$?\s?(\d[\d,]*(?:\.\d{1,2})?)\s*$/i.exec(m[2]);
+    const to = (only ? m[2].slice(0, only.index) : m[2]).replace(/^["“]|["”]$/g, "").trim().slice(0, 60);
+    const onlyAmount = only ? Math.round(Number(only[1].replace(/,/g, "")) * 100) : null;
+    return { kind: "rename", from: m[1].replace(/^["“]|["”]$/g, "").trim() || null, to: to || null, onlyAmount: onlyAmount && onlyAmount > 0 ? onlyAmount : null };
+  }
+  if (/^rename\b/i.test(text)) return { kind: "rename", from: text.replace(/^rename\s*/i, "").trim() || null, to: null, onlyAmount: null };
 
-  // Money into a goal: "add $200 to the emergency fund", "put 150 toward Japan".
+  // Money into a goal: "add $200 to the emergency fund", "put 150 toward Japan". Only when the money is
+  // aimed at the goal and nothing says it's a bill: "add emergency vet bill $400" is a bill.
   const goal = mention(text, ctx.goals);
-  if (goal && /\b(?:add|put|move|save|saved|deposit|set aside|transfer)\b/i.test(text) && !/\b(?:new|create|goal for|start)\b/i.test(text)) {
+  const withoutGoal = goal ? text.replace(new RegExp(plain(goal).replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/ /g, "\\W+"), "i"), " ") : text;
+  if (goal && /\b(?:add|put|move|save|saved|deposit|set aside|transfer|transferred|stash)\b/i.test(text) && aimedAt(text, goal) && !BILL_WORDS.test(withoutGoal) && !/\b(?:new|create|goal for|start)\b/i.test(text)) {
     const w = new Words(text);
     return { kind: "deposit", goal, amount: takeAmount(w) };
   }
 
   // A loan's rate or payment: "student loan rate is 4.5%", "pay $350 a month on the auto loan".
+  // "Add student loan payment $300 on the 15th" is adding a bill, so a date or "add" sends it there.
   const loan = mention(text, ctx.loans);
-  if ((loan || /\bloan\b/i.test(text)) && /(%|percent|\brate\b|\binterest\b|\bapr\b|\bpay(?:ment|ing)?\b|\bminimum\b)/i.test(text) && !/\bbill\b/i.test(text)) {
+  const dated = takeDate(new Words(text), ctx.today) !== null;
+  if ((loan || /\bloan\b/i.test(text)) && /(%|percent|\brate\b|\binterest\b|\bapr\b|\bpay(?:ment|ing)?\b|\bminimum\b)/i.test(text) && !/\bbill\b/i.test(text) && !dated && !/^(?:please\s+)?(?:add|new|create)\b/i.test(text)) {
     const w = new Words(text);
     const aprPercent = takePercent(w);
     takeFrequency(w);
@@ -190,8 +229,8 @@ export function parseCommand(input: string, ctx: CommandContext): Command | null
   // A new goal: "new goal Japan $4,500 by June", "save $3,000 for a new roof by next year".
   if (/\b(?:goal|save up|saving up|saving for|save for|start saving)\b/i.test(lower) || (/^save\b/i.test(text) && /\bfor\b/i.test(text))) {
     const w = new Words(text);
-    const target = takeAmount(w);
     const date = takeDate(w, ctx.today, true);
+    const target = takeAmount(w);
     // The words that say "make a goal" go; a name like "New roof" keeps its "New".
     w.take(/^(?:please\s+)?(?:(?:add|create|make|start|set\s+up)\s+)?(?:a\s+)?(?:new\s+)?(?:savings\s+)?goal(?:\s+(?:for|called|named))?:?(?=\s|$)/i);
     w.take(/\b(?:new\s+)?(?:savings\s+)?goal\b/i);
@@ -202,8 +241,8 @@ export function parseCommand(input: string, ctx: CommandContext): Command | null
   // A bill: repeating unless it's clearly a one-off.
   const w = new Words(text);
   const frequency = takeFrequency(w);
-  const amount = takeAmount(w);
   const date = takeDate(w, ctx.today);
+  const amount = takeAmount(w);
   const oneOff = /\b(?:upcoming|one[- ]time|one[- ]off|once|just this once|coming up)\b/i.test(lower) || (!frequency && /\bdue\b/i.test(lower));
   const billish = frequency || oneOff || /\b(?:bill|subscription|payment|rent|insurance|membership)\b/i.test(lower) || (/^add\b/i.test(text) && amount !== null);
   if (!billish) return null;

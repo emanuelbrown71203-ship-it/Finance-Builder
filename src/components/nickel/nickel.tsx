@@ -8,6 +8,7 @@ import { CLAUDE_PREFIX, CLAUDE_QUESTIONS, claudeLink } from "@/lib/nickel/claude
 import { parseCommand, type Command } from "@/lib/nickel/commands";
 import { BillForm, type BillDraft } from "../bill-form";
 import { GoalDialog } from "../goals";
+import { formatShort } from "@/lib/dates";
 import { dollars } from "@/lib/money";
 import type { NickelPayload } from "@/server/nickel";
 import { Dialog, Input, cx, toast } from "../ui";
@@ -589,67 +590,108 @@ type Done = { activityId: string; summary: string; href: string };
 
 const EXAMPLES = ["add rent $2,150 on the 1st", "upcoming vet bill $250 next friday", "new goal Japan $4,500 by June", "add $200 to the emergency fund", "student loan rate 4.5%"];
 
-/** The body Nickel sends for an instruction that has everything it needs, or what to ask for when it doesn't. */
-function plan(c: Command, loans: { name: string }[]): { body: Record<string, unknown> } | { ask: string } | { form: Partial<BillDraft> } {
+const usd = (cents: number) => `$${(cents / 100).toLocaleString("en-US", { minimumFractionDigits: cents % 100 ? 2 : 0, maximumFractionDigits: 2 })}`;
+const HOW_OFTEN: Record<string, string> = { weekly: "every week", biweekly: "every 2 weeks", monthly: "every month", quarterly: "every 3 months", semiannual: "every 6 months", yearly: "every year" };
+
+type Plan = { body: Record<string, unknown>; read: string; form?: Partial<BillDraft> } | { ask: string } | { form: Partial<BillDraft> };
+
+/**
+ * What Nickel would do with an instruction, read back in plain words so a
+ * misread can be caught before anything changes; or what to ask for when
+ * something's missing.
+ */
+function plan(c: Command, loans: { name: string }[]): Plan {
   switch (c.kind) {
     case "bill":
-    case "upcoming":
-      if (!c.name || !c.amount || !c.date) return { form: { name: c.name ?? "", amount: c.amount, frequency: c.kind === "upcoming" ? "once" : c.frequency, startDate: c.date, kind: "bill" } };
-      return { body: c.kind === "upcoming" ? { kind: "upcoming", name: c.name, amount: c.amount, date: c.date } : { kind: "bill", name: c.name, amount: c.amount, frequency: c.frequency, date: c.date } };
+    case "upcoming": {
+      const form: Partial<BillDraft> = { name: c.name ?? "", amount: c.amount, frequency: c.kind === "upcoming" ? "once" : c.frequency, startDate: c.date, kind: "bill" };
+      if (!c.name || !c.amount || !c.date) return { form };
+      return c.kind === "upcoming"
+        ? { body: { kind: "upcoming", name: c.name, amount: c.amount, date: c.date }, read: `Add an upcoming bill: ${c.name}, ${usd(c.amount)}, due ${formatShort(c.date)}.`, form }
+        : { body: { kind: "bill", name: c.name, amount: c.amount, frequency: c.frequency, date: c.date }, read: `Add a bill: ${c.name}, ${usd(c.amount)} ${HOW_OFTEN[c.frequency]}, next on ${formatShort(c.date)}.`, form };
+    }
     case "goal":
       if (!c.name) return { ask: "What’s the goal called? Like “new goal Japan $4,500 by June”." };
       if (!c.target) return { ask: `How much does “${c.name}” need? Like “new goal ${c.name} $3,000 by June”.` };
-      return { body: { kind: "goal", name: c.name, target: c.target, date: c.date } };
+      return { body: { kind: "goal", name: c.name, target: c.target, date: c.date }, read: `Make a savings goal: ${c.name}, ${usd(c.target)}${c.date ? ` by ${formatShort(c.date)}` : ""}.` };
     case "deposit":
       if (!c.goal) return { ask: "Which goal?" };
       if (!c.amount) return { ask: `How much should I put toward “${c.goal}”? Like “add $100 to ${c.goal}”.` };
-      return { body: { kind: "deposit", goal: c.goal, amount: c.amount } };
+      return { body: { kind: "deposit", goal: c.goal, amount: c.amount }, read: `Put ${usd(c.amount)} toward ${c.goal}. (A note in Passbook; no money moves.)` };
     case "loan":
       if (!c.loan) return { ask: loans.length ? `Which one? ${loans.map((l) => l.name).join(", ")}.` : "I don’t see any loans or cards to change." };
       if (c.aprPercent === null && c.payment === null) return { ask: `What should change on ${c.loan}? A rate like “4.5%” or a payment like “$300 a month”.` };
-      return { body: { kind: "loan", loan: c.loan, aprPercent: c.aprPercent, payment: c.payment } };
+      return {
+        body: { kind: "loan", loan: c.loan, aprPercent: c.aprPercent, payment: c.payment },
+        read: `Change ${c.loan}: ${[c.aprPercent !== null ? `${c.aprPercent}% interest` : "", c.payment !== null ? `${usd(c.payment)} a month` : ""].filter(Boolean).join(", ")}.`,
+      };
     case "rename":
       if (!c.from || !c.to) return { ask: "Rename what to what? Like “rename SQ *TARTINE to Tartine”." };
-      return { body: { kind: "rename", from: c.from, to: c.to } };
+      return { body: { kind: "rename", from: c.from, to: c.to, onlyAmount: c.onlyAmount }, read: `Rename “${c.from}” to “${c.to}”${c.onlyAmount ? ` (only charges of ${usd(c.onlyAmount)})` : ", for every charge like it"}.` };
   }
 }
 
 /**
- * "Tell me what to do": Nickel takes an instruction in plain words, does it,
- * and reports back with Undo. The words are understood right here on the
- * phone (no AI service); when something's missing he asks for just that, or
- * opens the bill form with what he understood filled in.
+ * "Tell me what to do": Nickel takes an instruction in plain words, reads
+ * back what he understood, does it on "Do it", and reports back with Undo.
+ * The words are understood right here on the phone (no AI service); when
+ * something's missing he asks for just that, or opens the bill form with what
+ * he understood filled in.
  */
 function NickelDo({ today, goals, loans, onDone, onBill, onGoal, onLeave }: { today: string; goals: { name: string }[]; loans: { name: string }[]; onDone: (d: Done) => void; onBill: (draft: Partial<BillDraft>) => void; onGoal: () => void; onLeave: () => void }) {
   const [text, setText] = useState("");
   const [hint, setHint] = useState<string | null>(null);
+  const [pending, setPending] = useState<{ body: Record<string, unknown>; read: string; form?: Partial<BillDraft> } | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const submit = async (e: React.FormEvent) => {
+  const submit = (e: React.FormEvent) => {
     e.preventDefault();
+    setPending(null);
     const command = parseCommand(text, { today, goals: goals.map((g) => g.name), loans: loans.map((l) => l.name) });
     if (!command) return setHint(`I didn’t catch that. Try “${EXAMPLES[0]}” or “${EXAMPLES[2]}”.`);
     const next = plan(command, loans);
     if ("ask" in next) return setHint(next.ask);
-    if ("form" in next) return onBill(next.form);
-    setBusy(true);
+    if (!("body" in next)) return onBill(next.form);
     setHint(null);
+    setPending(next);
+  };
+
+  const run = async () => {
+    if (!pending) return;
+    setBusy(true);
     try {
-      onDone(await send<Done>("POST", "/api/nickel/do", next.body));
+      onDone(await send<Done>("POST", "/api/nickel/do", pending.body));
     } catch (err) {
       setHint(err instanceof Error ? err.message : "That didn’t work. Try again.");
+      setPending(null);
       setBusy(false);
     }
   };
 
   const chip = "inline-flex min-h-10 items-center rounded-full border border-line px-3 text-small font-bold text-ink-2 active:bg-sunk";
+  if (pending) {
+    return (
+      <div className="mt-1">
+        <p className="text-micro font-extrabold uppercase tracking-wide text-ink-3">Got it</p>
+        <p className="mt-1 leading-relaxed">{pending.read}</p>
+        <div className="mt-3 flex flex-wrap gap-2">
+          <button type="button" disabled={busy} onClick={run} className="min-h-11 rounded-full bg-accent px-5 font-bold text-on-accent active:scale-[0.97] disabled:opacity-50">
+            {busy ? "Doing it…" : "Do it"}
+          </button>
+          <button type="button" disabled={busy} onClick={() => (pending.form ? onBill(pending.form) : setPending(null))} className={chip}>
+            Change it
+          </button>
+        </div>
+      </div>
+    );
+  }
   return (
     <div className="mt-1">
       <p className="leading-relaxed">What should I add or change? Say it like you’d tell a friend.</p>
       <form onSubmit={submit} className="mt-2 flex gap-2">
-        <Input value={text} onChange={(e) => setText(e.target.value)} autoFocus enterKeyHint="go" maxLength={300} aria-label={`What should Nickel do?`} placeholder="Add Netflix $15.99 on the 5th" className="min-w-0 flex-1" />
-        <button type="submit" disabled={busy || !text.trim()} className="min-h-12 shrink-0 rounded-control bg-accent px-4 font-bold text-on-accent active:scale-[0.97] disabled:opacity-50">
-          {busy ? "…" : "Go"}
+        <Input value={text} onChange={(e) => setText(e.target.value)} autoFocus enterKeyHint="go" maxLength={300} aria-label="What should Nickel do?" placeholder="Add Netflix $15.99 on the 5th" className="min-w-0 flex-1" />
+        <button type="submit" disabled={!text.trim()} className="min-h-12 shrink-0 rounded-control bg-accent px-4 font-bold text-on-accent active:scale-[0.97] disabled:opacity-50">
+          Go
         </button>
       </form>
       {hint && (

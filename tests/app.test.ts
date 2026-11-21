@@ -9,7 +9,8 @@ import { countUnclear, createNameRule, deleteNameRule, getNames, previewNameRule
 import { transactions as transactionsTable } from "@/db/schema";
 import { eq as eqOp } from "drizzle-orm";
 import { addBill, addGoal, addToGoal, changeGoal, changeLoan, findCharge, findDebt, findGoal, listActivity, renameCharges, undoActivity } from "@/server/actions";
-import { createManualBill, deleteManualBill, nextDue, restoreManualBill, updateManualBill } from "@/server/manual-bills";
+import { createManualBill, deleteManualBill, manualSeries, nextDue, restoreManualBill, updateManualBill } from "@/server/manual-bills";
+import { upcomingBetween } from "@/lib/finance/recurring";
 import { getAccounts, getBudget, getDebt, getGoal, getGoals, getInvestments, getNetWorth, getOverview, getRecap, getRecurring, getTransactions } from "@/server/queries";
 
 /** End-to-end over the real SQL: seed the sample household into PGlite, then read it back. */
@@ -526,6 +527,85 @@ describe("changes Nickel and Claude make when asked", () => {
     expect((await getTransactions(ctx, { limit: 5, offset: 0, q: "Muni" })).transactions[0]?.name).toBe("Muni");
     await undoActivity(ctx, done.activityId);
     expect((await getTransactions(ctx, { limit: 5, offset: 0, q: "Clipper" })).transactions[0]?.name).toBe("Clipper Service");
+  });
+
+  it("keeps a bill on the 31st on the 31st, and counts every few months from the first date", () => {
+    expect(nextDue({ frequency: "monthly", startDate: "2026-12-31" }, "2027-03-01")).toBe("2027-03-31");
+    expect(nextDue({ frequency: "quarterly", startDate: "2025-11-30" }, "2026-11-21")).toBe("2026-11-30");
+    const series = manualSeries({ id: "m", userId: "u", name: "Phone", amount: -8000, frequency: "monthly", startDate: "2026-12-31", kind: "bill", category: "utilities", cancelled: false, addedBy: "you", createdAt: new Date() }, "2027-01-15");
+    expect(upcomingBetween(series, "2027-01-15", "2027-04-30")).toEqual(["2027-01-31", "2027-02-28", "2027-03-31", "2027-04-30"]);
+  });
+
+  it("counts an added bill as paid when the bank shows it paid early, and stands aside once the bank finds it", async () => {
+    const before = await getOverview(ctx);
+    const gym = await addBill(ctx, "nickel", { name: "Pilates Studio", amount: 6_000, frequency: "monthly", date: "2026-11-25" });
+    expect((await getOverview(ctx)).plan.billsExpected).toBe(before.plan.billsExpected + 6_000);
+    // Paid four days early: it counts as a bill paid (not everyday spending), once, and moves on to December.
+    await db.insert(transactionsTable).values({ id: "pilates-paid", userId: DEMO_USER_ID, accountId: "demo-card", date: "2026-11-19", name: "PILATES STUDIO", rawName: "PILATES STUDIO", amount: -6_000, category: "health" });
+    const after = await getOverview(ctx);
+    expect(after.plan.billsExpected).toBe(before.plan.billsExpected + 6_000);
+    expect(after.plan.everydaySpent).toBe(before.plan.everydaySpent);
+    const series = (await getRecurring(ctx)).series.find((s) => s.name === "Pilates Studio")!;
+    expect(series).toMatchObject({ nextDate: "2026-12-25", manual: { paidOn: "2026-11-19", seenAtBank: null } });
+    await db.delete(transactionsTable).where(eqOp(transactionsTable.id, "pilates-paid"));
+    await undoActivity(ctx, gym.activityId);
+
+    // Netflix is already found in the history, so a hand-added copy doesn't count twice.
+    const copy = await addBill(ctx, "claude", { name: "Netflix", amount: 1_799, frequency: "monthly", date: "2026-12-09" });
+    const dupe = (await getRecurring(ctx)).series.find((s) => s.manual && s.name === "Netflix")!;
+    expect(dupe).toMatchObject({ active: false, manual: { seenAtBank: "Netflix" } });
+    expect((await getOverview(ctx)).plan.billsExpected).toBe(before.plan.billsExpected);
+    await undoActivity(ctx, copy.activityId);
+  });
+
+  it("undoes only what Nickel or Claude changed, leaving later edits alone", async () => {
+    const goal = await findGoal(ctx, "japan");
+    const changed = await changeGoal(ctx, "claude", goal.id, { target: 500_000 });
+    await updateGoal(ctx, goal.id, { targetDate: "2028-01-31" }); // the owner, afterwards
+    await undoActivity(ctx, changed.activityId);
+    expect((await getGoals(ctx)).goals.find((g) => g.id === goal.id)).toMatchObject({ target: goal.target, targetDate: "2028-01-31" });
+    await updateGoal(ctx, goal.id, { targetDate: goal.targetDate });
+    // Changed again since: nothing to put back, and it says so.
+    const again = await changeGoal(ctx, "claude", goal.id, { target: 600_000 });
+    await updateGoal(ctx, goal.id, { target: 700_000 });
+    await expect(undoActivity(ctx, again.activityId)).rejects.toMatchObject({ status: 409 });
+    await updateGoal(ctx, goal.id, { target: goal.target });
+
+    const loan = await findDebt(ctx, "auto loan");
+    const rate = await changeLoan(ctx, "nickel", loan.id, { aprPercent: 2.5 });
+    await setDebtPlan(ctx, loan.id, { monthlyPayment: 40_000 }); // the owner, afterwards
+    await undoActivity(ctx, rate.activityId);
+    const plan = (await getDebt(ctx)).debts.find((d) => d.id === loan.id)!;
+    expect(plan.payment).toBe(40_000);
+    expect(plan.aprPercent).not.toBe(2.5);
+    await setDebtPlan(ctx, loan.id, { monthlyPayment: null });
+  });
+
+  it("renames a charge named for one amount at that amount only, never every charge from the place", async () => {
+    const patreon = (await getRecurring(ctx)).series.find((s) => s.bankName.startsWith("PATREON"))!;
+    const exact = await createNameRule(ctx, { transactionId: patreon.sampleId, name: "Podcast club", onlyThisAmount: true });
+    await db.insert(transactionsTable).values({ id: "patreon-other", userId: DEMO_USER_ID, accountId: "demo-card", date: today, name: "PATREON* MEMBERSHIP 4155550123 CA", rawName: null, amount: -2_500, category: "entertainment" });
+    const charge = await findCharge(ctx, "Podcast club");
+    expect(charge.exact).toBe(true);
+    const done = await renameCharges(ctx, "claude", charge.id, "Podcasts", charge.exact);
+    const names = await getNames(ctx);
+    expect(names.rules.filter((r) => r.key.includes("patreon")).map((r) => [r.name, r.amount])).toEqual([["Podcasts", -800]]);
+    expect((await getTransactions(ctx, { limit: 50, offset: 0, q: "PATREON" })).transactions.find((t) => t.id === "patreon-other")?.name).toBe("Patreon");
+    await undoActivity(ctx, done.activityId);
+    expect((await getNames(ctx)).rules.find((r) => r.id === exact.ruleId)?.name).toBe("Podcast club");
+    await deleteNameRule(ctx, exact.ruleId);
+    await db.delete(transactionsTable).where(eqOp(transactionsTable.id, "patreon-other"));
+  });
+
+  it("never trims a change that can still be undone out of the list", async () => {
+    const { activityLog } = await import("@/db/schema");
+    const rows = Array.from({ length: 1005 }, (_, i) => ({ id: `bulk-${i}`, userId: DEMO_USER_ID, actor: "claude", summary: "x", undo: { type: "bill.remove", billId: "none" }, createdAt: new Date(Date.now() - i * 1000) }));
+    for (let i = 0; i < rows.length; i += 250) await db.insert(activityLog).values(rows.slice(i, i + 250));
+    const done = await addBill(ctx, "claude", { name: "Trim test", amount: 100, frequency: "once", date: "2026-12-01" });
+    const left = await db.select({ id: activityLog.id }).from(activityLog).where(eqOp(activityLog.userId, DEMO_USER_ID));
+    expect(left.filter((r) => r.id.startsWith("bulk-"))).toHaveLength(1005);
+    await undoActivity(ctx, done.activityId);
+    await db.delete(activityLog).where(eqOp(activityLog.actor, "claude"));
   });
 
   it("checks bills before saving them", async () => {
