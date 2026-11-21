@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { ChevronDown, X } from "lucide-react";
 import { useEffect, useId, useRef, useState, useSyncExternalStore, type ButtonHTMLAttributes, type InputHTMLAttributes, type PointerEvent, type ReactNode, type SelectHTMLAttributes } from "react";
 
@@ -40,11 +41,21 @@ export function SheetHeader({ title, action, hint }: { title: string; action?: R
  * a phone, with one action on the right and an optional line saying what the
  * screen is for.
  */
-export function PageHeader({ title, lead, action }: { title: string; lead?: ReactNode; action?: ReactNode }) {
+export function PageHeader({ title, lead, action, back }: { title: string; lead?: ReactNode; action?: ReactNode; back?: { href: string; label: string } }) {
   return (
     <>
       <div className="sticky top-0 z-20 -mx-4 flex min-h-[60px] items-center justify-between gap-3 bg-paper/90 px-4 pb-2 pt-[calc(env(safe-area-inset-top)+10px)] backdrop-blur-xl sm:-mx-6 sm:px-6 lg:static lg:mx-0 lg:bg-transparent lg:px-0 lg:pt-0 lg:backdrop-blur-none">
-        <h1 className="display min-w-0 truncate text-[1.625rem] lg:text-headline">{title}</h1>
+        <div className="flex min-w-0 items-center gap-1">
+          {back && (
+            <Link href={back.href} aria-label={`Back to ${back.label}`} className="-ml-2 inline-flex size-11 shrink-0 items-center justify-center rounded-full text-ink-2 active:scale-[0.96] active:bg-sunk">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.25" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                <path d="m15 18-6-6 6-6" />
+              </svg>
+            </Link>
+          )}
+          {/* Screens reached with Back often have a long name (a goal); they wrap to two lines instead of cutting off. */}
+          <h1 className={cx("display min-w-0 text-[1.625rem] lg:text-headline", back ? "line-clamp-2 break-words leading-tight" : "truncate")}>{title}</h1>
+        </div>
         {action && <div className="flex shrink-0 items-center gap-2">{action}</div>}
       </div>
       {lead ? <p className="mb-5 mt-1 max-w-[60ch] text-ink-2">{lead}</p> : <div className="mb-3" />}

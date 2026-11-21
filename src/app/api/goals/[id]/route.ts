@@ -1,6 +1,10 @@
 import { z } from "zod";
 import { readBody, withUser } from "@/server/http";
 import { deleteGoal, updateGoal } from "@/server/mutations";
+import { getGoal } from "@/server/queries";
+
+/** One goal's own screen: its plan, track, checkpoints, milestones and ideas. */
+export const GET = withUser<{ id: string }>(async (ctx, _request, { id }) => getGoal(ctx, id));
 
 const money = z.number().int().min(0).max(100_000_000_000);
 const Body = z.object({
@@ -13,8 +17,8 @@ const Body = z.object({
 });
 
 export const PATCH = withUser<{ id: string }>(async (ctx, request, { id }) => {
-  await updateGoal(ctx, id, await readBody(request, Body));
-  return { ok: true };
+  const { depositId } = await updateGoal(ctx, id, await readBody(request, Body));
+  return { ok: true, depositId };
 });
 
 export const DELETE = withUser<{ id: string }>(async (ctx, _request, { id }) => {

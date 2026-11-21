@@ -2,7 +2,7 @@ import { eq } from "drizzle-orm";
 import { DEMO_USER_ID } from "@/lib/config";
 import { addDays, addMonths, dayOfMonth, daysInMonth, diffDays, monthEnd, monthOf, monthStart, weekday, type ISODate } from "@/lib/dates";
 import type { DB } from "./index";
-import { accounts, balanceSnapshots, budgets, goals, holdings, items, transactions, users } from "./schema";
+import { accounts, balanceSnapshots, budgets, goalDeposits, goals, holdings, items, transactions, users } from "./schema";
 
 /**
  * Sample household for demo mode: about 13 months of believable history
@@ -319,11 +319,35 @@ export async function seedDemo(db: DB, today: ISODate, now: Date = new Date()): 
     })),
   );
 
-  await db.insert(goals).values([
-    { id: "demo-goal-emergency", userId: DEMO_USER_ID, name: "Emergency fund", target: cents(15000), saved: cents(9200), monthlyContribution: cents(400), targetDate: null },
-    { id: "demo-goal-japan", userId: DEMO_USER_ID, name: "Two weeks in Japan", target: cents(4500), saved: cents(2150), monthlyContribution: cents(250), targetDate: monthEnd(monthOf(addMonths(today, 9))) },
-    { id: "demo-goal-home", userId: DEMO_USER_ID, name: "Down payment", target: cents(40000), saved: cents(6400), monthlyContribution: cents(150), targetDate: null },
-  ]);
+  // Three goals that show the three ways a goal can be going: open-ended, on track, and behind.
+  // Each was started some months ago and has had money put in on the 7th since, so its track has a history.
+  const goalSpecs = [
+    { id: "demo-goal-emergency", name: "Emergency fund", target: 15000, monthly: 400, months: 12, targetDate: null },
+    { id: "demo-goal-home", name: "Down payment", target: 40000, monthly: 150, months: 10, targetDate: monthEnd(monthOf(addMonths(today, 36))) },
+    { id: "demo-goal-japan", name: "Two weeks in Japan", target: 4500, monthly: 250, months: 6, targetDate: monthEnd(monthOf(addMonths(today, 9))) },
+  ];
+  const savedNow = { "demo-goal-emergency": 9200, "demo-goal-home": 6400, "demo-goal-japan": 2150 } as Record<string, number>;
+  await db.insert(goals).values(
+    goalSpecs.map((g) => ({
+      id: g.id,
+      userId: DEMO_USER_ID,
+      name: g.name,
+      target: cents(g.target),
+      saved: cents(savedNow[g.id]),
+      monthlyContribution: cents(g.monthly),
+      targetDate: g.targetDate,
+      createdAt: new Date(`${addMonths(today, -g.months)}T15:00:00Z`),
+    })),
+  );
+  const depositRows: (typeof goalDeposits.$inferInsert)[] = [];
+  for (const g of goalSpecs) {
+    for (let m = g.months - 1; m >= 0; m--) {
+      const date = `${monthOf(addMonths(today, -m))}-07`;
+      if (date > today || date <= addMonths(today, -g.months)) continue;
+      depositRows.push({ id: `demo-deposit-${g.id}-${date}`, userId: DEMO_USER_ID, goalId: g.id, amount: cents(g.monthly), date });
+    }
+  }
+  await db.insert(goalDeposits).values(depositRows);
 }
 
 /** The next date (today or later) that falls on the given day of the month. */

@@ -492,3 +492,75 @@ input[type="number"]::-webkit-inner-spin-button {
     animation: none;
   }
 }
+
+/* ---------- Nickel, the robo dog ---------- */
+/* Every moving part turns around its own box, so a rotate on an ear pivots at the ear. */
+.nk * { transform-box: fill-box; }
+.nk { overflow: visible; display: block; }
+.nk-float { transform-origin: 50% 100%; animation: nk-breathe 3.4s ease-in-out infinite; }
+.nk-sleep .nk-float { animation-duration: 5.2s; }
+@keyframes nk-breathe { 0%, 100% { transform: translateY(0) scaleY(1); } 50% { transform: translateY(-1.4px) scaleY(1.014); } }
+
+.nk-tail { transform-origin: 0% 100%; animation: nk-wag var(--nk-wag, 0.7s) ease-in-out infinite; }
+.nk-still .nk-tail, .nk-sleep .nk-tail { animation: none; transform: rotate(-24deg); }
+@keyframes nk-wag { 0%, 100% { transform: rotate(-16deg); } 50% { transform: rotate(18deg); } }
+
+.nk-head { transform-origin: 50% 100%; transition: transform 0.4s cubic-bezier(0.3, 1.5, 0.5, 1); }
+.nk-tilt-l .nk-head { transform: rotate(-11deg); }
+.nk-tilt-r .nk-head { transform: rotate(11deg); }
+.nk-sleep .nk-head { transform: translateY(3.5px) rotate(6deg); }
+
+/* Floppy ears hinge at the top, where they meet the head: perked swings them up and out, sad lets them hang. */
+.nk-ear-l { transform-origin: 92% 8%; transition: transform 0.35s cubic-bezier(0.3, 1.6, 0.5, 1); }
+.nk-ear-r { transform-origin: 8% 8%; transition: transform 0.35s cubic-bezier(0.3, 1.6, 0.5, 1); }
+.nk-ears-perk .nk-ear-l { transform: rotate(24deg); }
+.nk-ears-perk .nk-ear-r { transform: rotate(-24deg); }
+.nk-ears-down .nk-ear-l { transform: rotate(-10deg) translateY(2px); }
+.nk-ears-down .nk-ear-r { transform: rotate(10deg) translateY(2px); }
+.nk-twitch-l .nk-ear-l { animation: nk-twitch-l 0.45s ease-out; }
+.nk-twitch-r .nk-ear-r { animation: nk-twitch-r 0.45s ease-out; }
+@keyframes nk-twitch-l { 30% { transform: rotate(30deg); } 65% { transform: rotate(-6deg); } }
+@keyframes nk-twitch-r { 30% { transform: rotate(-30deg); } 65% { transform: rotate(6deg); } }
+
+.nk-gaze { transition: transform 0.18s ease-out; }
+.nk-eye { transform-origin: center; }
+.nk-bulb-glow { transform-origin: center; animation: nk-glow 2.4s ease-in-out infinite; }
+@keyframes nk-glow { 50% { opacity: 0.06; transform: scale(1.7); } }
+
+.nk-wrap { transform-origin: 50% 100%; }
+.nk-act-hop { animation: nk-hop 0.62s cubic-bezier(0.3, 0.7, 0.4, 1); }
+.nk-act-spin { animation: nk-spin 0.95s ease-in-out; }
+.nk-act-shake { animation: nk-shake 0.55s ease-in-out; }
+.nk-act-wiggle { animation: nk-wiggle 0.7s ease-in-out; }
+.nk-act-stretch { animation: nk-stretch 1.1s ease-in-out; }
+.nk-act-bark .nk-head { animation: nk-bark 0.36s ease-out; }
+.nk-act-sniff .nk-head { animation: nk-sniff 1.3s ease-in-out; }
+.nk-act-look .nk-head { animation: nk-look 1.7s ease-in-out; }
+@keyframes nk-hop { 0% { transform: none; } 15% { transform: scale(1.08, 0.9); } 45% { transform: translateY(-16px) scale(0.96, 1.05); } 75% { transform: scale(1.06, 0.94); } 100% { transform: none; } }
+@keyframes nk-spin { 0% { transform: none; } 25% { transform: translateY(-12px) rotate(160deg); } 55% { transform: translateY(-12px) rotate(360deg); } 75% { transform: scale(1.06, 0.92) rotate(360deg); } 100% { transform: rotate(360deg); } }
+@keyframes nk-shake { 20% { transform: rotate(-8deg); } 40% { transform: rotate(8deg); } 60% { transform: rotate(-6deg); } 80% { transform: rotate(4deg); } }
+@keyframes nk-wiggle { 25% { transform: translateX(-2px) rotate(-3deg); } 50% { transform: translateX(2px) rotate(3deg); } 75% { transform: translateX(-1px) rotate(-2deg); } }
+@keyframes nk-stretch { 30% { transform: scale(1.12, 0.86); } 60% { transform: scale(0.95, 1.08); } }
+@keyframes nk-bark { 40% { transform: translateY(-2.5px) scale(1.07) rotate(-3deg); } }
+@keyframes nk-sniff { 0%, 100% { transform: none; } 20%, 60% { transform: translateY(5px) rotate(-7deg); } 40%, 80% { transform: translateY(4px) rotate(7deg); } }
+@keyframes nk-look { 25% { transform: rotate(-12deg); } 65% { transform: rotate(10deg); } }
+
+.nk-z { position: absolute; right: 0; top: 0; opacity: 0; animation: nk-z 3s ease-in infinite; }
+@keyframes nk-z { 0% { opacity: 0; transform: translate(0, 4px) scale(0.6); } 25% { opacity: 1; } 100% { opacity: 0; transform: translate(14px, -26px) scale(1.15); } }
+.nk-pop { display: inline-block; animation: nk-pop 1.1s ease-out forwards; }
+@keyframes nk-pop { 0% { opacity: 0; transform: translateY(6px) scale(0.4); } 25% { opacity: 1; transform: translateY(-4px) scale(1.25); } 70% { opacity: 1; transform: translateY(-8px) scale(1); } 100% { opacity: 0; transform: translateY(-12px); } }
+.nk-heart { position: absolute; font-size: 18px; opacity: 0; animation: nk-heart 1.5s ease-out forwards; }
+@keyframes nk-heart { 0% { opacity: 0; transform: translateY(8px) scale(0.5); } 25% { opacity: 1; } 100% { opacity: 0; transform: translateY(-34px) scale(1.15); } }
+
+.nk-bubble { animation: nk-bubble 0.28s cubic-bezier(0.3, 1.4, 0.5, 1); transform-origin: bottom right; }
+@keyframes nk-bubble { from { opacity: 0; transform: translateY(8px) scale(0.92); } }
+.nk-btn { -webkit-touch-callout: none; cursor: grab; }
+.nk-dragging .nk-btn { cursor: grabbing; transform: scale(1.06); }
+.nk-dragging { transition: none; }
+
+/* People who'd rather things didn't move still get Nickel, just calmer. */
+@media (prefers-reduced-motion: reduce) {
+  .nk-float, .nk-tail, .nk-bulb-glow, .nk-z, .nk-pop, .nk-heart, .nk-bubble { animation: none !important; }
+  .nk-wrap, .nk-wrap .nk-head { animation: none !important; }
+  .nk-z, .nk-pop, .nk-heart { opacity: 1; }
+}

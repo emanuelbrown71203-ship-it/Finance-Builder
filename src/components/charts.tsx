@@ -476,3 +476,135 @@ export function SegmentedBar({ parts, label }: { parts: { name: string; value: n
   );
 }
 
+
+/* ---------- goal track ---------- */
+
+/**
+ * The track to a savings goal: a dashed straight line from what was saved at
+ * the start to the target on its date (the plan), the saved amount so far as
+ * a solid stepped line (what really happened), and a marker for today.
+ */
+export function GoalTrack({ start, end, startSaved, target, history, today, plan = true, height = 220 }: { start: ISODate; end: ISODate; startSaved: number; target: number; history: { date: ISODate; amount: number }[]; today: ISODate; plan?: boolean; height?: number }) {
+  const [ref, width] = useWidth<HTMLDivElement>();
+  const [active, setActive] = useState<number | null>(null);
+  const m = { top: 30, right: 16, bottom: 24, left: 46 };
+  const plotW = Math.max(0, width - m.left - m.right);
+  const plotH = height - m.top - m.bottom;
+
+  const days = useMemo(() => {
+    const out: ISODate[] = [];
+    const total = Math.max(1, Math.round((Date.parse(`${end}T00:00:00Z`) - Date.parse(`${start}T00:00:00Z`)) / 86_400_000));
+    // One point a day, or fewer for long goals so the line stays light.
+    const step = Math.max(1, Math.ceil(total / 400));
+    for (let i = 0; i <= total; i += step) out.push(new Date(Date.parse(`${start}T00:00:00Z`) + i * 86_400_000).toISOString().slice(0, 10));
+    if (out[out.length - 1] !== end) out.push(end);
+    return out;
+  }, [start, end]);
+
+  const totalDays = Math.max(1, days.length - 1);
+  const planAt = (i: number) => Math.round(startSaved + (target - startSaved) * (i / totalDays));
+  const savedAt = (date: ISODate) => {
+    let v = startSaved;
+    for (const p of history) if (p.date <= date) v = p.amount;
+    return v;
+  };
+  const todayIndex = Math.max(0, days.findLastIndex((d) => d <= today));
+  const maxValue = Math.max(target, ...history.map((h) => h.amount));
+  const ticks = niceTicks(0, maxValue * 1.05);
+  const top = ticks[ticks.length - 1] || 1;
+
+  const x = (i: number) => m.left + (i / totalDays) * plotW;
+  const y = (v: number) => m.top + (1 - v / top) * plotH;
+
+  const planLine = `M${x(0).toFixed(1)},${y(startSaved).toFixed(1)}L${x(totalDays).toFixed(1)},${y(target).toFixed(1)}`;
+  let savedLine = "";
+  let prev = startSaved;
+  for (let i = 0; i <= todayIndex; i++) {
+    const v = savedAt(days[i]);
+    savedLine += i === 0 ? `M${x(0).toFixed(1)},${y(v).toFixed(1)}` : `${v !== prev ? `L${x(i).toFixed(1)},${y(prev).toFixed(1)}` : ""}L${x(i).toFixed(1)},${y(v).toFixed(1)}`;
+    prev = v;
+  }
+  const shown = active ?? todayIndex;
+  const xTicks = [0, Math.round(totalDays / 2), totalDays];
+
+  const onMove = (e: PointerEvent<SVGSVGElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const ratio = (e.clientX - rect.left - m.left) / plotW;
+    setActive(Math.min(totalDays, Math.max(0, Math.round(ratio * totalDays))));
+  };
+  const onKey = (e: KeyboardEvent<SVGSVGElement>) => {
+    if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+    e.preventDefault();
+    const step = (e.shiftKey ? 30 : 7) * (e.key === "ArrowLeft" ? -1 : 1);
+    setActive(Math.min(totalDays, Math.max(0, (active ?? todayIndex) + step)));
+  };
+
+  return (
+    <div ref={ref} className="relative pb-7" style={{ height: height + 28 }}>
+      {width > 0 && (
+        <svg
+          width={width}
+          height={height}
+          role="img"
+          tabIndex={0}
+          aria-label={`Track to ${dollars(target)}${plan ? ` by ${formatMedium(end)}` : ""}. Saved ${dollars(savedAt(today))} by today${plan ? `; the plan has ${dollars(planAt(todayIndex))}` : ""}. Use the arrow keys to read along the track.`}
+          onPointerMove={onMove}
+          onPointerLeave={() => setActive(null)}
+          onKeyDown={onKey}
+          onBlur={() => setActive(null)}
+          className="block touch-pan-y select-none rounded-control"
+        >
+          {ticks.map((t) => (
+            <g key={t}>
+              <line x1={m.left} x2={width - m.right} y1={y(t)} y2={y(t)} stroke="var(--grid)" />
+              <text x={m.left - 8} y={y(t) + 4} textAnchor="end" className="tabular fill-ink-3 text-[11px]">
+                {dollarsCompact(t)}
+              </text>
+            </g>
+          ))}
+          {xTicks.map((i, k) => (
+            <text key={k} x={x(i)} y={height - 6} textAnchor={k === 0 ? "start" : k === 2 ? "end" : "middle"} className="fill-ink-3 text-[11px]">
+              {formatShort(days[i])}
+            </text>
+          ))}
+          {/* Today */}
+          <line x1={x(todayIndex)} x2={x(todayIndex)} y1={m.top} y2={m.top + plotH} stroke="var(--axis)" strokeDasharray="2 3" />
+          <text x={x(todayIndex)} y={m.top - 16} textAnchor={todayIndex > totalDays * 0.85 ? "end" : "middle"} className="fill-ink-3 text-[10px] font-bold">
+            Today
+          </text>
+          {plan && <path d={planLine} fill="none" stroke="var(--series-muted)" strokeWidth="1.75" strokeDasharray="5 4" strokeLinecap="round" />}
+          <path d={savedLine} fill="none" stroke="var(--series-1)" strokeWidth="2.25" strokeLinejoin="round" strokeLinecap="round" />
+          {/* The goal itself, at the end of the plan */}
+          <circle cx={x(totalDays)} cy={y(target)} r="5" fill="var(--sheet)" stroke="var(--series-1)" strokeWidth="2" />
+          <text x={x(totalDays) - 8} y={y(target) - 9} textAnchor="end" className="tabular fill-ink-2 text-[11px] font-bold">
+            Goal {dollarsCompact(target)}
+          </text>
+          {active !== null && <line x1={x(shown)} x2={x(shown)} y1={m.top} y2={m.top + plotH} stroke="var(--axis)" />}
+          {shown <= todayIndex && <circle cx={x(shown)} cy={y(savedAt(days[shown]))} r="4.5" fill="var(--series-1)" stroke="var(--sheet)" strokeWidth="2" />}
+          {plan && active !== null && <circle cx={x(shown)} cy={y(planAt(shown))} r="3.5" fill="var(--series-muted)" stroke="var(--sheet)" strokeWidth="2" />}
+        </svg>
+      )}
+      {active !== null && width > 0 && (
+        <Tooltip x={x(active)} width={width}>
+          <p className="text-micro text-ink-3">{formatMedium(days[active])}</p>
+          {active <= todayIndex && (
+            <p className="mt-1 flex justify-between gap-4 text-small">
+              <span className="text-ink-2">Saved</span>
+              <span className="tabular font-semibold">{dollars(savedAt(days[active]))}</span>
+            </p>
+          )}
+          {plan && (
+            <p className="flex justify-between gap-4 text-small">
+              <span className="text-ink-2">Plan</span>
+              <span className="tabular">{dollars(planAt(active))}</span>
+            </p>
+          )}
+        </Tooltip>
+      )}
+      <div className="absolute inset-x-0 bottom-0 flex flex-wrap gap-x-4 pl-[46px]">
+        <LegendKey color="var(--series-1)" label="Saved" />
+        {plan && <LegendKey color="var(--series-muted)" label="Plan" dashed />}
+      </div>
+    </div>
+  );
+}

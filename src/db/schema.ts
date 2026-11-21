@@ -142,6 +142,21 @@ export const goals = pgTable(
   (t) => [index("goals_user_idx").on(t.userId)],
 );
 
+/** Each time money is put toward a goal (or taken back out), so progress can be drawn against the plan. */
+export const goalDeposits = pgTable(
+  "goal_deposits",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    goalId: text("goal_id").notNull().references(() => goals.id, { onDelete: "cascade" }),
+    /** Signed: money taken back out of the goal is negative. */
+    amount: cents("amount").notNull(),
+    date: text("date").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [index("goal_deposits_goal_idx").on(t.userId, t.goalId, t.date)],
+);
+
 /**
  * What the owner has decided about a recurring charge. The charges themselves
  * are detected from transactions on every read; this table only stores

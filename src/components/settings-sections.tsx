@@ -6,6 +6,8 @@ import { useState } from "react";
 import { category } from "@/lib/categories";
 import type { TasksLinkStatus } from "@/server/tasks-link";
 import { setCelebrations, useCelebrations } from "./celebrate";
+import { RoboDog } from "./nickel/robo-dog";
+import { nickelSettings, useNickelSettings } from "./nickel/store";
 import { Button, ErrorNote, Field, Fold, Input, Select, Sheet, SheetHeader, Tag, confirm, cx, toast } from "./ui";
 import { send, useApi, useNow } from "./use-api";
 
@@ -360,5 +362,68 @@ export function RulesSection() {
         </ul>
       </Fold>
     </Sheet>
+  );
+}
+
+/* ---------- Nickel ---------- */
+
+export function NickelSection() {
+  const settings = useNickelSettings();
+  const now = useNow(30_000);
+  const napping = now > 0 && settings.napUntil > now;
+  return (
+    <Sheet id="nickel" className="scroll-mt-24">
+      <div className="flex items-start gap-3">
+        <span aria-hidden className="shrink-0">
+          <RoboDog eyes="happy" mouth="smile" antenna="var(--good)" cheeks tongue gaze={{ x: 0, y: 0 }} size={56} />
+        </span>
+        <SheetHeader title={`${settings.name}, your robo dog`} hint="He sits in the corner, notices things in your numbers and tells you about them. Tap him to hear what he’s found, hold him for options, drag him if he’s in the way." />
+      </div>
+      <div className="divide-y divide-line-soft border-y border-line-soft">
+        <div className="flex min-h-14 items-center justify-between gap-4 py-2">
+          <div>
+            <p className="font-bold">Show {settings.name}</p>
+            <p className="text-small text-ink-3">On this device.</p>
+          </div>
+          <Switch checked={settings.on} onChange={nickelSettings.setOn} label={`Show ${settings.name}`} />
+        </div>
+        <div className="flex min-h-14 items-center justify-between gap-4 py-2">
+          <div>
+            <p className="font-bold">Speaks up on his own</p>
+            <p className="text-small text-ink-3">Off: he only talks when you tap him.</p>
+          </div>
+          <Switch checked={settings.chatty} onChange={nickelSettings.setChatty} label="Speaks up on his own" />
+        </div>
+        <NickelName key={settings.name} current={settings.name} />
+      </div>
+      {napping && (
+        <Button className="mt-3 w-full" onClick={nickelSettings.wake}>
+          Wake {settings.name} up
+        </Button>
+      )}
+      <p className="mt-3 text-small text-ink-3">{settings.name} is a robot dog, not a financial advisor. He points out what’s in your own numbers; what you do about it is up to you. He reads only what Passbook already shows you, and sends it nowhere.</p>
+    </Sheet>
+  );
+}
+
+/** Keyed by the saved name, so the box starts from it once this device's settings are read. */
+function NickelName({ current }: { current: string }) {
+  const [name, setName] = useState(current);
+  return (
+    <form
+      className="flex flex-wrap items-end gap-2 py-3"
+      onSubmit={(e) => {
+        e.preventDefault();
+        nickelSettings.setName(name);
+        toast(name.trim() ? `He’s ${name.trim()} now. Good name!` : "Back to Nickel");
+      }}
+    >
+      <div className="min-w-0 flex-1">
+        <Field label="His name">{(id) => <Input id={id} value={name} onChange={(e) => setName(e.target.value)} maxLength={20} placeholder="Nickel" />}</Field>
+      </div>
+      <Button type="submit" disabled={name.trim() === current}>
+        Rename
+      </Button>
+    </form>
   );
 }

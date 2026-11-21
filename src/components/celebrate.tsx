@@ -1,5 +1,6 @@
 "use client";
 
+import { nickelReact } from "./nickel/store";
 import { useEffect, useSyncExternalStore } from "react";
 
 /*
@@ -46,6 +47,7 @@ export function useCelebrations(): boolean {
 }
 
 export function celebrate(title: string, body: string) {
+  nickelReact({ type: "celebrate" });
   if (!celebrationsOn()) return;
   current = { title, body };
   emit();

@@ -40,6 +40,10 @@ for it to be remembered and used whenever an app is built.
 - Bills and subscriptions are worked out from transaction history each time; only the person's own
   choices ("I cancelled this") are stored.
 - Bank access tokens are stored encrypted. The app can read accounts and can never move money.
+- **Nickel (the robo dog) only points things out** from the person's own numbers. He never says
+  "you should", never gives investment advice, and says he isn't a financial advisor. His wording
+  lives in `src/lib/nickel/brain.ts` and a test checks for advice-like phrasing. A real AI chat
+  for him would send data to an outside service: ask the owner first.
 - **The Claude connector is read-only.** Never add a tool to `src/server/connector.ts` that changes
   anything without asking the owner first.
 - **The Tasks for Two link never runs on sample data or Plaid’s practice banks**, only ticks bills

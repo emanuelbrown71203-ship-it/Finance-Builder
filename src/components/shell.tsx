@@ -8,6 +8,7 @@ import { APP_NAME } from "@/lib/config";
 import { diffDays } from "@/lib/dates";
 import type { Me, Overview } from "@/lib/types";
 import { Celebrations } from "./celebrate";
+import { Nickel } from "./nickel/nickel";
 import { ReauthHost } from "./reauth";
 import { PullToRefresh } from "./pull-to-refresh";
 import { ConfirmHost, Dialog, IconButton, Tag, Toaster, cx } from "./ui";
@@ -153,7 +154,7 @@ export function Shell({ children }: { children: ReactNode }) {
           <LiveStatus />
         </div>
 
-        <main id="main" className={cx(current.section, "flex-1 px-4 pb-[calc(96px+env(safe-area-inset-bottom))] sm:px-6 lg:px-8 lg:pb-12")}>
+        <main id="main" className={cx(current.section, "flex-1 px-4 pb-[calc(96px+var(--nickel-space,0px)+env(safe-area-inset-bottom))] sm:px-6 lg:px-8 lg:pb-[calc(48px+var(--nickel-space,0px))]")}>
           {children}
         </main>
       </div>
@@ -209,6 +210,7 @@ export function Shell({ children }: { children: ReactNode }) {
       <Toaster />
       <ConfirmHost />
       <ReauthHost />
+      <Nickel />
     </div>
   );
 }

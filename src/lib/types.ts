@@ -50,8 +50,35 @@ export type GoalView = {
   saved: number;
   monthlyContribution: number;
   targetDate: ISODate | null;
-  /** When the goal is reached at the current monthly amount. Null if never. */
+  /** When the goal is reached at the current pace. Null if never. */
   projectedDate: ISODate | null;
+  status: "reached" | "ahead" | "on_track" | "behind" | "overdue" | "no_date";
+  /** Saved minus where the plan says you'd be today; positive is ahead. */
+  gap: number | null;
+  daysLeft: number | null;
+  /** To reach it by its date from now. */
+  perMonth: number | null;
+  perWeek: number | null;
+  perPayday: number | null;
+  nextPayday: ISODate | null;
+  /** What actually goes in a month, lately. */
+  pace: number;
+};
+
+export type GoalDetailPayload = {
+  today: ISODate;
+  goal: GoalView;
+  startDate: ISODate;
+  startSaved: number;
+  /** Saved over time, from the start to today. */
+  history: { date: ISODate; amount: number }[];
+  expectedNow: number | null;
+  checkpoints: { date: ISODate; amount: number; met: boolean | null }[];
+  milestones: { percent: 25 | 50 | 75 | 100; amount: number; reachedOn: ISODate | null; projected: ISODate | null }[];
+  deposits: { id: string; date: ISODate; amount: number }[];
+  ideas: { title: string; detail: string; href?: string }[];
+  /** How often pay arrives, e.g. "Every 2 weeks", when there's regular income. */
+  payFrequency: string | null;
 };
 
 export type RecurringView = RecurringSeries & {

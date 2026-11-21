@@ -4,7 +4,7 @@ import { ChevronRight, KeyRound, Landmark, LogOut } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 import { ChangePasswordDialog } from "@/components/reauth";
-import { CelebrationsRow, ClaudeSection, PasskeySection, RulesSection, TasksSection } from "@/components/settings-sections";
+import { CelebrationsRow, ClaudeSection, NickelSection, PasskeySection, RulesSection, TasksSection } from "@/components/settings-sections";
 import { Button, Fold, PageHeader, Segmented, Sheet, SheetHeader, confirm, toast } from "@/components/ui";
 import { send, useApi, useTheme, type ThemeChoice } from "@/components/use-api";
 import { APP_NAME, APP_VERSION } from "@/lib/config";
@@ -56,6 +56,7 @@ export default function SettingsPage() {
           <CelebrationsRow />
         </Sheet>
 
+        <NickelSection />
         <PasskeySection demo={me?.demo ?? true} />
         <ClaudeSection />
         <TasksSection />

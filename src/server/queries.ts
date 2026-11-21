@@ -1,12 +1,15 @@
 import { and, asc, desc, eq, gte, ilike, inArray, lte, ne, or, sql } from "drizzle-orm";
-import { accounts, balanceSnapshots, budgets, debtPlans, goals, holdings, items, recurringOverrides, transactions, userSettings, type Account } from "@/db/schema";
+import { accounts, balanceSnapshots, budgets, debtPlans, goalDeposits, goals, holdings, items, recurringOverrides, transactions, userSettings, type Account } from "@/db/schema";
 import { category } from "@/lib/categories";
-import { addDays, addMonths, addMonthsToMonth, diffDays, eachDay, formatDistance, formatShort, monthEnd, monthOf, monthStart, weekday, type ISODate } from "@/lib/dates";
+import { DEFAULT_TIMEZONE } from "@/lib/config";
+import { addDays, addMonths, addMonthsToMonth, dayOfMonth, daysInMonth, diffDays, eachDay, formatDistance, formatShort, monthEnd, monthOf, monthStart, todayIn, weekday, type ISODate } from "@/lib/dates";
+import { goalIdeas, goalPlan } from "@/lib/finance/goalplan";
 import { dollars, dollarsExact } from "@/lib/money";
 import { buildMonthPlan, spendingByCategory } from "@/lib/finance/plan";
 import { payoffPlan, payoffOrder, type Debt, type Strategy } from "@/lib/finance/payoff";
-import { detectRecurring, monthlyEquivalent, seriesKeyFor, upcomingBetween, type RecurringKind } from "@/lib/finance/recurring";
+import { FREQUENCY_LABEL, detectRecurring, monthlyEquivalent, seriesKeyFor, upcomingBetween, type RecurringKind } from "@/lib/finance/recurring";
 import { cancelHelp, isKnownSubscription } from "@/lib/finance/subscriptions";
+import { HttpError } from "./errors";
 import type {
   AccountView,
   AttentionItem,
@@ -17,6 +20,7 @@ import type {
   AccountsPayload,
   BudgetPayload,
   BudgetRow,
+  GoalDetailPayload,
   GoalView,
   GoalsPayload,
   InvestmentsPayload,
@@ -341,21 +345,103 @@ export async function getNetWorth(ctx: Ctx, range: string): Promise<NetWorthPayl
 
 /* ---------- goals ---------- */
 
-function goalView(g: typeof goals.$inferSelect, today: ISODate): GoalView {
-  const remaining = g.target - g.saved;
-  let projectedDate: ISODate | null = null;
-  if (remaining <= 0) projectedDate = today;
-  else if (g.monthlyContribution > 0) projectedDate = addMonths(today, Math.ceil(remaining / g.monthlyContribution));
-  return { id: g.id, name: g.name, target: g.target, saved: g.saved, monthlyContribution: g.monthlyContribution, targetDate: g.targetDate, projectedDate };
+type GoalRow = typeof goals.$inferSelect;
+type DepositRow = typeof goalDeposits.$inferSelect;
+
+/** The day a goal was made, in the person's time zone: where its plan line starts. */
+const goalStart = (g: GoalRow, today: ISODate): ISODate => {
+  const d = todayIn(DEFAULT_TIMEZONE, g.createdAt);
+  return d > today ? today : d;
+};
+
+function planFor(g: GoalRow, deposits: DepositRow[], today: ISODate, paydays: ISODate[]) {
+  return goalPlan({
+    target: g.target,
+    saved: g.saved,
+    targetDate: g.targetDate,
+    today,
+    startDate: goalStart(g, today),
+    deposits: deposits.map((d) => ({ date: d.date, amount: d.amount })),
+    monthlyContribution: g.monthlyContribution,
+    paydays,
+  });
 }
 
-async function listGoals(ctx: Ctx): Promise<GoalView[]> {
-  const rows = await ctx.db.select().from(goals).where(eq(goals.userId, ctx.userId)).orderBy(asc(goals.createdAt), asc(goals.id));
-  return rows.map((g) => goalView(g, ctx.today));
+function goalView(g: GoalRow, plan: ReturnType<typeof goalPlan>): GoalView {
+  return {
+    id: g.id,
+    name: g.name,
+    target: g.target,
+    saved: g.saved,
+    monthlyContribution: g.monthlyContribution,
+    targetDate: g.targetDate,
+    projectedDate: plan.projectedDate,
+    status: plan.status,
+    gap: plan.gap,
+    daysLeft: plan.daysLeft,
+    perMonth: plan.perMonth,
+    perWeek: plan.perWeek,
+    perPayday: plan.perPayday,
+    nextPayday: plan.nextPayday,
+    pace: plan.pace,
+  };
+}
+
+/** Upcoming paydays from every regular income, merged, up to a horizon. */
+function paydaysFrom(bundle: RecurringBundle, today: ISODate, until: ISODate): { dates: ISODate[]; frequency: string | null } {
+  const incomes = bundle.series.filter((s) => s.kind === "income" && s.active);
+  const dates = [...new Set(incomes.flatMap((s) => upcomingBetween(s, addDays(today, 1), until)))].sort();
+  const main = [...incomes].sort((a, b) => b.monthly - a.monthly)[0];
+  return { dates, frequency: main ? FREQUENCY_LABEL[main.frequency] : null };
+}
+
+async function listGoals(ctx: Ctx, paydays: ISODate[] = []): Promise<GoalView[]> {
+  const [rows, deposits] = await Promise.all([
+    ctx.db.select().from(goals).where(eq(goals.userId, ctx.userId)).orderBy(asc(goals.createdAt), asc(goals.id)),
+    ctx.db.select().from(goalDeposits).where(eq(goalDeposits.userId, ctx.userId)),
+  ]);
+  return rows.map((g) => goalView(g, planFor(g, deposits.filter((d) => d.goalId === g.id), ctx.today, paydays)));
+}
+
+/** Everything for one goal's own screen: the plan, the track so far, checkpoints, milestones, and ideas. */
+export async function getGoal(ctx: Ctx, id: string): Promise<GoalDetailPayload> {
+  const [g] = await ctx.db.select().from(goals).where(and(eq(goals.id, id), eq(goals.userId, ctx.userId))).limit(1);
+  if (!g) throw new HttpError(404, "That goal wasn’t found.");
+  const [deposits, bundle, budget, overview] = await Promise.all([
+    ctx.db.select().from(goalDeposits).where(and(eq(goalDeposits.userId, ctx.userId), eq(goalDeposits.goalId, g.id))),
+    loadRecurring(ctx),
+    getBudget(ctx, monthOf(ctx.today)),
+    getOverview(ctx),
+  ]);
+  const pay = paydaysFrom(bundle, ctx.today, g.targetDate ?? addMonths(ctx.today, 24));
+  const plan = planFor(g, deposits, ctx.today, pay.dates);
+  const need = plan.perMonth ?? (plan.status === "no_date" ? g.monthlyContribution : null);
+  return {
+    today: ctx.today,
+    goal: goalView(g, plan),
+    startDate: goalStart(g, ctx.today),
+    startSaved: plan.startSaved,
+    history: plan.history,
+    expectedNow: plan.expectedNow,
+    checkpoints: plan.checkpoints,
+    milestones: plan.milestones,
+    deposits: deposits
+      .sort((a, b) => (a.date === b.date ? (a.createdAt < b.createdAt ? 1 : -1) : a.date < b.date ? 1 : -1))
+      .slice(0, 60)
+      .map((d) => ({ id: d.id, date: d.date, amount: d.amount })),
+    ideas: goalIdeas({
+      need,
+      categories: budget.rows.map((r) => ({ category: r.category, label: category(r.category).label, spent: r.spent, average: r.average })),
+      monthProgress: dayOfMonth(ctx.today) / daysInMonth(Number(ctx.today.slice(0, 4)), Number(ctx.today.slice(5, 7))),
+      leftToSpend: overview.plan.leftToSpend,
+    }),
+    payFrequency: pay.frequency,
+  };
 }
 
 export async function getGoals(ctx: Ctx): Promise<GoalsPayload> {
-  const [goalList, accountList] = await Promise.all([listGoals(ctx), listAccounts(ctx)]);
+  const bundle = await loadRecurring(ctx);
+  const [goalList, accountList] = await Promise.all([listGoals(ctx, paydaysFrom(bundle, ctx.today, addMonths(ctx.today, 60)).dates), listAccounts(ctx)]);
   const savingsAccounts = accountList.filter((a) => a.type === "depository" && a.subtype !== "checking");
   const month = monthOf(ctx.today);
   const months = Array.from({ length: 6 }, (_, i) => addMonthsToMonth(month, i - 5));

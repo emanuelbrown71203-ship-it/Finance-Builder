@@ -1,5 +1,6 @@
 "use client";
 
+import { nickelReact } from "./nickel/store";
 import { ArrowDown, Check, RefreshCw } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { send } from "./use-api";
@@ -45,6 +46,7 @@ export async function refreshApp(): Promise<"reload" | "done"> {
   }
   // Pulls the latest from every linked bank, then reloads every screen's data.
   await send("POST", "/api/sync").catch(() => {});
+  nickelReact({ type: "refreshed" });
   return "done";
 }
 

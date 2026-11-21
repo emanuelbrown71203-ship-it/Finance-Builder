@@ -69,7 +69,7 @@ const TOOLS = [
   { name: "get_spending", title: "Spending by category", description: "Spending by category for one month against the user's limits, with last month and the three-month average, plus money in and out for the last six months.", inputSchema: { type: "object", properties: { month: { type: "string", description: "YYYY-MM. Default: this month." } } } },
   { name: "list_bills", title: "Bills and subscriptions", description: "Recurring bills, subscriptions and regular income found in the transaction history, what each costs a month, what is due in the next six weeks, price increases and renewals.", inputSchema: { type: "object", properties: {} } },
   { name: "get_net_worth", title: "Net worth", description: "Every account with its balance, total owned, total owed, and how net worth has changed.", inputSchema: { type: "object", properties: { range: { type: "string", enum: ["1m", "3m", "6m", "1y"], description: "How far back to compare. Default 6m." } } } },
-  { name: "list_goals", title: "Savings goals", description: "Savings goals with how much is saved, the target, the monthly amount and when each will be reached.", inputSchema: { type: "object", properties: {} } },
+  { name: "list_goals", title: "Savings goals", description: "Savings goals with how much is saved, the target and its date, whether it's on track, ahead or behind its plan, what's needed per month, week and payday to hit the date, the actual pace, and when it will be reached.", inputSchema: { type: "object", properties: {} } },
   { name: "get_investments", title: "Investments", description: "Investment accounts, holdings with gain or loss, and the split by type.", inputSchema: { type: "object", properties: {} } },
   { name: "get_debt_plan", title: "Debt payoff plan", description: "Each debt with its balance, interest rate and payment, when it will be paid off, total interest, and what the extra monthly amount changes.", inputSchema: { type: "object", properties: {} } },
   { name: "get_weekly_recap", title: "Weekly recap", description: "A look back at one full week (Monday to Sunday): spent against the week before, money in, bills paid, top categories, biggest purchase.", inputSchema: { type: "object", properties: { weeks_back: { type: "number", description: "0 = the most recent full week (default), 1 = the one before, up to 12." } } } },
@@ -174,7 +174,21 @@ async function callTool(name: string, args: Record<string, unknown>, ctx: Ctx): 
       const g = await getGoals(ctx);
       return {
         in_savings_accounts: usd(g.savingsBalance),
-        goals: g.goals.map((x) => ({ name: x.name, saved: usd(x.saved), target: usd(x.target), set_aside_per_month: usd(x.monthlyContribution), target_date: x.targetDate ?? undefined, reached_around: x.projectedDate ?? undefined })),
+        goals: g.goals.map((x) => ({
+          name: x.name,
+          saved: usd(x.saved),
+          target: usd(x.target),
+          target_date: x.targetDate ?? undefined,
+          days_left: x.daysLeft ?? undefined,
+          status: x.status.replace("_", " "),
+          ahead_or_behind_plan_by: x.gap === null ? undefined : usd(x.gap),
+          needed_per_month_to_hit_date: x.perMonth === null ? undefined : usd(x.perMonth),
+          needed_per_week: x.perWeek === null ? undefined : usd(x.perWeek),
+          needed_per_payday: x.perPayday === null ? undefined : usd(x.perPayday),
+          set_aside_per_month: usd(x.monthlyContribution),
+          actual_pace_per_month: usd(x.pace),
+          reached_around: x.projectedDate ?? undefined,
+        })),
         added_to_savings_by_month: g.monthlySaved.map((m) => ({ month: m.month, amount: usd(m.amount) })),
       };
     }

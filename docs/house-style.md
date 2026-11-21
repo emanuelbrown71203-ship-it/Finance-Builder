@@ -60,6 +60,11 @@ If a rule here and an app's own existing look disagree, the app's existing look 
   and always give another way to do the same thing.
 - A small celebration (confetti and a card, a few seconds, tap to close) for the moments that earn
   one: a goal reached, a list cleared. It can be switched off, and "reduce motion" hides the confetti.
+- The owner likes a **companion with life** in an app (Passbook's robo dog, Nickel): drawn by hand,
+  always on screen but small and draggable out of the way, with many small unscheduled movements
+  (blinks, breathing, ear twitches, looking at what you touch, dozing off when left alone) and
+  reactions to what happens in the app. It points things out rather than giving orders, and can
+  be hidden, quietened or renamed in Settings.
 
 ## 6. Feedback
 
@@ -147,6 +152,8 @@ Ask before anything that changes or deletes real data.
 | "Connect to Claude" private link | `src/server/connector.ts`, Settings | Tasks for Two |
 | Sign in with Face ID (passkey) | `src/server/passkeys.ts`, Settings, sign-in page | HOH Hub, Tasks for Two |
 | Weekly recap | `src/app/(app)/recap/page.tsx`, `src/components/recap.tsx` | Tasks for Two |
+| A companion character (Nickel) | `src/components/nickel/`, `src/lib/nickel/brain.ts` | Passbook |
+| Goal with a date and a track | `src/lib/finance/goalplan.ts`, `src/app/(app)/savings/goal/` | Passbook |
 
 ## 13. Keeping it secure
 

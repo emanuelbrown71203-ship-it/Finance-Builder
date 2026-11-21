@@ -39,7 +39,7 @@ Passbook follows the same house style as the owner's other apps (written down in
 | Bills | Recurring bills, subscriptions and income, found from history. Upcoming due dates, price-increase alerts, "I cancelled this". |
 | Budget | Spending by category against monthly limits, month over month, and six months of money in vs money out. |
 | Net worth | What you own minus what you owe over time, by account. Add things no bank reports (a car, a house) by hand. |
-| Savings | Savings balance, monthly saving history, and goals with a projected finish date. |
+| Savings | Savings balance, monthly saving history, and goals. Each goal with a date gets a **track**: what to put away a month, a week and each payday to make it, whether you're ahead or behind, month-end checkpoints, 25/50/75/100% milestones, and ideas for where the money could come from. |
 | Investing | Total, trend, split by type, and holdings with gain or loss. |
 | Debt payoff | When the loans will be paid off at today's payments, and what a little extra each month changes. |
 | Weekly recap | Last week in money: spent against the week before, money in, bills paid, no-spend days. |
@@ -54,6 +54,13 @@ Smaller things that make it easier to live with:
 - **Subscription help.** A warning before a yearly charge renews, a note when a known service charges
   for the first time, and where to go to cancel.
 - **A little celebration** when a savings goal is reached (it can be switched off).
+- **Nickel, the robo dog.** He sits in the corner of every screen, blinks, breathes, wags, looks
+  toward whatever you touch, naps when left alone, perks up at new charges and hops when money
+  goes into a goal. Tap him for what he's noticed in your numbers (bills due, price rises, budgets,
+  goals behind or ahead, payday, streaks); hold him for options; drag him to the other side.
+  He points things out and is clear he isn't a financial advisor. His "brain" is rules over your
+  own numbers (`src/lib/nickel/brain.ts`), so nothing leaves the app; a real AI chat could be
+  added later. Settings: show him, quiet mode, rename him.
 
 ## Connections
 

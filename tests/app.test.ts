@@ -3,9 +3,9 @@ import { getDb, type DB } from "@/db";
 import { seedDemo } from "@/db/seed";
 import { DEMO_USER_ID } from "@/lib/config";
 import type { Ctx } from "@/server/auth";
-import { setBudget, setDebtPlan, setDebtSettings, setRecurringOverride, updateGoal, updateTransaction } from "@/server/mutations";
+import { deleteDeposit, setBudget, setDebtPlan, setDebtSettings, setRecurringOverride, updateGoal, updateTransaction } from "@/server/mutations";
 import { loadRules } from "@/server/rules";
-import { getAccounts, getBudget, getDebt, getGoals, getInvestments, getNetWorth, getOverview, getRecap, getRecurring, getTransactions } from "@/server/queries";
+import { getAccounts, getBudget, getDebt, getGoal, getGoals, getInvestments, getNetWorth, getOverview, getRecap, getRecurring, getTransactions } from "@/server/queries";
 
 /** End-to-end over the real SQL: seed the sample household into PGlite, then read it back. */
 const today = "2026-11-19";
@@ -183,6 +183,54 @@ describe("sample household", () => {
     expect(r.biggest!.amount).toBeLessThan(0);
     expect(r.netWorthChange).not.toBeNull();
     expect((await getRecap(ctx, 1)).to).toBe("2026-11-08");
+  });
+
+  it("gives each goal a plan: open-ended, behind, on track", async () => {
+    const { goals } = await getGoals(ctx);
+    expect(goals.map((g) => [g.name, g.status])).toEqual([
+      ["Emergency fund", "no_date"],
+      ["Down payment", "behind"],
+      ["Two weeks in Japan", "on_track"],
+    ]);
+    const japan = goals[2];
+    // $2,350 to go by the end of August: about 9.4 months, so $251 a month.
+    expect(japan.perMonth).toBe(25_100);
+    // Paychecks every two weeks: the plan also says how much from each one.
+    expect(japan.perPayday).not.toBeNull();
+    expect(japan.nextPayday! > today).toBe(true);
+    const home = goals[1];
+    expect(home.gap).toBeLessThan(-500_000);
+  });
+
+  it("draws a goal's track: history, checkpoints, milestones and ideas", async () => {
+    const japan = (await getGoals(ctx)).goals.find((g) => g.name === "Two weeks in Japan")!;
+    const detail = await getGoal(ctx, japan.id);
+    expect(detail.startSaved).toBe(65_000);
+    expect(detail.history[0]).toEqual({ date: detail.startDate, amount: 65_000 });
+    expect(detail.history.at(-1)!.amount).toBe(215_000);
+    expect(detail.deposits.length).toBe(6);
+    expect(detail.checkpoints.at(-1)).toMatchObject({ date: japan.targetDate, amount: 450_000 });
+    expect(detail.milestones.map((m) => m.percent)).toEqual([25, 50, 75, 100]);
+    expect(detail.milestones[0].reachedOn).not.toBeNull();
+    expect(detail.payFrequency).toBe("Every 2 weeks");
+    await expect(getGoal({ ...ctx, userId: "someone-else" }, japan.id)).rejects.toThrow("wasn’t found");
+  });
+
+  it("writes each deposit down, and Undo takes exactly that deposit back off", async () => {
+    const goal = (await getGoals(ctx)).goals[0];
+    const { depositId } = await updateGoal(ctx, goal.id, { add: 12_345 });
+    expect(depositId).toBeTruthy();
+    expect((await getGoal(ctx, goal.id)).deposits[0]).toMatchObject({ id: depositId, amount: 12_345, date: today });
+    // Someone else can't remove it.
+    await expect(deleteDeposit({ ...ctx, userId: "someone-else" }, goal.id, depositId!)).rejects.toThrow("wasn’t found");
+    await deleteDeposit(ctx, goal.id, depositId!);
+    expect((await getGoals(ctx)).goals[0].saved).toBe(goal.saved);
+    // Taking out more than is there takes out what is there, and records that.
+    const out = await updateGoal(ctx, goal.id, { add: -999_999_999 });
+    expect((await getGoals(ctx)).goals[0].saved).toBe(0);
+    expect((await getGoal(ctx, goal.id)).deposits[0].amount).toBe(-goal.saved);
+    await deleteDeposit(ctx, goal.id, out.depositId!);
+    expect((await getGoals(ctx)).goals[0].saved).toBe(goal.saved);
   });
 
   it("saves budget limits, goal deposits and cancelled subscriptions", async () => {
