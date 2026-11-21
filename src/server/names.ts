@@ -1,6 +1,6 @@
 import { and, asc, desc, eq, gte, inArray, isNull, sql } from "drizzle-orm";
 import { nameRules, transactions } from "@/db/schema";
-import { addDays, addMonths } from "@/lib/dates";
+import { addDays } from "@/lib/dates";
 import { RULE_KEY_PATTERN, cleanName, looksUnclear, namer, validName, type NameRule, type Namer } from "@/lib/finance/names";
 import type { NameRuleView, NamesPayload, UnclearName } from "@/lib/types";
 import type { Ctx } from "./auth";
@@ -182,7 +182,7 @@ export async function getNames(ctx: Ctx): Promise<NamesPayload> {
     ctx.db
       .select({ id: transactions.id, date: transactions.date, name: transactions.name, rawName: transactions.rawName, amount: transactions.amount, category: transactions.category, customName: transactions.customName })
       .from(transactions)
-      .where(and(eq(transactions.userId, ctx.userId), gte(transactions.date, addMonths(ctx.today, -13))))
+      .where(eq(transactions.userId, ctx.userId))
       .orderBy(desc(transactions.date), desc(transactions.createdAt)),
   ]);
   const resolve = namer(rules);

@@ -94,7 +94,7 @@ export default function NamesPage() {
                         <span className="block truncate font-bold">{r.name}</span>
                         {r.bankNames.length > 0 && <span className="block truncate text-small text-ink-3">Bank says: {r.bankNames.join(", ")}</span>}
                         <span className="block text-small text-ink-3">
-                          {r.count > 0 ? charges(r.count) : "No charges in the last year"}
+                          {r.count > 0 ? charges(r.count) : "No charges yet"}
                           {r.amount !== 0 && `, only at ${dollarsExact(Math.abs(r.amount))}`}
                         </span>
                       </span>
