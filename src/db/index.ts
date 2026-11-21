@@ -22,9 +22,16 @@ async function connect(): Promise<DB> {
   if (url && !isDemoMode()) {
     const { default: postgres } = await import("postgres");
     const { drizzle } = await import("drizzle-orm/postgres-js");
-    // prepare:false keeps us compatible with Supabase’s transaction pooler.
+    // On Supabase, DATABASE_URL must be the *session* pooler (port 5432), not the transaction
+    // pooler (6543). This driver sends several queries down one connection at once when a screen
+    // asks for many things together, and the transaction pooler loses track of the answers: the
+    // connection then hangs and every later request on it waits until the host gives up.
+    //
+    // A small pool whose idle connections close quickly suits a host that freezes and thaws
+    // server copies at will: no connection is left open for long enough to go stale, and a
+    // household's few users never need more than a handful at once.
     // Encrypted in transit whatever the address says: the driver's own default is plain text.
-    const client = postgres(url, { prepare: false, max: 5, ...databaseTls(url) });
+    const client = postgres(url, { prepare: false, max: 3, idle_timeout: 20, max_lifetime: 15 * 60, connect_timeout: 10, ...databaseTls(url) });
     return drizzle(client, { schema }) as unknown as DB;
   }
 

@@ -65,6 +65,9 @@ for it to be remembered and used whenever an app is built.
   `withUser(handler, { fresh: true })`, which asks the person to confirm it’s them.
 - New accounts need the invite code (`SIGNUP_CODE`). Don’t reopen sign-up.
 - With real data the site’s address is `APP_URL` and nothing else: never read it from a request header.
+- On Supabase, `DATABASE_URL` uses the **session** pooler (port 5432). The transaction pooler (6543)
+  hangs on the driver's pipelined queries, which takes the whole live site down. Tests against a
+  direct Postgres can't show this; after a deploy check `/api/health` reports `"pool":"ok"`.
 - If a change touches sign-in, sessions, the connectors or the headers in `next.config.ts`, run the
   security checks again and get an independent review before publishing.
 

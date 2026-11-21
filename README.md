@@ -111,9 +111,11 @@ everything else in the project:
 - row level security is on for every table, with access for that role only.
 
 Create the role first (`create role passbook_app login password '…'`), run the SQL as the
-database owner, and point `DATABASE_URL` at the transaction pooler as
-`passbook_app.<project ref>`. The password can be left out of the address and put in
-`DATABASE_PASSWORD` instead. `GET /api/health` then says whether the database answers.
+database owner, and point `DATABASE_URL` at the **session** pooler (port 5432) as
+`passbook_app.<project ref>`. Not the transaction pooler (port 6543): the database driver
+sends several queries down one connection at once, and the transaction pooler hangs on that. The password can be left out of the address and put in
+`DATABASE_PASSWORD` instead. `GET /api/health` then says whether the database answers
+(`database`) and whether the app's own connections answer several questions at once (`pool`).
 For later schema changes: `npx tsx scripts/install-sql.ts --from <n>`.
 
 ### How "real time" works

@@ -1,4 +1,6 @@
 import { connection } from "next/server";
+import { sql as q } from "drizzle-orm";
+import { getDb } from "@/db";
 import { databaseTls, databaseUrl, isDemoMode, liveConfigProblem } from "@/lib/config";
 import { describeError } from "@/server/errors";
 
@@ -14,8 +16,26 @@ import { describeError } from "@/server/errors";
  */
 
 type Database = { database: "none" | "ok" | "not-installed" | "unreachable"; code?: string };
+type Pool = "ok" | "stuck" | "error";
 
-let last: { at: number; result: Promise<Database> } | null = null;
+let last: { at: number; result: Promise<[Database, Pool]> } | null = null;
+
+/**
+ * Asks the app's own database connections several questions at once, the way
+ * a screen does. A gateway that mishandles that hangs instead of answering, so
+ * this is given eight seconds and then reported as "stuck".
+ */
+async function poolCheck(): Promise<Pool> {
+  try {
+    const db = await getDb();
+    const all = Promise.all(Array.from({ length: 6 }, () => db.execute(q`select 1`))).then(() => "ok" as const);
+    const timeout = new Promise<"stuck">((resolve) => setTimeout(() => resolve("stuck"), 8_000));
+    return await Promise.race([all, timeout]);
+  } catch (error) {
+    console.error("Health check (app connections):", describeError(error));
+    return "error";
+  }
+}
 
 async function probe(): Promise<Database> {
   const url = databaseUrl();
@@ -39,9 +59,9 @@ async function probe(): Promise<Database> {
 export async function GET() {
   // Answered when asked, never worked out ahead of time at build.
   await connection();
-  if (!last || Date.now() - last.at > 60_000) last = { at: Date.now(), result: probe() };
-  const database = await last.result;
+  if (!last || Date.now() - last.at > 60_000) last = { at: Date.now(), result: Promise.all([probe(), poolCheck()]) };
+  const [database, pool] = await last.result;
   const sample = isDemoMode();
-  const ready = sample || (liveConfigProblem() === null && database.database === "ok");
-  return Response.json({ mode: sample ? "sample" : "live", ready, ...database, build: process.env.NEXT_PUBLIC_BUILD_ID ?? null }, { headers: { "cache-control": "no-store" } });
+  const ready = sample ? pool === "ok" : liveConfigProblem() === null && database.database === "ok" && pool === "ok";
+  return Response.json({ mode: sample ? "sample" : "live", ready, ...database, pool, build: process.env.NEXT_PUBLIC_BUILD_ID ?? null }, { headers: { "cache-control": "no-store" } });
 }
