@@ -120,6 +120,13 @@ export function Nickel() {
   const shownThisVisit = useRef(new Set<string>());
   const taps = useRef<number[]>([]);
   const press = useRef<{ x: number; y: number; t: number; timer: number; moved: boolean; held: boolean } | null>(null);
+  /** The leg he's walking now and when he set off on it, to know where his paws are. Null when he isn't walking. */
+  const legNow = useRef<(Leg & { start: number }) | null>(null);
+  /** Where the whole walk ends (its last leg). */
+  const walkEnd = useRef<{ x: number; y: number } | null>(null);
+  const printId = useRef(0);
+  /** Counts walks, so one that was replaced before it set off never starts. */
+  const walkGen = useRef(0);
   const bubbleTimer = useRef(0);
   // Anything unexpected from the server counts as "nothing to say", never a broken screen.
   const tips = useMemo(() => (Array.isArray(data?.tips) ? data.tips : []), [data]);
@@ -197,7 +204,9 @@ export function Nickel() {
       timer = window.setTimeout(() => {
         const idle = Date.now() - lastActive.current;
         const sleepAfter = isNight() ? 20_000 : 80_000;
-        if (idle > sleepAfter) {
+        if (legNow.current) {
+          // Busy walking: habits can wait until he gets there.
+        } else if (idle > sleepAfter) {
           setAsleep(true);
           setTilt(0);
         } else if (!press.current) {
@@ -277,9 +286,6 @@ export function Nickel() {
     spotRef.current = spot;
   }, [spot]);
   const walkTimer = useRef(0);
-  /** The leg he's walking now and when he set off on it, to know where his paws are. */
-  const legNow = useRef<(Leg & { start: number }) | null>(null);
-  const printId = useRef(0);
   /** Where his home spot is on screen, measured the last time he set off from it (for this screen size). */
   const homeAt = useRef<{ x: number; y: number; w: number; h: number } | null>(null);
   const goingHome = useRef(false);
@@ -303,6 +309,17 @@ export function Nickel() {
   /** Trots to a spot anywhere on the screen (null: back home), then does something doggy there. */
   const trot = useCallback(
     (target: { x: number; y: number } | null) => {
+      // Already walking (sent home, or off somewhere new): stop where he really is, and plan from there.
+      const gen = ++walkGen.current;
+      const wasWalking = legNow.current !== null;
+      if (wasWalking) {
+        const r = root.current?.getBoundingClientRect();
+        window.clearTimeout(walkTimer.current);
+        legNow.current = null;
+        walkEnd.current = null;
+        setWalk(null);
+        if (r) spotRef.current = { x: r.left, y: r.top };
+      }
       // Setting off from home: remember exactly where home is, so he can come back to it.
       if (spotRef.current === null) {
         const r = root.current?.getBoundingClientRect();
@@ -314,14 +331,17 @@ export function Nickel() {
       const distance = Math.hypot(to.x - from.x, to.y - from.y);
       if (distance < 30) {
         if (target === null) setSpot(null);
+        else if (wasWalking) setSpot(from);
         return;
       }
       // Across side-on and up or down climbing, never a diagonal (see lib/nickel/walk.ts). Climbing is slower.
       const legs = planLegs(from, to, { across: rand(90, 130), climb: rand(55, 80) });
       if (legs.length === 0) {
         if (target === null) setSpot(null);
+        else if (wasWalking) setSpot(from);
         return;
       }
+      walkEnd.current = to;
       goingHome.current = target === null;
       setGaze({ x: 0, y: 0 });
       // Start from where he is (switching from sitting at home to a spot), then set off on the next frame.
@@ -330,6 +350,7 @@ export function Nickel() {
       const arrive = () => {
         setWalk(null);
         legNow.current = null;
+        walkEnd.current = null;
         goingHome.current = false;
         if (target === null) {
           setSpot(null);
@@ -347,6 +368,7 @@ export function Nickel() {
         }
       };
       const step = (i: number) => {
+        if (gen !== walkGen.current) return;
         const leg = legs[i];
         legNow.current = { ...leg, start: performance.now() };
         setWalk({ dir: leg.dir, ms: leg.ms });
@@ -366,7 +388,7 @@ export function Nickel() {
       timer = window.setTimeout(() => {
         const c = calm.current;
         const quiet = Date.now() - lastActive.current > 3500 && !press.current && document.visibilityState === "visible" && !document.querySelector("dialog[open]");
-        if (!reduced.matches && quiet && !c.asleep && !c.bubble && !c.menu && !c.drag) {
+        if (!reduced.matches && quiet && !c.asleep && !c.bubble && !c.menu && !c.drag && !legNow.current) {
           const here = spotRef.current;
           if (here !== null && Math.random() < 0.3) trot(null);
           else {
@@ -401,7 +423,7 @@ export function Nickel() {
       if (here === null || goingHome.current || calm.current.drag || calm.current.bubble || calm.current.menu || press.current) return;
       if (e.type === "pointerdown" && root.current?.contains(e.target as Node)) return;
       const b = bounds();
-      if (here.y >= b.maxY - 40) return; // already along the bottom
+      if ((walkEnd.current ?? here).y >= b.maxY - 40) return; // already along the bottom, and staying there
       window.clearTimeout(homeTimer.current);
       homeTimer.current = window.setTimeout(() => trot(null), 250);
     };
@@ -418,8 +440,10 @@ export function Nickel() {
   useEffect(() => {
     if (settings.roams) return;
     const t = window.setTimeout(() => {
+      walkGen.current++;
       window.clearTimeout(walkTimer.current);
       legNow.current = null;
+      walkEnd.current = null;
       setWalk(null);
       setSpot(null);
     }, 0);
@@ -428,11 +452,13 @@ export function Nickel() {
 
   /** Stops where he is (when touched mid-trot). */
   const halt = () => {
+    walkGen.current++; // a walk about to set off doesn't
     window.clearTimeout(homeTimer.current);
     if (!walk) return;
     const r = root.current?.getBoundingClientRect();
     window.clearTimeout(walkTimer.current);
     legNow.current = null;
+    walkEnd.current = null;
     setWalk(null);
     goingHome.current = false;
     if (r) setSpot({ x: r.left, y: r.top });
@@ -825,7 +851,7 @@ export function Nickel() {
           className={cx("nk-btn relative block touch-none rounded-full outline-offset-4", walk && `nk-walking nk-walk-${walk.dir}`)}
           style={{ ["--nk-wag" as string]: look.wag }}
         >
-          <div key={action?.key} className={cx("nk-wrap", action && `nk-act-${action.name}`)} onAnimationEnd={() => setAction(null)}>
+          <div key={action?.key} className={cx("nk-wrap", action && `nk-act-${action.name}`)} onAnimationEnd={(e) => e.animationName === `nk-${action?.name}` && setAction(null)}>
             <RoboDog
               key={walk?.dir ?? "sit"}
               walk={walk?.dir ?? null}
