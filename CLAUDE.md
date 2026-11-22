@@ -63,7 +63,7 @@ for it to be remembered and used whenever an app is built.
   saving, asks what the card owes, and has Undo. The sample household uses a made-up statement, never
   the person's file.
 - **Apple Card taps arrive live** through a private tap link (`src/server/card-taps.ts`,
-  `/api/tap/<key>`), called by an iPhone Shortcuts "Transaction" automation with the merchant and
+  `/api/tap/<key>`), called by an iPhone Shortcuts Wallet automation ("Transaction" before iOS 26) with the merchant and
   amount. The link can only add a pending Apple Card purchase: it reads nothing back. Only a hash of its
   key is kept (`tap_keys`), making one needs a fresh "confirm it's you", it's rate limited, and it
   switches itself off after 180 days unused. A statement confirms each tap (same amount, within 3 days),

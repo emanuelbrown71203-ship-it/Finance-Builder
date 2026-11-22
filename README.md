@@ -85,7 +85,7 @@ Smaller things that make it easier to live with:
   what's new before saving, asks what the card owes now, and brings it in as a card account with Undo.
   Bringing the same month in twice adds nothing. Purchases count in budgets; paying the card off is a
   transfer. Any date range can also be exported at card.apple.com, as often as you like.
-- **Apple Card taps, live.** An iPhone Shortcuts automation (Transaction trigger, Apple Card only)
+- **Apple Card taps, live.** An iPhone Shortcuts automation (the Wallet trigger, "Transaction" before iOS 26; Apple Card only)
   sends each tap at a register to a private link, and the purchase shows up within seconds as pending.
   The next statement confirms it (same amount within three days), keeping a category you picked, and
   replaces taps that never went through (declined, or a tip changed the amount). Online purchases come

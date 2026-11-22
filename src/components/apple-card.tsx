@@ -295,10 +295,10 @@ function AppleCardTaps({ demo }: { demo: boolean }) {
                 Open the <span className="font-bold text-ink">Shortcuts</span> app, tap <span className="font-bold text-ink">Automation</span> at the bottom, then <span className="font-bold text-ink">+</span>.
               </li>
               <li>
-                Choose <span className="font-bold text-ink">Transaction</span>. Pick only <span className="font-bold text-ink">Apple Card</span>, leave the rest as it is, choose <span className="font-bold text-ink">Run Immediately</span>, and tap Next.
+                Choose <span className="font-bold text-ink">Wallet</span> (on older iPhones it’s called <span className="font-bold text-ink">Transaction</span>). Pick <span className="font-bold text-ink">When I tap</span> and choose only <span className="font-bold text-ink">Apple Card</span>. Choose <span className="font-bold text-ink">Run Immediately</span>, and tap Next.
               </li>
               <li>
-                Tap <span className="font-bold text-ink">New Blank Automation</span>, then <span className="font-bold text-ink">Add Action</span>, and search for <span className="font-bold text-ink">Get Contents of URL</span>.
+                Tap <span className="font-bold text-ink">New Blank Automation</span> (or Create New Shortcut), then <span className="font-bold text-ink">Add Action</span>, and search for <span className="font-bold text-ink">Get Contents of URL</span>.
               </li>
               <li>
                 Tap <span className="font-bold text-ink">URL</span> and paste your link. Tap the arrow beside it to show more: set <span className="font-bold text-ink">Method</span> to POST and <span className="font-bold text-ink">Request Body</span> to JSON.
