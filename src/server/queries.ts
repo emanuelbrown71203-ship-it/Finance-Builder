@@ -241,7 +241,7 @@ async function loadRecurring(ctx: Ctx): Promise<RecurringBundle> {
   }
 
   // Bills added by hand sit alongside the ones found in the history.
-  const found = series.map((s) => ({ name: s.name, bankName: s.bankName, active: s.active, kind: s.kind }));
+  const found = series.map((s) => ({ name: s.name, bankName: s.bankName, active: s.active, kind: s.kind, amount: s.amount, frequency: s.frequency }));
   const charges = raw.filter((t) => t.amount < 0 && t.date >= addDays(ctx.today, -60)).map((t) => ({ id: t.id, date: t.date, amount: t.amount, names: [t.name, nameFor(t).name] }));
   for (const bill of added) series.push(manualSeries(bill, ctx.today, bankMatch(bill, ctx.today, charges, found)));
   series.sort((a, b) => (a.nextDate < b.nextDate ? -1 : a.nextDate > b.nextDate ? 1 : a.name.localeCompare(b.name)));

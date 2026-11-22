@@ -136,21 +136,31 @@ export function bankMatch(
   bill: Pick<ManualBill, "name" | "amount" | "frequency" | "startDate">,
   today: ISODate,
   charges: { id: string; date: ISODate; amount: number; names: string[] }[],
-  found: { name: string; bankName: string; active: boolean; kind: string }[],
+  found: { name: string; bankName: string; active: boolean; kind: string; amount: number; frequency: string }[],
 ): BankMatch {
   const key = merchantKey(bill.name);
   if (key.replace(/ /g, "").length < 3) return { paid: null, seenAs: null };
+  const frequency = bill.frequency as Frequency;
+  /** The same place: the same name, or the bank's name with something after it ("Netflix" and "Netflix com"). */
   const same = (name: string) => {
     const k = merchantKey(name);
-    return k === key || (k.length >= 4 && key.length >= 4 && (k.startsWith(`${key} `) || key.startsWith(`${k} `) || k.endsWith(` ${key}`)));
+    return k === key || (key.length >= 4 && k.startsWith(`${key} `));
   };
-  const seen = found.find((s) => s.active && s.kind !== "income" && (same(s.name) || same(s.bankName)));
+  const near = (a: number, within: number) => Math.abs(Math.abs(a) - Math.abs(bill.amount)) <= Math.abs(bill.amount) * within;
+  // The bank's own repeating charge for it: same place, same schedule, about the same amount.
+  // "Rent" $2,150 is not "Rent the Runway"; "Apple Card" $500 is not Apple's $2.99 iCloud.
+  const seen = frequency === "once" ? undefined : found.find((s) => s.active && s.kind !== "income" && s.frequency === frequency && near(s.amount, 0.2) && (same(s.name) || same(s.bankName)));
   if (seen) return { paid: null, seenAs: seen.name };
-  const due = nextDue(bill, today);
-  const from = addDays(due, -12);
-  const near = (a: number) => Math.abs(Math.abs(a) - Math.abs(bill.amount)) <= Math.abs(bill.amount) * 0.1;
+  // Paid early: only after the one before was due, so last week's payment never pays this week's.
+  const due = firstOnOrAfter(bill.startDate, frequency, today);
+  const gap = { once: 24, weekly: 7, biweekly: 14, monthly: 30, quarterly: 91, semiannual: 182, yearly: 365 }[frequency];
+  let from = addDays(due.date, -Math.min(12, Math.floor(gap / 2)));
+  if (due.k > 0) {
+    const before = addDays(nthDate(bill.startDate, frequency, due.k - 1), 1);
+    if (before > from) from = before;
+  }
   const paid = charges
-    .filter((c) => c.amount < 0 && c.date >= from && c.date <= today && c.date <= due && near(c.amount) && c.names.some(same))
+    .filter((c) => c.amount < 0 && c.date >= from && c.date <= today && c.date <= due.date && near(c.amount, 0.1) && c.names.some(same))
     .sort((a, b) => (a.date < b.date ? 1 : -1))[0];
   return { paid: paid ? { id: paid.id, date: paid.date, amount: paid.amount } : null, seenAs: null };
 }

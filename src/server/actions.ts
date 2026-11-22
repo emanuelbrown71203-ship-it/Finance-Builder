@@ -7,7 +7,7 @@ import { dollarsExact } from "@/lib/money";
 import type { ActivityItem } from "@/lib/types";
 import type { Ctx } from "./auth";
 import { HttpError } from "./http";
-import { createManualBill, deleteManualBill, type BillFrequencyChoice } from "./manual-bills";
+import { createManualBill, deleteManualBill, nextDue, type BillFrequencyChoice } from "./manual-bills";
 import { createGoal, deleteDeposit, setDebtPlan, updateGoal } from "./mutations";
 import { createNameRule, deleteNameRule, loadNamer, renameRule, restoreNameRule, type NameUndo } from "./names";
 
@@ -108,15 +108,16 @@ export async function findCharge(ctx: Ctx, said: string, amount?: number) {
       .orderBy(desc(transactions.date), desc(transactions.createdAt))
       .limit(5000),
   ]);
-  const matches = (t: (typeof rows)[number]) => [nameFor(t).name, t.name, t.rawName ?? ""].map(norm);
   // "Only at $1,200": the charge must be exactly that much (money out or in).
-  const pool = rows.filter((t) => !t.customName && (amount === undefined || Math.abs(t.amount) === amount));
-  const exact = pool.find((t) => matches(t).includes(s));
-  const partial = exact ?? pool.find((t) => matches(t).some((n) => n.includes(s)));
-  if (!partial) throw new HttpError(400, `No charge called “${said.slice(0, 40)}”${amount !== undefined ? ` for ${money(amount)}` : ""} turned up.`);
-  const named = nameFor(partial);
-  // A charge named for one amount only ("Rent" for Venmo payments of $1,200) is renamed at that amount only.
-  return { ...partial, shown: named.name, exact: named.exact };
+  const pool = rows.filter((t) => !t.customName && (amount === undefined || Math.abs(t.amount) === amount)).map((t) => ({ t, named: nameFor(t) }));
+  // By the name it shows: a name kept for one amount ("Rent" for Venmo payments of $1,200) is renamed at that amount only.
+  const shown = pool.find((c) => norm(c.named.name) === s) ?? pool.find((c) => norm(c.named.name).includes(s));
+  if (shown) return { ...shown.t, shown: shown.named.name, exact: shown.named.exact };
+  // By the bank's text ("Venmo"): every charge like it, so start from one that isn't under a one-amount name.
+  const bank = pool.filter((c) => [c.t.name, c.t.rawName ?? ""].map(norm).some((n) => n === s || n.includes(s)));
+  const pick = bank.find((c) => !c.named.exact) ?? bank[0];
+  if (!pick) throw new HttpError(400, `No charge called “${said.slice(0, 40)}”${amount !== undefined ? ` for ${money(amount)}` : ""} turned up.`);
+  return { ...pick.t, shown: pick.named.name, exact: false };
 }
 
 /* ---------- the changes ---------- */
@@ -127,7 +128,8 @@ export async function addBill(
   input: { name: string; amount: number; frequency: BillFrequencyChoice; date: ISODate; kind?: "bill" | "subscription" },
 ): Promise<Done> {
   const bill = await createManualBill(ctx, { name: input.name, amount: input.amount, frequency: input.frequency, startDate: input.date, kind: input.kind }, actor);
-  const when = input.frequency === "once" ? `due ${formatShort(input.date)}` : `${FREQUENCY_LABEL[input.frequency as Frequency].toLowerCase()}, next on ${formatShort(input.date)}`;
+  const next = nextDue({ frequency: input.frequency, startDate: input.date }, ctx.today);
+  const when = input.frequency === "once" ? `due ${formatShort(input.date)}` : `${FREQUENCY_LABEL[input.frequency as Frequency].toLowerCase()}, next on ${formatShort(next)}`;
   const summary = `Added ${input.frequency === "once" ? "an upcoming bill" : input.kind === "subscription" ? "a subscription" : "a bill"}: ${bill.name}, ${money(bill.amount)} ${when}.`;
   const activityId = await record(ctx, actor, summary, { type: "bill.remove", billId: bill.id });
   return { activityId, summary, href: "/bills" };
@@ -217,7 +219,7 @@ export async function changeLoan(ctx: Ctx, actor: Agent, accountId: string, patc
 }
 
 export async function renameCharges(ctx: Ctx, actor: Agent, transactionId: string, name: string, onlyThisAmount = false): Promise<Done> {
-  const result = await createNameRule(ctx, { transactionId, name, onlyThisAmount });
+  const result = await createNameRule(ctx, { transactionId, name, onlyThisAmount, keepOneAmountNames: true });
   const clean = validName(name)!;
   const summary = `Renamed ${result.count === 1 ? "a charge" : `${result.count} charges`} to ${clean}${onlyThisAmount ? " (only at that amount)" : ""}. New ones will be too.`;
   const activityId = await record(ctx, actor, summary, { type: "name.undo", undo: result.undo, name: clean });

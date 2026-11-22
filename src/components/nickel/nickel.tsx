@@ -608,7 +608,8 @@ function plan(c: Command, loans: { name: string }[]): Plan {
       if (!c.name || !c.amount || !c.date) return { form };
       return c.kind === "upcoming"
         ? { body: { kind: "upcoming", name: c.name, amount: c.amount, date: c.date }, read: `Add an upcoming bill: ${c.name}, ${usd(c.amount)}, due ${formatShort(c.date)}.`, form }
-        : { body: { kind: "bill", name: c.name, amount: c.amount, frequency: c.frequency, date: c.date }, read: `Add a bill: ${c.name}, ${usd(c.amount)} ${HOW_OFTEN[c.frequency]}, next on ${formatShort(c.date)}.`, form };
+        : // The anchor carries the day asked for ("the 31st"); the read-back says when the next one is due.
+          { body: { kind: "bill", name: c.name, amount: c.amount, frequency: c.frequency, date: c.anchor ?? c.date }, read: `Add a bill: ${c.name}, ${usd(c.amount)} ${HOW_OFTEN[c.frequency]}, next on ${formatShort(c.date)}.`, form };
     }
     case "goal":
       if (!c.name) return { ask: "What’s the goal called? Like “new goal Japan $4,500 by June”." };

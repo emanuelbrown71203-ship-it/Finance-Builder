@@ -67,7 +67,7 @@ describe("telling Nickel to rename", () => {
 describe("instructions that are easy to misread", () => {
   it("never sends a bill or a loan payment into a savings goal", () => {
     const withGoals = (s: string, goals: string[]) => parseCommand(s, { ...ctx, goals: [...ctx.goals, ...goals] });
-    expect(parse("add student loan payment $300 on the 15th")).toEqual({ kind: "bill", name: "Student Loan", amount: 30_000, frequency: "monthly", date: "2026-12-15" });
+    expect(parse("add student loan payment $300 on the 15th")).toEqual({ kind: "bill", name: "Student Loan", amount: 30_000, frequency: "monthly", date: "2026-12-15", anchor: "2026-12-15" });
     expect(withGoals("add car insurance $600 every 6 months", ["Car"])).toMatchObject({ kind: "bill", name: "Car Insurance", amount: 60_000, frequency: "semiannual" });
     expect(parse("add emergency vet bill $400 due friday")).toEqual({ kind: "upcoming", name: "Emergency Vet", amount: 40_000, date: "2026-11-27" });
     expect(withGoals("add house insurance $1,200 yearly", ["House"])).toMatchObject({ kind: "bill", name: "House Insurance", amount: 120_000, frequency: "yearly" });
@@ -81,9 +81,30 @@ describe("instructions that are easy to misread", () => {
     expect(parse("add phone 80 on the 3rd")).toMatchObject({ kind: "bill", amount: 8000, date: "2026-12-03" });
   });
 
-  it("keeps the 31st as the 31st", () => {
-    // November has no 31st, so the first one is December's.
-    expect(parse("add phone bill $80 on the 31st")).toMatchObject({ date: "2026-12-31" });
+  it("keeps the 31st as the 31st, and still plans the short month", () => {
+    // November has no 31st: it's due Nov 30, counted from Oct 31 so December's lands on the 31st.
+    expect(parse("add phone bill $80 on the 31st")).toMatchObject({ date: "2026-11-30", anchor: "2026-10-31" });
+    // Typed on Feb 1, "the 30th" is due Feb 28, not skipped to March.
+    expect(parseCommand("add rent $2,150 on the 30th", { ...ctx, today: "2027-02-01" })).toMatchObject({ date: "2027-02-28", anchor: "2027-01-30" });
+    expect(parse("add gym $40 on the 25th")).toMatchObject({ date: "2026-11-25", anchor: "2026-11-25" });
+  });
+
+  it("lets a goal with 'new' in its name receive money, and treats a deadline as a new goal", () => {
+    const withRoof = { ...ctx, goals: [...ctx.goals, "New roof", "Car"] };
+    expect(parseCommand("add $100 to the new roof", withRoof)).toEqual({ kind: "deposit", goal: "New roof", amount: 10_000 });
+    expect(parseCommand("put $100 toward new roof", withRoof)).toEqual({ kind: "deposit", goal: "New roof", amount: 10_000 });
+    expect(parseCommand("save $5,000 by June 2027 for a car", withRoof)).toMatchObject({ kind: "goal", target: 500_000, date: "2027-06-30" });
+  });
+
+  it("reads a goal's bare year as its date and 'by the 15th' as a date", () => {
+    expect(parse("new goal trip 2027 3000")).toEqual({ kind: "goal", name: "Trip", target: 300_000, date: "2027-12-31" });
+    expect(parse("new goal bike $1,200 by the 15th")).toEqual({ kind: "goal", name: "Bike", target: 120_000, date: "2026-12-15" });
+  });
+
+  it("takes 'at $1,200' on a rename as that amount only", () => {
+    expect(parse("rename Venmo to Rent at $1,200")).toEqual({ kind: "rename", from: "Venmo", to: "Rent", onlyAmount: 120_000 });
+    // Without a dollar sign it's part of the name ("Lunch at 12").
+    expect(parse("rename Cafe to Lunch at 12")).toEqual({ kind: "rename", from: "Cafe", to: "Lunch at 12", onlyAmount: null });
   });
 });
 

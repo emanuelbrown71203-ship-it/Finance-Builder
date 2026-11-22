@@ -9,7 +9,7 @@ import { countUnclear, createNameRule, deleteNameRule, getNames, previewNameRule
 import { transactions as transactionsTable } from "@/db/schema";
 import { eq as eqOp } from "drizzle-orm";
 import { addBill, addGoal, addToGoal, changeGoal, changeLoan, findCharge, findDebt, findGoal, listActivity, renameCharges, undoActivity } from "@/server/actions";
-import { createManualBill, deleteManualBill, manualSeries, nextDue, restoreManualBill, updateManualBill } from "@/server/manual-bills";
+import { bankMatch, createManualBill, deleteManualBill, manualSeries, nextDue, restoreManualBill, updateManualBill } from "@/server/manual-bills";
 import { upcomingBetween } from "@/lib/finance/recurring";
 import { getAccounts, getBudget, getDebt, getGoal, getGoals, getInvestments, getNetWorth, getOverview, getRecap, getRecurring, getTransactions } from "@/server/queries";
 
@@ -556,6 +556,34 @@ describe("changes Nickel and Claude make when asked", () => {
     expect(dupe).toMatchObject({ active: false, manual: { seenAtBank: "Netflix" } });
     expect((await getOverview(ctx)).plan.billsExpected).toBe(before.plan.billsExpected);
     await undoActivity(ctx, copy.activityId);
+  });
+
+  it("doesn't match an added bill to a different place or to last week's payment", () => {
+    const rent = { name: "Rent", amount: -215_000, frequency: "monthly", startDate: "2026-12-01" };
+    const runway = { name: "Rent the Runway", bankName: "RENT THE RUNWAY", active: true, kind: "subscription", amount: -9_400, frequency: "monthly" };
+    expect(bankMatch(rent, "2026-11-22", [], [runway]).seenAs).toBeNull();
+    expect(bankMatch({ ...rent, name: "Apple Card", amount: -50_000 }, "2026-11-22", [], [{ ...runway, name: "Apple", bankName: "APPLE.COM/BILL", amount: -299 }]).seenAs).toBeNull();
+    expect(bankMatch({ ...rent, name: "Netflix", amount: -1_799 }, "2026-11-22", [], [{ ...runway, name: "Netflix", bankName: "Netflix", amount: -1_799 }]).seenAs).toBe("Netflix");
+    // A weekly bill on Fridays paid last Friday: this Friday's is still to come.
+    const weekly = { name: "Cleaner", amount: -8_000, frequency: "weekly", startDate: "2026-10-02" };
+    const charges = [{ id: "c1", date: "2026-11-20", amount: -8_000, names: ["CLEANER"] }];
+    expect(bankMatch(weekly, "2026-11-22", charges, []).paid).toBeNull();
+    expect(bankMatch(weekly, "2026-11-25", [{ ...charges[0], date: "2026-11-25" }], []).paid?.id).toBe("c1");
+  });
+
+  it("when asked to rename by the bank's text, leaves the owner's one-amount names alone", async () => {
+    const patreon = (await getRecurring(ctx)).series.find((s) => s.bankName.startsWith("PATREON"))!;
+    const exact = await createNameRule(ctx, { transactionId: patreon.sampleId, name: "Podcast club", onlyThisAmount: true });
+    await db.insert(transactionsTable).values({ id: "patreon-other2", userId: DEMO_USER_ID, accountId: "demo-card", date: today, name: "PATREON* MEMBERSHIP 4155550123 CA", rawName: null, amount: -2_500, category: "entertainment" });
+    const charge = await findCharge(ctx, "patreon membership");
+    expect(charge.exact).toBe(false);
+    const done = await renameCharges(ctx, "claude", charge.id, "Patreon tips", charge.exact);
+    const list = (await getTransactions(ctx, { limit: 50, offset: 0, q: "PATREON" })).transactions;
+    expect(list.find((t) => t.id === "patreon-other2")?.name).toBe("Patreon tips");
+    expect(list.filter((t) => t.amount === -800).every((t) => t.name === "Podcast club")).toBe(true);
+    await undoActivity(ctx, done.activityId);
+    await deleteNameRule(ctx, exact.ruleId);
+    await db.delete(transactionsTable).where(eqOp(transactionsTable.id, "patreon-other2"));
   });
 
   it("undoes only what Nickel or Claude changed, leaving later edits alone", async () => {

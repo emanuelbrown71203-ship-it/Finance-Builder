@@ -112,7 +112,7 @@ export type NameUndo = {
  */
 export async function createNameRule(
   ctx: Ctx,
-  input: { transactionId: string; name: string; onlyThisAmount?: boolean; fromItsSheet?: boolean },
+  input: { transactionId: string; name: string; onlyThisAmount?: boolean; fromItsSheet?: boolean; keepOneAmountNames?: boolean },
 ): Promise<{ ruleId: string; count: number; undo: NameUndo }> {
   const name = checkName(input.name);
   const tx = await ownTransaction(ctx, input.transactionId);
@@ -123,7 +123,8 @@ export async function createNameRule(
 
   // "Every charge like this" includes this one: a name kept for just its amount would hide the new name.
   let replaced: NameUndo["replaced"] = null;
-  if (amount === 0 && tx.amount !== 0) {
+  // Nickel and Claude never take away a name the owner kept for one amount (`keepOneAmountNames`).
+  if (amount === 0 && tx.amount !== 0 && !input.keepOneAmountNames) {
     const [exact] = await ctx.db
       .delete(nameRules)
       .where(and(eq(nameRules.userId, ctx.userId), eq(nameRules.merchantKey, key), eq(nameRules.amount, tx.amount)))

@@ -12,7 +12,8 @@ import { addDays, addMonths, daysInMonth, dayOfMonth, monthEnd, type ISODate } f
 export type BillFrequency = "weekly" | "biweekly" | "monthly" | "quarterly" | "semiannual" | "yearly";
 
 export type Command =
-  | { kind: "bill"; name: string | null; amount: number | null; frequency: BillFrequency; date: ISODate | null }
+  /** `date` is the next one due; `anchor` the date carrying the day asked for (the 31st), which may be in the past. */
+  | { kind: "bill"; name: string | null; amount: number | null; frequency: BillFrequency; date: ISODate | null; anchor: ISODate | null }
   | { kind: "upcoming"; name: string | null; amount: number | null; date: ISODate | null }
   | { kind: "goal"; name: string | null; target: number | null; date: ISODate | null }
   | { kind: "deposit"; goal: string | null; amount: number | null }
@@ -51,7 +52,8 @@ function takeAmount(w: Words): number | null {
     /(?:^|\s)(\d{1,3}(?:,\d{3})+|\d{2,})(k)?(?=\s|$|[.,!?])/i,
   ];
   for (const re of tries) {
-    const m = w.take(re);
+    // A bare year ("2027") is only the amount when nothing else could be.
+    const m = re === tries[3] ? (w.take(/(?:^|\s)(?!20\d{2}(?=\s|$|[.,!?]))(\d{1,3}(?:,\d{3})+|\d{2,})(k)?(?=\s|$|[.,!?])/i) ?? w.take(re)) : w.take(re);
     if (!m) continue;
     const value = Number(m[1].replace(/,/g, "")) * (m[2] ? 1000 : 1);
     return Number.isFinite(value) && value > 0 && value < 100_000_000 ? Math.round(value * 100) : null;
@@ -76,23 +78,40 @@ function takeFrequency(w: Words): BillFrequency | null {
   return null;
 }
 
+type Dated = { date: ISODate; anchor?: ISODate };
+
 /**
- * The next time a day of the month comes round, today included. "The 31st"
- * means a month that has a 31st, so a monthly bill keeps that day (it falls on
- * the last day in shorter months) instead of drifting to the 30th for good.
+ * The next time a day of the month comes round, today included, falling on
+ * the last day in a shorter month ("the 31st" in November is the 30th). The
+ * anchor is the latest month that really has that day, so a monthly bill
+ * counted from it comes back to the 31st instead of drifting to the 30th.
  */
-function nextDayOfMonth(today: ISODate, day: number): ISODate {
-  for (let i = 0; i < 13; i++) {
-    const [y, m] = addMonths(`${today.slice(0, 7)}-01`, i).split("-").map(Number);
-    if (day > daysInMonth(y, m)) continue;
-    const d = iso(y, m, day);
-    if (d >= today) return d;
+function nextDayOfMonth(today: ISODate, day: number): Dated {
+  const [y, m] = today.split("-").map(Number);
+  let date = iso(y, m, day);
+  if (date < today) {
+    const [ny, nm] = addMonths(`${today.slice(0, 7)}-01`, 1).split("-").map(Number);
+    date = iso(ny, nm, day);
   }
-  return today;
+  let anchor = date;
+  for (let i = 0; i < 12 && Number(anchor.slice(8)) !== day; i++) {
+    const [ay, am] = addMonths(`${anchor.slice(0, 7)}-01`, -1).split("-").map(Number);
+    anchor = iso(ay, am, day);
+  }
+  return { date, anchor };
 }
 
 /** "on the 5th", "Dec 12", "12/5", "tomorrow", "next friday", "in 2 weeks", "by June", "by June 2027". */
 function takeDate(w: Words, today: ISODate, forDeadline = false): ISODate | null {
+  return takeDated(w, today, forDeadline)?.date ?? null;
+}
+
+function takeDated(w: Words, today: ISODate, forDeadline = false): Dated | null {
+  const found = readDate(w, today, forDeadline);
+  return found === null ? null : typeof found === "string" ? { date: found } : found;
+}
+
+function readDate(w: Words, today: ISODate, forDeadline: boolean): ISODate | Dated | null {
   const [ty, tm] = today.split("-").map(Number);
   let m: RegExpExecArray | null;
   if ((m = w.take(/\b(?:on\s+|by\s+|due\s+|starting\s+)?(\d{4})-(\d{2})-(\d{2})\b/i))) return iso(Number(m[1]), Number(m[2]), Number(m[3]));
@@ -127,6 +146,8 @@ function takeDate(w: Words, today: ISODate, forDeadline = false): ISODate | null
     return monthEnd(`${year}-${String(mi).padStart(2, "0")}`);
   }
   if ((m = w.take(/\b(?:by|in|before)\s+(20\d{2})\b/i))) return `${m[1]}-12-31`;
+  // A goal's bare year ("trip 2027 3000") is its deadline, never its amount.
+  if (forDeadline && (m = w.take(/\b(20\d{2})\b(?!\s*(?:dollars|bucks|usd))/i)) && Number(m[1]) >= Number(today.slice(0, 4))) return `${m[1]}-12-31`;
   // "12/5", "12/5/2027"
   if ((m = w.take(/\b(?:on\s+|by\s+|due\s+)?(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?\b/))) {
     const mo = Number(m[1]);
@@ -137,7 +158,7 @@ function takeDate(w: Words, today: ISODate, forDeadline = false): ISODate | null
     return iso(year, mo, day);
   }
   // "on the 5th", "the 1st of every month", "on the 15"
-  if ((m = w.take(/\b(?:on\s+)?the\s+(\d{1,2})(?:st|nd|rd|th)?(?:\s+of\s+(?:the|each|every)\s+month)?\b/i)) || (m = w.take(/\bon\s+(\d{1,2})(?:st|nd|rd|th)?\b/i)) || (m = w.take(/\b(\d{1,2})(?:st|nd|rd|th)\b/i))) {
+  if ((m = w.take(/\b(?:on\s+|by\s+|due\s+)?the\s+(\d{1,2})(?:st|nd|rd|th)?(?:\s+of\s+(?:the|each|every)\s+month)?\b/i)) || (m = w.take(/\b(?:on|by)\s+(\d{1,2})(?:st|nd|rd|th)?\b/i)) || (m = w.take(/\b(\d{1,2})(?:st|nd|rd|th)\b/i))) {
     const day = Number(m[1]);
     return day >= 1 && day <= 31 ? nextDayOfMonth(today, day) : null;
   }
@@ -198,7 +219,7 @@ export function parseCommand(input: string, ctx: CommandContext): Command | null
   // Rename: "rename SQ *TARTINE to Tartine", "rename Venmo to Rent only at $1,200".
   const m = /^(?:please\s+)?(?:rename|change the name of)\s+(.+?)\s+(?:to|as|into)\s+(.+)$/i.exec(text) ?? /^(?:please\s+)?call\s+(.+?)\s+(?:instead\s+)?["“](.+)["”]$/i.exec(text);
   if (m) {
-    const only = /\s+only\s+(?:at|for|when\s+it'?s|if\s+it'?s|when)\s+\$?\s?(\d[\d,]*(?:\.\d{1,2})?)\s*$/i.exec(m[2]);
+    const only = /\s+only\s+(?:at|for|when\s+it'?s|if\s+it'?s|when)\s+\$?\s?(\d[\d,]*(?:\.\d{1,2})?)\s*$/i.exec(m[2]) ?? /\s+(?:at|for|when\s+it'?s|if\s+it'?s)\s+\$\s?(\d[\d,]*(?:\.\d{1,2})?)\s*$/i.exec(m[2]);
     const to = (only ? m[2].slice(0, only.index) : m[2]).replace(/^["“]|["”]$/g, "").trim().slice(0, 60);
     const onlyAmount = only ? Math.round(Number(only[1].replace(/,/g, "")) * 100) : null;
     return { kind: "rename", from: m[1].replace(/^["“]|["”]$/g, "").trim() || null, to: to || null, onlyAmount: onlyAmount && onlyAmount > 0 ? onlyAmount : null };
@@ -209,7 +230,8 @@ export function parseCommand(input: string, ctx: CommandContext): Command | null
   // aimed at the goal and nothing says it's a bill: "add emergency vet bill $400" is a bill.
   const goal = mention(text, ctx.goals);
   const withoutGoal = goal ? text.replace(new RegExp(plain(goal).replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/ /g, "\\W+"), "i"), " ") : text;
-  if (goal && /\b(?:add|put|move|save|saved|deposit|set aside|transfer|transferred|stash)\b/i.test(text) && aimedAt(text, goal) && !BILL_WORDS.test(withoutGoal) && !/\b(?:new|create|goal for|start)\b/i.test(text)) {
+  const deadline = takeDate(new Words(withoutGoal), ctx.today, true) !== null;
+  if (goal && /\b(?:add|put|move|save|saved|deposit|set aside|transfer|transferred|stash)\b/i.test(text) && aimedAt(text, goal) && !BILL_WORDS.test(withoutGoal) && !deadline && !/\b(?:new|create|goal for|start)\b/i.test(withoutGoal)) {
     const w = new Words(text);
     return { kind: "deposit", goal, amount: takeAmount(w) };
   }
@@ -217,8 +239,8 @@ export function parseCommand(input: string, ctx: CommandContext): Command | null
   // A loan's rate or payment: "student loan rate is 4.5%", "pay $350 a month on the auto loan".
   // "Add student loan payment $300 on the 15th" is adding a bill, so a date or "add" sends it there.
   const loan = mention(text, ctx.loans);
-  const dated = takeDate(new Words(text), ctx.today) !== null;
-  if ((loan || /\bloan\b/i.test(text)) && /(%|percent|\brate\b|\binterest\b|\bapr\b|\bpay(?:ment|ing)?\b|\bminimum\b)/i.test(text) && !/\bbill\b/i.test(text) && !dated && !/^(?:please\s+)?(?:add|new|create)\b/i.test(text)) {
+  const hasDate = takeDate(new Words(text), ctx.today) !== null;
+  if ((loan || /\bloan\b/i.test(text)) && /(%|percent|\brate\b|\binterest\b|\bapr\b|\bpay(?:ment|ing)?\b|\bminimum\b)/i.test(text) && !/\bbill\b/i.test(text) && !hasDate && !/^(?:please\s+)?(?:add|new|create)\b/i.test(text)) {
     const w = new Words(text);
     const aprPercent = takePercent(w);
     takeFrequency(w);
@@ -241,14 +263,15 @@ export function parseCommand(input: string, ctx: CommandContext): Command | null
   // A bill: repeating unless it's clearly a one-off.
   const w = new Words(text);
   const frequency = takeFrequency(w);
-  const date = takeDate(w, ctx.today);
+  const dated = takeDated(w, ctx.today);
+  const date = dated?.date ?? null;
   const amount = takeAmount(w);
   const oneOff = /\b(?:upcoming|one[- ]time|one[- ]off|once|just this once|coming up)\b/i.test(lower) || (!frequency && /\bdue\b/i.test(lower));
   const billish = frequency || oneOff || /\b(?:bill|subscription|payment|rent|insurance|membership)\b/i.test(lower) || (/^add\b/i.test(text) && amount !== null);
   if (!billish) return null;
   const name = nameFrom(w.text);
   if (oneOff && !frequency) return { kind: "upcoming", name, amount, date };
-  return { kind: "bill", name, amount, frequency: frequency ?? "monthly", date: date ?? (frequency === "monthly" || !frequency ? null : null) };
+  return { kind: "bill", name, amount, frequency: frequency ?? "monthly", date, anchor: dated?.anchor ?? date };
 }
 
 /** The day of the month a monthly bill lands on, said the way people say it. */
