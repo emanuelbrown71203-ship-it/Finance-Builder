@@ -1,5 +1,6 @@
 @import "tailwindcss";
 @import "@fontsource-variable/archivo/wdth.css";
+@import "@fontsource/press-start-2p/latin-400.css";
 
 /*
   Passbook follows the same house style as the owner's other apps: phone
@@ -209,6 +210,8 @@
 
   --font-sans: "Archivo Variable", ui-sans-serif, system-ui, -apple-system, sans-serif;
   --font-display: "Archivo Variable", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  /* The game's numbers only: level, XP. An 8-bit face, used small and sparingly. */
+  --font-pixel: "Press Start 2P", ui-monospace, monospace;
 
   --text-micro: 0.75rem;
   --text-small: 0.875rem;
@@ -280,6 +283,42 @@ body {
   font-stretch: 82%;
   letter-spacing: -0.015em;
   line-height: 1;
+}
+
+/* The game layer's retro touch: levels and XP in a pixel face. Sized in steps of 8px, where it stays crisp. */
+.pixel {
+  font-family: var(--font-pixel);
+  font-weight: 400;
+  letter-spacing: 0;
+  line-height: 1;
+}
+
+/* A +XP note rising into view, then fading. */
+@keyframes xp-pop {
+  0% { opacity: 0; transform: translate(-50%, 14px) scale(0.92); }
+  12% { opacity: 1; transform: translate(-50%, 0) scale(1.04); }
+  20% { transform: translate(-50%, 0) scale(1); }
+  85% { opacity: 1; transform: translate(-50%, 0); }
+  100% { opacity: 0; transform: translate(-50%, -10px); }
+}
+.xp-pop {
+  animation: xp-pop 2.8s ease-out both;
+}
+/* The level block's number blinks in, like a handheld's score. */
+@keyframes lv-blink {
+  0%, 30%, 60% { opacity: 1; }
+  15%, 45% { opacity: 0; }
+}
+.lv-new {
+  animation: lv-blink 0.9s steps(1) 0.2s both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .xp-pop { animation: xp-fade 2.8s linear both; }
+  .lv-new { animation: none; }
+}
+@keyframes xp-fade {
+  0%, 90% { opacity: 1; transform: translate(-50%, 0); }
+  100% { opacity: 0; transform: translate(-50%, 0); }
 }
 
 /* Columns of amounts line up digit for digit. */

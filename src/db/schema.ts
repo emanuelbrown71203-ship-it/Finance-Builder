@@ -1,4 +1,4 @@
-import { bigint, boolean, doublePrecision, index, jsonb, pgTable, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
+import { bigint, boolean, doublePrecision, index, integer, jsonb, pgTable, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
 
 /**
  * Conventions
@@ -288,6 +288,34 @@ export const activityLog = pgTable(
     createdAt: createdAt(),
   },
   (t) => [index("activity_user_created_idx").on(t.userId, t.createdAt)],
+);
+
+/**
+ * The game layer's record of small wins (sorted a charge, cancelled a
+ * subscription, put money toward a goal…). XP and levels add these up; streaks
+ * and badges are worked out from them. See src/lib/game/progress.ts.
+ */
+export const playerWins = pgTable(
+  "player_wins",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    /** sort | rename | note | bill | cancel | goal | save | milestone | budget | plan | checkin | nospend */
+    kind: text("kind").notNull(),
+    xp: integer("xp").notNull(),
+    /** What it was about ("Netflix"), shown in the list of recent wins. */
+    label: text("label"),
+    /** What it was won for (a transaction, a bill, a goal's 50% mark…), so the same thing never counts twice. */
+    ref: text("ref").notNull(),
+    /** The person's own date it was won. */
+    day: text("day").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("player_wins_user_created_idx").on(t.userId, t.createdAt),
+    index("player_wins_user_kind_day_idx").on(t.userId, t.kind, t.day),
+    uniqueIndex("player_wins_user_kind_ref_idx").on(t.userId, t.kind, t.ref),
+  ],
 );
 
 export const debtPlans = pgTable("debt_plans", {

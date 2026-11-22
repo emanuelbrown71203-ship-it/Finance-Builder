@@ -1,9 +1,11 @@
 import { and, eq, inArray, isNull, ne, sql } from "drizzle-orm";
 import { accounts, balanceSnapshots, budgets, categoryRules, debtPlans, goalDeposits, goals, recurringOverrides, transactions, userSettings } from "@/db/schema";
-import { isCategoryKey } from "@/lib/categories";
-import { validName } from "@/lib/finance/names";
+import { category as categoryOf, isCategoryKey } from "@/lib/categories";
+import { monthOf } from "@/lib/dates";
+import { cleanName, validName } from "@/lib/finance/names";
 import { merchantKey } from "@/lib/finance/recurring";
 import type { Ctx } from "./auth";
+import { goalMilestones, takeBack, undoGoalMilestones, win } from "./game";
 import { HttpError } from "./http";
 
 /** What a remembered change replaced, so Undo can put everything back exactly. */
@@ -35,6 +37,14 @@ export async function updateTransaction(
     set.customName = name;
   }
   if (Object.keys(set).length > 0) await ctx.db.update(transactions).set(set).where(eq(transactions.id, tx.id));
+
+  // Small wins, each once per transaction (an Undo puts things back but doesn't earn them twice).
+  if (!patch.restore) {
+    const shown = set.customName ?? tx.customName ?? cleanName(tx.name);
+    if (set.category !== undefined && set.category !== tx.category) await win(ctx, "sort", `tx:${tx.id}`, shown);
+    if (set.customName && set.customName !== tx.customName) await win(ctx, "rename", `tx:${tx.id}`, shown);
+    if (set.note && set.note !== tx.note) await win(ctx, "note", `tx:${tx.id}`, shown);
+  }
 
   const key = merchantKey(tx.name);
 
@@ -98,7 +108,12 @@ export async function setRecurringOverride(ctx: Ctx, key: string, patch: { kind?
       target: [recurringOverrides.userId, recurringOverrides.seriesKey],
       set: { ...(patch.kind !== undefined ? { kind: patch.kind } : {}), ...(patch.cancelled !== undefined ? { cancelled: patch.cancelled } : {}) },
     });
+  // Cancelling something you pay for is the biggest small win there is; Undo the same day takes it back.
+  if (key.startsWith("out:") && patch.cancelled === true) await win(ctx, "cancel", key, titleCase(key.slice(4)));
+  if (patch.cancelled === false) await takeBack(ctx, "cancel", key);
 }
+
+const titleCase = (words: string) => words.replace(/\b[a-z]/g, (c) => c.toUpperCase());
 
 export async function setBudget(ctx: Ctx, category: string, monthlyLimit: number | null) {
   if (!isCategoryKey(category) || category === "transfer" || category === "income") throw new HttpError(400, "Unknown category.");
@@ -110,6 +125,8 @@ export async function setBudget(ctx: Ctx, category: string, monthlyLimit: number
     .insert(budgets)
     .values({ id: crypto.randomUUID(), userId: ctx.userId, category, monthlyLimit })
     .onConflictDoUpdate({ target: [budgets.userId, budgets.category], set: { monthlyLimit } });
+  // Once per category per month.
+  await win(ctx, "budget", `${category}:${monthOf(ctx.today)}`, categoryOf(category).label);
 }
 
 type GoalInput = { name: string; target: number; saved: number; monthlyContribution: number; targetDate: string | null };
@@ -119,6 +136,8 @@ export async function createGoal(ctx: Ctx, input: GoalInput): Promise<string> {
   if (count >= 50) throw new HttpError(400, "That’s the most goals Passbook keeps. Delete one you’ve finished first.");
   const id = crypto.randomUUID();
   await ctx.db.insert(goals).values({ id, userId: ctx.userId, ...input });
+  await win(ctx, "goal", id, input.name);
+  if (input.saved > 0) await goalMilestones(ctx, { id, name: input.name, target: input.target }, 0, input.saved);
   return id;
 }
 
@@ -131,10 +150,17 @@ const MAX_DEPOSITS = 2000;
  */
 export async function updateGoal(ctx: Ctx, id: string, patch: Partial<GoalInput> & { add?: number }): Promise<{ depositId: string | null }> {
   const { add, ...fields } = patch;
+  type Moved = { goal: { id: string; name: string; target: number }; before: number; after: number };
+  let moved: Moved | null = null;
   // One transaction with the goal locked, so two changes at once (two phones, a double tap) can't
   // both read the same amount: what's saved and the list of deposits always agree.
-  return ctx.db.transaction(async (tx) => {
-    const [goal] = await tx.select({ id: goals.id, saved: goals.saved }).from(goals).where(and(eq(goals.id, id), eq(goals.userId, ctx.userId))).for("update").limit(1);
+  const result = await ctx.db.transaction(async (tx) => {
+    const [goal] = await tx
+      .select({ id: goals.id, saved: goals.saved, name: goals.name, target: goals.target })
+      .from(goals)
+      .where(and(eq(goals.id, id), eq(goals.userId, ctx.userId)))
+      .for("update")
+      .limit(1);
     if (!goal) throw new HttpError(404, "Goal not found.");
     // Never below zero: taking out more than is there takes out what is there.
     const change = add ? Math.max(-goal.saved, add) : 0;
@@ -148,8 +174,16 @@ export async function updateGoal(ctx: Ctx, id: string, patch: Partial<GoalInput>
     if (!change) return { depositId: null };
     const depositId = crypto.randomUUID();
     await tx.insert(goalDeposits).values({ id: depositId, userId: ctx.userId, goalId: goal.id, amount: change, date: ctx.today });
+    moved = { goal: { id: goal.id, name: fields.name ?? goal.name, target: fields.target ?? goal.target }, before: goal.saved, after: goal.saved + change };
     return { depositId };
   });
+  // Wins are written after the change is saved, never inside it, so they can't hold it up.
+  const done = moved as Moved | null;
+  if (done && result.depositId && done.after > done.before) {
+    await win(ctx, "save", result.depositId, done.goal.name);
+    await goalMilestones(ctx, done.goal, done.before, done.after);
+  }
+  return result;
 }
 
 /**
@@ -158,8 +192,8 @@ export async function updateGoal(ctx: Ctx, id: string, patch: Partial<GoalInput>
  * money appear on paper.
  */
 export async function deleteDeposit(ctx: Ctx, goalId: string, depositId: string) {
-  await ctx.db.transaction(async (tx) => {
-    const [goal] = await tx.select({ saved: goals.saved }).from(goals).where(and(eq(goals.id, goalId), eq(goals.userId, ctx.userId))).for("update").limit(1);
+  const after = await ctx.db.transaction(async (tx) => {
+    const [goal] = await tx.select({ saved: goals.saved, target: goals.target }).from(goals).where(and(eq(goals.id, goalId), eq(goals.userId, ctx.userId))).for("update").limit(1);
     const [deposit] = goal
       ? await tx.select({ amount: goalDeposits.amount }).from(goalDeposits).where(and(eq(goalDeposits.id, depositId), eq(goalDeposits.goalId, goalId), eq(goalDeposits.userId, ctx.userId))).limit(1)
       : [];
@@ -167,11 +201,15 @@ export async function deleteDeposit(ctx: Ctx, goalId: string, depositId: string)
     if (goal.saved - deposit.amount < 0) throw new HttpError(409, "That money has already been taken out of the goal, so there’s nothing to undo.");
     await tx.delete(goalDeposits).where(and(eq(goalDeposits.id, depositId), eq(goalDeposits.userId, ctx.userId)));
     await tx.update(goals).set({ saved: goal.saved - deposit.amount }).where(and(eq(goals.id, goalId), eq(goals.userId, ctx.userId)));
+    return { saved: goal.saved - deposit.amount, target: goal.target };
   });
+  await takeBack(ctx, "save", depositId);
+  await undoGoalMilestones(ctx, { id: goalId, target: after.target }, after.saved);
 }
 
 export async function deleteGoal(ctx: Ctx, id: string) {
   await ctx.db.delete(goals).where(and(eq(goals.id, id), eq(goals.userId, ctx.userId)));
+  await takeBack(ctx, "goal", id);
 }
 
 /** Things tracked by hand: a car, a house, a loan from a relative. */
@@ -211,14 +249,16 @@ export async function setDebtSettings(ctx: Ctx, patch: { extra?: number; strateg
   const set = { ...(patch.extra !== undefined ? { debtExtra: patch.extra } : {}), ...(patch.strategy ? { debtStrategy: patch.strategy } : {}) };
   if (Object.keys(set).length === 0) return;
   await ctx.db.insert(userSettings).values({ userId: ctx.userId, ...set }).onConflictDoUpdate({ target: userSettings.userId, set });
+  await win(ctx, "plan", `${ctx.today}:settings`, "Payoff plan");
 }
 
 /** The interest rate and monthly payment for one debt, when the bank doesn't say or the owner knows better. */
 export async function setDebtPlan(ctx: Ctx, accountId: string, patch: { aprPercent?: number | null; monthlyPayment?: number | null }) {
-  const [account] = await ctx.db.select({ id: accounts.id }).from(accounts).where(and(eq(accounts.id, accountId), eq(accounts.userId, ctx.userId))).limit(1);
+  const [account] = await ctx.db.select({ id: accounts.id, name: accounts.name }).from(accounts).where(and(eq(accounts.id, accountId), eq(accounts.userId, ctx.userId))).limit(1);
   if (!account) throw new HttpError(404, "Account not found.");
   await ctx.db
     .insert(debtPlans)
     .values({ accountId, userId: ctx.userId, aprPercent: patch.aprPercent ?? null, monthlyPayment: patch.monthlyPayment ?? null })
     .onConflictDoUpdate({ target: debtPlans.accountId, set: { ...(patch.aprPercent !== undefined ? { aprPercent: patch.aprPercent } : {}), ...(patch.monthlyPayment !== undefined ? { monthlyPayment: patch.monthlyPayment } : {}) } });
+  await win(ctx, "plan", `${ctx.today}:${account.id}`, account.name);
 }

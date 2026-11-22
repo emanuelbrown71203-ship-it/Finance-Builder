@@ -2,7 +2,7 @@ import { eq } from "drizzle-orm";
 import { DEMO_USER_ID } from "@/lib/config";
 import { addDays, addMonths, dayOfMonth, daysInMonth, diffDays, monthEnd, monthOf, monthStart, weekday, type ISODate } from "@/lib/dates";
 import type { DB } from "./index";
-import { accounts, balanceSnapshots, budgets, goalDeposits, goals, holdings, items, transactions, users } from "./schema";
+import { accounts, balanceSnapshots, budgets, goalDeposits, goals, holdings, items, playerWins, transactions, users } from "./schema";
 
 /**
  * Sample household for demo mode: about 13 months of believable history
@@ -350,6 +350,26 @@ export async function seedDemo(db: DB, today: ISODate, now: Date = new Date()): 
     }
   }
   await db.insert(goalDeposits).values(depositRows);
+
+  // A week of playing already: level 3, a six-day check-in streak (today's visit makes it seven) and a few badges.
+  const won: (typeof playerWins.$inferInsert)[] = [];
+  const XP = { checkin: 5, sort: 5, rename: 10, bill: 15, goal: 25, save: 20, milestone: 40, budget: 15, nospend: 15 } as const;
+  const add = (kind: keyof typeof XP, ref: string, label: string | null, daysAgo: number) =>
+    won.push({ id: `demo-win-${won.length + 1}`, userId: DEMO_USER_ID, kind, xp: XP[kind], label, ref, day: addDays(today, -daysAgo), createdAt: new Date(now.getTime() - daysAgo * 86_400_000 - (40 - won.length) * 60_000) });
+  for (let d = 6; d >= 1; d--) add("checkin", addDays(today, -d), null, d);
+  for (const g of goalSpecs) add("goal", g.id, g.name, 6);
+  add("milestone", "demo-goal-emergency:25", "Emergency fund: 25%", 6);
+  add("milestone", "demo-goal-emergency:50", "Emergency fund: 50%", 6);
+  add("milestone", "demo-goal-japan:25", "Two weeks in Japan: 25%", 5);
+  for (const c of ["groceries", "dining", "shopping"]) add("budget", `${c}:${monthOf(today)}`, { groceries: "Groceries", dining: "Restaurants & coffee", shopping: "Shopping" }[c] ?? c, 5);
+  depositRows.slice(-6).forEach((dep, i) => add("save", dep.id, goalSpecs.find((g) => g.id === dep.goalId)?.name ?? null, 4 - (i % 3)));
+  ["Blue Bottle", "Trader Joe’s", "Shell", "Target", "Chipotle", "Amazon", "Whole Foods", "Lyft", "Sweetgreen", "Costco", "Uber Eats", "CVS"].forEach((name, i) => add("sort", `demo-sort-${i}`, name, 1 + (i % 4)));
+  ["Gym membership", "Water bill", "Phone plan", "Car wash club"].forEach((name, i) => add("rename", `demo-rename-${i}`, name, 2 + (i % 2)));
+  add("bill", "demo-bill-1", "Gym membership", 3);
+  add("bill", "demo-bill-2", "Water bill", 2);
+  add("nospend", addDays(today, -4), null, 4);
+  add("nospend", addDays(today, -2), null, 2);
+  await db.insert(playerWins).values(won);
 }
 
 /** The next date (today or later) that falls on the given day of the month. */

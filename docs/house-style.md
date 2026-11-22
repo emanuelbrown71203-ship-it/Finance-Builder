@@ -90,6 +90,13 @@ If a rule here and an app's own existing look disagree, the app's existing look 
 - An empty screen says what it is for and what to do next ("Your list is empty. Plan dinners and
   their ingredients land here."). A good empty state is a green "All clear."
 - Errors say what happened and what to do. They don't apologise and they aren't vague.
+- **Small wins feel like a game.** Everyday tasks earn points (XP) toward levels, with a daily streak
+  and badges. Say so the moment it happens: a small "+15 XP" note at the top with what it was for, a
+  coin sound, and a party with a fanfare for a level up. Keep the app's own look; the game gets only
+  retro accents (a pixel font for levels and XP, a block-by-block XP bar, little pixel badge
+  pictures). Points are decided on the server, each thing counts once, there's a daily limit per
+  kind, and Undo takes them back. Sounds are quiet, follow the phone's silent switch, and can be
+  switched off in Settings.
 - Up or down is always **an arrow and a number**, never colour alone.
 - **Anything named by someone else can be renamed.** When names come from outside (a bank, a store, an
   import), let the owner rename them in place: "every one like this" (now and in future) or "just this
@@ -118,6 +125,8 @@ Charts and breakdowns live on their own screens.
   everywhere. Text never takes a chart colour.
 - **Icons:** simple line icons (lucide). Emoji only for the person's own content or a little
   personality in a message, never as navigation icons.
+- **Game accents:** Press Start 2P only for short game numbers (level, +XP), at 8, 10, 12, 16 or 24px.
+  Badges are 12×12 pixel pictures drawn in the app's own colour tokens; ones not won yet are grey.
 - **Light, dark or automatic**, chosen in Settings with a three-way switch, remembered on that device
   only. Automatic is the default.
 - Charts are hand-drawn SVG, follow the dataviz skill, have a hover/scrub readout, and never rely on

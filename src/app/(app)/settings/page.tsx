@@ -4,7 +4,7 @@ import { ChevronRight, History, KeyRound, Landmark, LogOut, PencilLine } from "l
 import Link from "next/link";
 import { useState } from "react";
 import { ChangePasswordDialog } from "@/components/reauth";
-import { CelebrationsRow, ClaudeSection, NickelSection, PasskeySection, RulesSection, TasksSection } from "@/components/settings-sections";
+import { CelebrationsRow, ClaudeSection, NickelSection, PasskeySection, RulesSection, SoundsRow, TasksSection } from "@/components/settings-sections";
 import { Button, Fold, PageHeader, Segmented, Sheet, SheetHeader, confirm, toast } from "@/components/ui";
 import { send, useApi, useTheme, type ThemeChoice } from "@/components/use-api";
 import { APP_NAME, APP_VERSION } from "@/lib/config";
@@ -54,6 +54,7 @@ export default function SettingsPage() {
             ]}
           />
           <CelebrationsRow />
+          <SoundsRow />
         </Sheet>
 
         <NickelSection />

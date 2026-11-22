@@ -4,6 +4,7 @@ import { ArrowDownRight, ArrowUpRight, CalendarClock, ChevronRight, CircleCheck,
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { BillRow } from "@/components/bills";
+import { GameStrip } from "@/components/game/game";
 import { Runway } from "@/components/charts";
 import { LinkBankButton } from "@/components/link-bank";
 import { LiveStatus } from "@/components/shell";
@@ -237,6 +238,7 @@ export default function HomePage() {
         </p>
       )}
 
+      <GameStrip />
       <RecapCard today={data.today} />
 
       <div className="flex flex-col gap-4 xl:grid xl:grid-cols-[1.3fr_1fr] xl:items-start xl:gap-5">

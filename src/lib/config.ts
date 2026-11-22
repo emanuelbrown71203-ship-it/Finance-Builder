@@ -9,7 +9,7 @@
 
 export const APP_NAME = "Passbook";
 /** Shown in Settings. Bump it with every change: small fixes 0.2.0 → 0.2.1, new features 0.2 → 0.3. */
-export const APP_VERSION = "0.8.0";
+export const APP_VERSION = "0.9.0";
 
 export type PlaidEnv = "sandbox" | "production";
 

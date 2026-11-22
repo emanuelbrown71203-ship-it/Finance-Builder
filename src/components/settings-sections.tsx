@@ -6,6 +6,7 @@ import { useState } from "react";
 import { category } from "@/lib/categories";
 import type { TasksLinkStatus } from "@/server/tasks-link";
 import { setCelebrations, useCelebrations } from "./celebrate";
+import { setSounds, useSounds } from "./game/sounds";
 import { RoboDog } from "./nickel/robo-dog";
 import { nickelSettings, useNickelSettings } from "./nickel/store";
 import { Button, ErrorNote, Field, Fold, Input, Select, Sheet, SheetHeader, Tag, confirm, cx, toast } from "./ui";
@@ -60,9 +61,22 @@ export function CelebrationsRow() {
     <div className="mt-4 flex min-h-12 items-center justify-between gap-4 border-t border-line-soft pt-3">
       <div>
         <p className="font-bold">Celebrations</p>
-        <p className="text-small text-ink-3">A little confetti when you reach a savings goal.</p>
+        <p className="text-small text-ink-3">A little confetti when you reach a savings goal or a new level.</p>
       </div>
       <Switch checked={on} onChange={setCelebrations} label="Celebrations" />
+    </div>
+  );
+}
+
+export function SoundsRow() {
+  const on = useSounds();
+  return (
+    <div className="mt-4 flex min-h-12 items-center justify-between gap-4 border-t border-line-soft pt-3">
+      <div>
+        <p className="font-bold">Game sounds</p>
+        <p className="text-small text-ink-3">8-bit blips when you earn XP or a badge. Quiet when your phone is on silent.</p>
+      </div>
+      <Switch checked={on} onChange={setSounds} label="Game sounds" />
     </div>
   );
 }

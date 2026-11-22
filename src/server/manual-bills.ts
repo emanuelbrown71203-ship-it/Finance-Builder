@@ -7,6 +7,7 @@ import { firstOnOrAfter, merchantKey, monthlyEquivalent, nthDate, type Frequency
 import { cancelHelp } from "@/lib/finance/subscriptions";
 import type { RecurringView } from "@/lib/types";
 import type { Ctx } from "./auth";
+import { takeBack, win } from "./game";
 import { HttpError } from "./http";
 
 /*
@@ -76,6 +77,7 @@ export async function createManualBill(ctx: Ctx, input: ManualBillInput, addedBy
       addedBy,
     })
     .returning();
+  await win(ctx, "bill", row.id, row.name);
   return row;
 }
 
@@ -92,12 +94,15 @@ export async function updateManualBill(ctx: Ctx, id: string, patch: Partial<Manu
   if (patch.cancelled !== undefined) set.cancelled = Boolean(patch.cancelled);
   if (Object.keys(set).length === 0) return { before, after: before };
   const [after] = await ctx.db.update(manualBills).set(set).where(and(eq(manualBills.id, id), eq(manualBills.userId, ctx.userId))).returning();
+  if (after.cancelled && !before.cancelled) await win(ctx, "cancel", `manual:${id}`, after.name);
+  if (!after.cancelled && before.cancelled) await takeBack(ctx, "cancel", `manual:${id}`);
   return { before, after };
 }
 
 export async function deleteManualBill(ctx: Ctx, id: string): Promise<ManualBill> {
   const [row] = await ctx.db.delete(manualBills).where(and(eq(manualBills.id, id), eq(manualBills.userId, ctx.userId))).returning();
   if (!row) throw new HttpError(404, "That bill isn’t there any more.");
+  await takeBack(ctx, "bill", row.id);
   return row;
 }
 
@@ -112,6 +117,8 @@ export async function restoreManualBill(ctx: Ctx, bill: Pick<ManualBill, "id" | 
     .insert(manualBills)
     .values({ id: bill.id, userId: ctx.userId, name: checked.name, amount: -checked.amount, frequency: checked.frequency, startDate: checked.startDate, kind: checked.kind ?? "bill", category: checked.category ?? "other", cancelled: Boolean(bill.cancelled), addedBy })
     .onConflictDoNothing();
+  // Removing it today took its XP back; putting it back returns it (it can never count twice).
+  await win(ctx, "bill", bill.id, checked.name);
 }
 
 export async function listManualBills(ctx: Ctx): Promise<ManualBill[]> {

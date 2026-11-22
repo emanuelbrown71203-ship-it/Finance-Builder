@@ -1,5 +1,6 @@
 "use client";
 
+import { LevelBlock } from "./game/level";
 import { nickelReact } from "./nickel/store";
 import { useEffect, useSyncExternalStore } from "react";
 
@@ -14,7 +15,7 @@ const KEY = "passbook-celebrations";
 const EVENT = "passbook-celebrations-change";
 const COLORS = ["#08835a", "#2459d6", "#ffd84d", "#cf2f5b", "#8a3fc7", "#0b7c8a", "#eb6834"];
 
-type Party = { title: string; body: string } | null;
+type Party = { title: string; body: string; level?: number } | null;
 let current: Party = null;
 const listeners = new Set<() => void>();
 const emit = () => listeners.forEach((l) => l());
@@ -46,10 +47,11 @@ export function useCelebrations(): boolean {
   );
 }
 
-export function celebrate(title: string, body: string) {
+/** `level` shows the new level's pixel block instead of the party popper (a level up). */
+export function celebrate(title: string, body: string, options?: { level?: number }) {
   nickelReact({ type: "celebrate" });
   if (!celebrationsOn()) return;
-  current = { title, body };
+  current = { title, body, level: options?.level };
   emit();
 }
 
@@ -92,7 +94,14 @@ export function Celebrations() {
         ))}
       </div>
       <div className="party-card relative max-w-sm rounded-[26px] bg-sheet px-7 py-8 text-center shadow-float">
-        <p aria-hidden className="text-[3rem] leading-none">🎉</p>
+        {party.level ? (
+          <span className="flex flex-col items-center gap-3">
+            <span className="pixel text-micro text-accent-text">LEVEL UP</span>
+            <LevelBlock level={party.level} size={72} fresh />
+          </span>
+        ) : (
+          <p aria-hidden className="text-[3rem] leading-none">🎉</p>
+        )}
         <h2 className="display mt-3 text-title">{party.title}</h2>
         <p className="mt-2 text-ink-2">{party.body}</p>
         <p className="mt-4 text-small text-ink-3">Tap anywhere to close</p>

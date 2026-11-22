@@ -102,3 +102,21 @@ export function badgesFor(counts: Counts, checkinDays: ISODate[], level: number)
   const best = bestStreak(checkinDays);
   return BADGES.map((b) => ({ id: b.id, name: b.name, how: b.how, earned: b.test(counts, best, level) }));
 }
+
+/** What the app shows: worked out on the server from the wins written down. */
+export type GameWin = { id: string; kind: WinKind; xp: number; label: string | null; title: string; day: ISODate };
+
+export type GamePayload = {
+  xp: number;
+  level: number;
+  /** XP into this level, and XP this level takes in all. */
+  into: number;
+  needed: number;
+  todayXp: number;
+  streak: number;
+  bestStreak: number;
+  checkedInToday: boolean;
+  badges: Badge[];
+  counts: Partial<Record<WinKind, number>>;
+  recent: GameWin[];
+};

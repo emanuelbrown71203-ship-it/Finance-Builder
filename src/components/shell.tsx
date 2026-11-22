@@ -1,6 +1,6 @@
 "use client";
 
-import { CalendarCheck, CalendarClock, ChevronRight, Flag, Ellipsis, House, Landmark, ListOrdered, PieChart, PiggyBank, RefreshCw, Scale, Settings, TrendingUp, type LucideIcon } from "lucide-react";
+import { CalendarCheck, CalendarClock, ChevronRight, Flag, Ellipsis, House, Landmark, ListOrdered, PieChart, PiggyBank, RefreshCw, Scale, Settings, TrendingUp, Trophy, type LucideIcon } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState, type ReactNode } from "react";
@@ -8,6 +8,7 @@ import { APP_NAME } from "@/lib/config";
 import { diffDays } from "@/lib/dates";
 import type { Me, Overview } from "@/lib/types";
 import { Celebrations } from "./celebrate";
+import { GameWatcher } from "./game/game";
 import { Nickel } from "./nickel/nickel";
 import { ReauthHost } from "./reauth";
 import { PullToRefresh } from "./pull-to-refresh";
@@ -30,6 +31,7 @@ export const NAV: NavItem[] = [
   { href: "/investing", label: "Investing", hint: "Brokerage and retirement accounts together", icon: TrendingUp, section: "sec-investing" },
   { href: "/debt", label: "Debt payoff", hint: "When you’ll be debt-free, and how to get there sooner", icon: Flag, section: "sec-bills" },
   { href: "/recap", label: "Weekly recap", hint: "Last week in money: spent, saved and paid", icon: CalendarCheck, section: "sec-home" },
+  { href: "/progress", label: "Progress", hint: "Your level, streak and badges", icon: Trophy, section: "sec-budget" },
   { href: "/accounts", label: "Accounts", hint: "Link or remove banks, cards and lenders", icon: Landmark, section: "sec-accounts" },
   { href: "/settings", label: "Settings", hint: "Light or dark, your account, app version", icon: Settings, section: "sec-accounts" },
 ];
@@ -207,6 +209,7 @@ export function Shell({ children }: { children: ReactNode }) {
 
       <PullToRefresh />
       <Celebrations />
+      <GameWatcher />
       <Toaster />
       <ConfirmHost />
       <ReauthHost />

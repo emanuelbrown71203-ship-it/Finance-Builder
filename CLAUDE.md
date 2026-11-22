@@ -51,6 +51,10 @@ for it to be remembered and used whenever an app is built.
   `answers.ts`); talking uses the phone's own speech recognition and voice (`voice.ts`). "Chat with
   Claude" opens the owner's own Claude app. A built-in AI chat would send data to an outside service:
   ask the owner first.
+- **Small wins earn XP** (`src/lib/game/progress.ts` for what's worth what; `win()` in
+  `src/server/game.ts` records them where the change happens, in `player_wins`). XP never comes from
+  the browser; each thing counts once (`ref`), each kind has a daily limit, Undo on the same day takes
+  it back, and a failed win never blocks the real change. Give any new everyday task a win.
 - **Names never overwrite the bank's text.** `transactions.name` stays what the bank sent; shown names
   come from `custom_name`, `name_rules` and the tidy-up in `src/lib/finance/names.ts`, applied on read.
   Anything that matches charges (bills, category rules, the Tasks link) keys on the bank's text.

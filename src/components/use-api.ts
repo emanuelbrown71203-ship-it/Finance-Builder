@@ -52,6 +52,11 @@ export function getJson<T>(url: string): Promise<T> {
   return request<T>(url);
 }
 
+/** Sends something that changes nothing on any screen (today's check-in), without refreshing them all. */
+export function postQuietly<T>(url: string): Promise<T> {
+  return request<T>(url, { method: "POST" });
+}
+
 /** How often live screens re-check for new activity. */
 export const LIVE_INTERVAL = 5000;
 

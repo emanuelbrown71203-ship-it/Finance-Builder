@@ -44,6 +44,7 @@ Passbook follows the same house style as the owner's other apps (written down in
 | Investing | Total, trend, split by type, and holdings with gain or loss. |
 | Debt payoff | When the loans will be paid off at today's payments, and what a little extra each month changes. |
 | Weekly recap | Last week in money: spent against the week before, money in, bills paid, no-spend days. |
+| Progress | Your level, XP toward the next one, check-in streak, badges (won ones in colour, the rest with how to win them), what earns XP and where to go to do it, and the latest wins. |
 | Accounts | Linked banks, their status, and linking or removing one. |
 | Settings | Light or dark, Face ID sign-in, Connect to Claude, Tasks for Two, Names, Activity, remembered categories, your account, version. |
 | Activity | What Nickel and Claude changed when asked, newest first, each with Undo for 30 days. |
@@ -64,6 +65,15 @@ Smaller things that make it easier to live with:
 - **Subscription help.** A warning before a yearly charge renews, a note when a known service charges
   for the first time, and where to go to cancel.
 - **A little celebration** when a savings goal is reached (it can be switched off).
+- **Small wins add up, like a game.** Sorting a charge, giving bank code a clear name, adding a bill,
+  cancelling a subscription, setting a budget limit, putting money toward a goal, a goal passing
+  25/50/75/100%, tuning the debt plan, opening the app each day and days with no everyday spending
+  all earn XP. XP makes levels; daily check-ins make a streak; 14 badges have little pixel pictures.
+  A "+XP" note pops up when something earns some, there's a level-up party, and 8-bit sounds (made by
+  the browser, quiet, silent when the phone is; off in Settings). Today's look stays: only the level
+  block, the XP bar and the badges are retro. The server decides what earns XP
+  (`src/server/game.ts`, rules in `src/lib/game/progress.ts`): each thing counts once, each kind has a
+  daily limit, and Undo on the same day takes the XP back. Home shows the level and streak at the top.
 - **Nickel, the robo dog.** He sits in the corner of every screen, blinks, breathes, wags, looks
   toward whatever you touch, naps when left alone, perks up at new charges and hops when money
   goes into a goal. Tap him for what he's noticed in your numbers (bills due, price rises, budgets,
@@ -200,6 +210,8 @@ Conventions worth knowing before changing things:
   and are excluded from income and spending.
 - Recurring charges are detected on read from transaction history; only the person's
   overrides ("cancelled", "this is a bill") are stored.
+- XP is written down where a change happens (`win()` in `src/server/game.ts`, in `player_wins`),
+  never sent from the browser. A failed win is logged and never stops the change it was for.
 - Names work the same way: `transactions.name` is always the bank's text. A one-off name is
   `custom_name`; "every charge like this" is a row in `name_rules`, matched on the tidied bank text.
   Keys for bills, categories and the Tasks link come from the bank's text, never the shown name.

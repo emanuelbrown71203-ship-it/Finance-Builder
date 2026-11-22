@@ -4,6 +4,7 @@ import { addDays } from "@/lib/dates";
 import { RULE_KEY_PATTERN, cleanName, looksUnclear, namer, validName, type NameRule, type Namer } from "@/lib/finance/names";
 import type { NameRuleView, NamesPayload, UnclearName } from "@/lib/types";
 import type { Ctx } from "./auth";
+import { win } from "./game";
 import { HttpError } from "./http";
 
 /*
@@ -137,6 +138,7 @@ export async function createNameRule(
     await ctx.db.update(transactions).set({ customName: null }).where(and(eq(transactions.id, tx.id), eq(transactions.userId, ctx.userId)));
   }
   const { count } = await countNamedBy(ctx, await loadNameRules(ctx), key, saved.id);
+  await win(ctx, "rename", `rule:${key}`, name);
   return { ruleId: saved.id, count, undo: { ruleId: saved.id, key, previousName: saved.previousName, transactionId: tx.id, customName, replaced } };
 }
 

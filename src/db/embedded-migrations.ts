@@ -79,5 +79,10 @@ export const MIGRATION_STATEMENTS: string[] = [
   "ALTER TABLE \"activity_log\" ADD CONSTRAINT \"activity_log_user_id_users_id_fk\" FOREIGN KEY (\"user_id\") REFERENCES \"public\".\"users\"(\"id\") ON DELETE cascade ON UPDATE no action;",
   "ALTER TABLE \"manual_bills\" ADD CONSTRAINT \"manual_bills_user_id_users_id_fk\" FOREIGN KEY (\"user_id\") REFERENCES \"public\".\"users\"(\"id\") ON DELETE cascade ON UPDATE no action;",
   "CREATE INDEX \"activity_user_created_idx\" ON \"activity_log\" USING btree (\"user_id\",\"created_at\");",
-  "CREATE INDEX \"manual_bills_user_idx\" ON \"manual_bills\" USING btree (\"user_id\");"
+  "CREATE INDEX \"manual_bills_user_idx\" ON \"manual_bills\" USING btree (\"user_id\");",
+  "CREATE TABLE \"player_wins\" (\n\t\"id\" text PRIMARY KEY NOT NULL,\n\t\"user_id\" text NOT NULL,\n\t\"kind\" text NOT NULL,\n\t\"xp\" integer NOT NULL,\n\t\"label\" text,\n\t\"ref\" text NOT NULL,\n\t\"day\" text NOT NULL,\n\t\"created_at\" timestamp with time zone DEFAULT now() NOT NULL\n);",
+  "ALTER TABLE \"player_wins\" ADD CONSTRAINT \"player_wins_user_id_users_id_fk\" FOREIGN KEY (\"user_id\") REFERENCES \"public\".\"users\"(\"id\") ON DELETE cascade ON UPDATE no action;",
+  "CREATE INDEX \"player_wins_user_created_idx\" ON \"player_wins\" USING btree (\"user_id\",\"created_at\");",
+  "CREATE INDEX \"player_wins_user_kind_day_idx\" ON \"player_wins\" USING btree (\"user_id\",\"kind\",\"day\");",
+  "CREATE UNIQUE INDEX \"player_wins_user_kind_ref_idx\" ON \"player_wins\" USING btree (\"user_id\",\"kind\",\"ref\");"
 ];
