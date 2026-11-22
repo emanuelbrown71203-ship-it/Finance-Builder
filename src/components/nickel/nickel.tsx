@@ -627,7 +627,7 @@ export function Nickel() {
       {/* What he says */}
       {(bubble || menu) && !drag && (
         <div className={cx("nk-bubble absolute w-[min(19rem,calc(100vw-1.5rem))]", bubbleBelow ? "top-[86px]" : "bottom-[86px]", !bubblePlace && (settings.side === "right" ? "right-0" : "left-0"))} style={bubblePlace?.box}>
-          <div role="status" aria-live="polite" className="rounded-[18px] border border-line bg-sheet p-3.5 text-small text-ink shadow-float">
+          <div role="status" aria-live="polite" className="max-h-[min(30rem,calc(100dvh-13rem))] overflow-y-auto overscroll-contain rounded-[18px] border border-line bg-sheet p-3.5 text-small text-ink shadow-float">
             <div className="flex items-start justify-between gap-2">
               <p className="text-micro font-extrabold uppercase tracking-wide text-accent-text">{settings.name}</p>
               <button type="button" onClick={() => (bubble?.kind === "intro" ? (nickelSettings.finishIntro(), setBubble(null)) : (setBubble(null), setMenu(false), setAsking(false), setDoing(false)))} aria-label="Close" className="-mr-2 -mt-2 inline-flex size-9 items-center justify-center rounded-full text-ink-3 active:bg-sunk">
@@ -1069,21 +1069,26 @@ function NickelDo({ today, goals, loans, talksBack, onDone, onBill, onGoal, onLe
           {hint}
         </p>
       )}
-      <div className="mt-2.5 flex flex-wrap gap-2">
-        <button type="button" className={chip} onClick={() => onBill({})}>
-          Add a bill
-        </button>
-        <button type="button" className={chip} onClick={() => onBill({ frequency: "once" })}>
-          Upcoming bill
-        </button>
-        <button type="button" className={chip} onClick={onGoal}>
-          New goal
-        </button>
-        <button type="button" className={chip} onClick={() => void handle("what's left to spend?", false)}>
-          What’s left?
-        </button>
-      </div>
-      <p className="mt-2.5 text-micro text-ink-3">Like: “{EXAMPLES[1]}”, “can I afford a $300 jacket?”, “when is rent due?”. Changes I make show under Settings, Activity, with Undo.</p>
+      {/* Shortcuts and examples to start with; once you're talking, they step aside to keep the bubble small. */}
+      {!youSaid && (
+        <>
+          <div className="mt-2.5 flex flex-wrap gap-2">
+            <button type="button" className={chip} onClick={() => onBill({})}>
+              Add a bill
+            </button>
+            <button type="button" className={chip} onClick={() => onBill({ frequency: "once" })}>
+              Upcoming bill
+            </button>
+            <button type="button" className={chip} onClick={onGoal}>
+              New goal
+            </button>
+            <button type="button" className={chip} onClick={() => void handle("what's left to spend?", false)}>
+              What’s left?
+            </button>
+          </div>
+          <p className="mt-2.5 text-micro text-ink-3">Like: “{EXAMPLES[1]}”, “can I afford a $300 jacket?”, “when is rent due?”. Changes I make show under Settings, Activity, with Undo.</p>
+        </>
+      )}
     </div>
   );
 }
