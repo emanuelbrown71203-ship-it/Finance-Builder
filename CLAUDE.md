@@ -62,6 +62,13 @@ for it to be remembered and used whenever an app is built.
   among identical ones, so a statement brought in twice adds nothing. An import shows what's new before
   saving, asks what the card owes, and has Undo. The sample household uses a made-up statement, never
   the person's file.
+- **Apple Card taps arrive live** through a private tap link (`src/server/card-taps.ts`,
+  `/api/tap/<key>`), called by an iPhone Shortcuts "Transaction" automation with the merchant and
+  amount. The link can only add a pending Apple Card purchase: it reads nothing back. Only a hash of its
+  key is kept (`tap_keys`), making one needs a fresh "confirm it's you", it's rate limited, and it
+  switches itself off after 180 days unused. A statement confirms each tap (same amount, within 3 days),
+  keeping a category the person picked, and drops taps it shows never went through. The sample
+  household has a test button instead of a link.
 - **Nickel (the robo dog) points things out** from the person's own numbers, and never gives
   investment advice (no stock, fund or crypto picks); he says he isn't a financial advisor. His wording
   lives in `src/lib/nickel/brain.ts` and tests check for advice-like phrasing.

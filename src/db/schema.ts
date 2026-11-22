@@ -374,6 +374,17 @@ export const connectorTokens = pgTable("connector_tokens", {
   createdAt: createdAt(),
 });
 
+/**
+ * The private link an iPhone Shortcuts automation uses to tell Passbook each time Apple Card is tapped.
+ * It can only add Apple Card purchases. Only a hash of the key is stored.
+ */
+export const tapKeys = pgTable("tap_keys", {
+  userId: text("user_id").primaryKey().references(() => users.id, { onDelete: "cascade" }),
+  tokenHash: text("token_hash").notNull().unique(),
+  lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+  createdAt: createdAt(),
+});
+
 /** The connection to Tasks for Two, so bills there can be ticked off when the bank shows them paid. */
 export const taskLinks = pgTable("task_links", {
   userId: text("user_id").primaryKey().references(() => users.id, { onDelete: "cascade" }),

@@ -14,7 +14,7 @@ import { send, useApi, useNow } from "./use-api";
 
 const fail = (e: unknown) => toast(e instanceof Error ? e.message : "Something went wrong. Try again.", { tone: "error" });
 
-function ago(iso: string | null, now: number): string {
+export function ago(iso: string | null, now: number): string {
   if (!iso || !now) return "";
   const minutes = Math.max(0, Math.round((now - Date.parse(iso)) / 60_000));
   if (minutes < 1) return "just now";
@@ -33,7 +33,7 @@ export function Switch({ checked, onChange, label }: { checked: boolean; onChang
 }
 
 /** A value to copy, with a button that says when it has been. */
-function CopyField({ value, label }: { value: string; label: string }) {
+export function CopyField({ value, label }: { value: string; label: string }) {
   const [copied, setCopied] = useState(false);
   const copy = async () => {
     try {

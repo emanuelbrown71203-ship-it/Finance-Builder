@@ -289,7 +289,7 @@ export type AccountsPayload = {
   institutions: LinkedInstitution[];
   manual: AccountView[];
   /** Apple Card, brought in from its statements (Apple doesn't let websites link it). Null until the first one. */
-  appleCard: { accountId: string; owed: number; transactions: number; lastDate: ISODate | null } | null;
+  appleCard: { accountId: string; owed: number; transactions: number; pendingTaps: number; lastDate: ISODate | null } | null;
 };
 
 /** What an Apple Card statement holds, before it's brought in. */
@@ -302,6 +302,10 @@ export type AppleCardPreview = {
   already: number;
   /** In the file but not cleared yet: they come in with a later statement. */
   pending: number;
+  /** Taps already in Passbook that this statement confirms. */
+  confirmedTaps: number;
+  /** Taps it shows never went through (declined, or a tip changed the amount): they're dropped. */
+  droppedTaps: number;
   /** What Passbook has the card owing now (null before the first statement). */
   owedNow: number | null;
   /** A starting point for "what it owes now": the last balance plus new charges, less new payments. Null for the first statement. */
@@ -310,8 +314,15 @@ export type AppleCardPreview = {
   sample: boolean;
 };
 
+/** A tap a statement dropped, kept in the Undo so it can be put back exactly. */
+export type DroppedTap = { id: string; date: ISODate; name: string; amount: number; category: string; categoryLocked: boolean; note: string | null; customName: string | null; createdAt: string };
+
 export type AppleCardImport = {
   added: number;
+  /** Taps this statement confirmed (they became its lines). */
+  confirmed: string[];
+  /** Taps it dropped. */
+  removed: DroppedTap[];
   skipped: number;
   from: ISODate;
   to: ISODate;
@@ -324,6 +335,9 @@ export type AppleCardImport = {
   earned: boolean;
   accountId: string;
 };
+
+/** What Undo needs from an import. */
+export type AppleCardUndo = Pick<AppleCardImport, "batch" | "to" | "previousOwed" | "owed" | "earned"> & Partial<Pick<AppleCardImport, "confirmed" | "removed">>;
 
 export type HoldingView = {
   id: string;

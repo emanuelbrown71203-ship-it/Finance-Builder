@@ -6,8 +6,9 @@ import { dollars } from "@/lib/money";
 import type { AccountsPayload, AppleCardImport, AppleCardPreview } from "@/lib/types";
 import { XpTag } from "./game/level";
 import { WINS } from "@/lib/game/progress";
+import { CopyField, ago } from "./settings-sections";
 import { Button, Dialog, Field, MoneyInput, Sheet, SheetHeader, Tag, confirm, toast } from "./ui";
-import { send } from "./use-api";
+import { send, useApi, useNow } from "./use-api";
 
 /*
  * Apple Card on the Accounts screen. Apple doesn't let websites link Apple
@@ -77,8 +78,9 @@ export function AppleCardSheet({ card, demo }: { card: AccountsPayload["appleCar
     try {
       const done = await send<AppleCardImport>("POST", "/api/import/apple-card", { text: picked.text, owed: cents });
       setPicked(null);
-      const undo = { label: "Undo", run: () => send("POST", "/api/import/apple-card/undo", { batch: done.batch, to: done.to, previousOwed: done.previousOwed, owed: done.owed, earned: done.earned }) };
-      toast(done.added > 0 ? `Brought in ${plural(done.added, "Apple Card transaction", "Apple Card transactions")}` : "Apple Card balance updated", { action: undo });
+      const undo = { label: "Undo", run: () => send("POST", "/api/import/apple-card/undo", { batch: done.batch, to: done.to, previousOwed: done.previousOwed, owed: done.owed, earned: done.earned, confirmed: done.confirmed, removed: done.removed }) };
+      const count = done.added + done.confirmed.length;
+      toast(count > 0 ? `Brought in ${plural(count, "Apple Card transaction", "Apple Card transactions")}` : "Apple Card balance updated", { action: undo });
     } catch (e) {
       setOwedError(e instanceof Error ? e.message : "Couldn’t bring it in. Try again.");
     } finally {
@@ -120,7 +122,7 @@ export function AppleCardSheet({ card, demo }: { card: AccountsPayload["appleCar
             <span className="tabular whitespace-nowrap font-medium">{dollars(card.owed)} owed</span>
           </div>
           <p className="mt-3 text-small text-ink-2">
-            {plural(card.transactions, "transaction", "transactions")} so far. Each month, once your statement arrives: Wallet, Apple Card, Card Balance, the statement, Export Transactions, CSV.
+            {plural(card.transactions, "transaction", "transactions")} so far{card.pendingTaps > 0 ? `, and ${plural(card.pendingTaps, "tap", "taps")} waiting for the statement to confirm ${card.pendingTaps === 1 ? "it" : "them"}` : ""}. Bring it up to date any time: export any dates at card.apple.com (Statements, Export Transactions, CSV), or a monthly statement from Wallet. Overlapping dates are fine.
           </p>
           <div className="mt-4 flex flex-wrap gap-2">
             <Button size="sm" variant="primary" disabled={busy} onClick={pick}>
@@ -140,6 +142,7 @@ export function AppleCardSheet({ card, demo }: { card: AccountsPayload["appleCar
             <li>Pick a monthly statement, tap Export Transactions and choose CSV.</li>
             <li>Save it to Files, then choose it here.</li>
           </ol>
+          <p className="mt-2 text-small text-ink-3">Or any dates, any time: at card.apple.com, Statements, Export Transactions, CSV (on a laptop or in Safari).</p>
           {demo && <p className="mt-3 text-small text-ink-3">This is the sample household, so it tries a made-up statement instead of a file of yours.</p>}
           <Button className="mt-4" variant="primary" disabled={busy} onClick={pick}>
             {busy ? "Reading…" : demo ? "Try a sample statement" : "Choose a statement"}
@@ -148,6 +151,7 @@ export function AppleCardSheet({ card, demo }: { card: AccountsPayload["appleCar
         </>
       )}
       {error && <p className="mt-3 rounded-control bg-canary px-3 py-2 text-small text-canary-ink">{error}</p>}
+      <AppleCardTaps demo={demo} />
 
       <Dialog
         open={p !== undefined}
@@ -179,6 +183,12 @@ export function AppleCardSheet({ card, demo }: { card: AccountsPayload["appleCar
                     : `${plural(p.fresh, "transaction", "transactions")}, all new.`}
                 {p.pending > 0 && ` ${plural(p.pending, "purchase hasn’t", "purchases haven’t")} cleared yet: ${p.pending === 1 ? "it comes" : "they come"} with the next statement.`}
               </p>
+              {(p.confirmedTaps > 0 || p.droppedTaps > 0) && (
+                <p className="mt-1 text-small text-ink-2">
+                  {p.confirmedTaps > 0 && `${plural(p.confirmedTaps, "tap-to-pay purchase", "tap-to-pay purchases")} confirmed. `}
+                  {p.droppedTaps > 0 && `${plural(p.droppedTaps, "tap", "taps")} the statement doesn’t show (declined, or a tip changed the amount) ${p.droppedTaps === 1 ? "is" : "are"} replaced by what it does show.`}
+                </p>
+              )}
               {p.sample && <p className="mt-1 text-small text-ink-3">A made-up statement, because this is the sample household.</p>}
             </div>
             <Field label="What the card owes now" error={owedError} hint={p.suggestedOwed === null ? "The Card Balance on the Apple Card screen in Wallet." : "Worked out from the last balance and this statement. Check it against the Card Balance in Wallet."}>
@@ -189,5 +199,118 @@ export function AppleCardSheet({ card, demo }: { card: AccountsPayload["appleCar
         )}
       </Dialog>
     </Sheet>
+  );
+}
+
+type TapStatus = { on: boolean; createdAt: string | null; lastUsedAt: string | null; demo: boolean };
+
+/**
+ * Automatic Apple Card purchases: an iPhone Shortcuts automation sends each tap at a register to a
+ * private link, and the purchase shows up at once, pending until a statement confirms it. The link is
+ * shown once, with the steps to set it up.
+ */
+function AppleCardTaps({ demo }: { demo: boolean }) {
+  const { data } = useApi<TapStatus>("/api/tap-link");
+  const [key, setKey] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const now = useNow(60_000);
+  const origin = typeof window === "undefined" ? "" : window.location.origin;
+  const fail = (e: unknown) => toast(e instanceof Error ? e.message : "Something went wrong. Try again.", { tone: "error" });
+
+  const make = async () => {
+    setBusy(true);
+    try {
+      setKey((await send<{ key: string }>("POST", "/api/tap-link")).key);
+    } catch (e) {
+      fail(e);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const renew = async () => {
+    if (await confirm({ title: "Make a new tap link?", body: "The link in your Shortcuts automation stops working until you paste the new one in. Only do this if taps stopped arriving, or the link got out.", confirmLabel: "Make new link" })) void make();
+  };
+  const off = async () => {
+    if (!(await confirm({ title: "Turn off automatic taps?", body: "Taps stop showing up right away. Your statements still bring every purchase in. You can delete the automation in Shortcuts too.", confirmLabel: "Turn off", danger: true }))) return;
+    await send("DELETE", "/api/tap-link").then(() => toast("Automatic taps turned off"), fail);
+  };
+  const test = async () => {
+    setBusy(true);
+    try {
+      await send("POST", "/api/tap-link/test", { amount: 6.5, merchant: "Soft Serve Co" });
+      toast("Tap received: Soft Serve Co, $6.50. It’s in your latest activity as pending.");
+    } catch (e) {
+      fail(e);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (!data) return null;
+  return (
+    <div className="mt-5 border-t border-line-soft pt-4">
+      <h3 className="font-bold">Automatic: tap-to-pay purchases</h3>
+      {data.demo || demo ? (
+        <>
+          <p className="mt-1 text-small text-ink-2">In your own account, your iPhone tells Passbook each time you tap Apple Card at a register, so purchases show up in seconds. Here’s what one looks like.</p>
+          <Button className="mt-3" size="sm" disabled={busy} onClick={() => void test()}>
+            Send a test tap
+          </Button>
+        </>
+      ) : data.on ? (
+        <>
+          <p className="mt-1 flex flex-wrap items-center gap-2 text-small text-ink-2">
+            <Tag tone="mint">On</Tag>
+            <span suppressHydrationWarning>{data.lastUsedAt ? `Last tap ${ago(data.lastUsedAt, now)}` : "Waiting for your first tap"}</span>
+          </p>
+          <p className="mt-2 text-small text-ink-3">Taps show as pending until a statement confirms them. Online purchases come in with the statement. The link switches itself off after 6 months unused.</p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <Button size="sm" disabled={busy} onClick={() => void renew()}>
+              Make a new link
+            </Button>
+            <Button size="sm" variant="danger" onClick={() => void off()}>
+              Turn off
+            </Button>
+          </div>
+        </>
+      ) : (
+        <>
+          <p className="mt-1 text-small text-ink-2">Each time you tap Apple Card at a register, your iPhone can tell Passbook right away, so it shows up in seconds instead of at the end of the month. It takes about 5 minutes to set up in the Shortcuts app, once.</p>
+          <Button className="mt-3" size="sm" variant="primary" disabled={busy} onClick={() => void make()}>
+            Set it up
+          </Button>
+        </>
+      )}
+
+      <Dialog open={key !== null} onClose={() => setKey(null)} title="Set up automatic taps" footer={<Button variant="primary" className="w-full" onClick={() => setKey(null)}>I’ve set it up</Button>}>
+        {key && (
+          <div className="flex flex-col gap-3 text-small text-ink-2">
+            <p className="rounded-control bg-canary px-3.5 py-2.5 text-canary-ink">This private link can only add Apple Card purchases to your Passbook. Keep it to yourself. It’s shown this once, so copy it now.</p>
+            <ol className="flex list-decimal flex-col gap-2.5 pl-5">
+              <li>
+                Copy your link:
+                <CopyField value={`${origin}/api/tap/${key}`} label="Tap link" />
+              </li>
+              <li>
+                Open the <span className="font-bold text-ink">Shortcuts</span> app, tap <span className="font-bold text-ink">Automation</span> at the bottom, then <span className="font-bold text-ink">+</span>.
+              </li>
+              <li>
+                Choose <span className="font-bold text-ink">Transaction</span>. Pick only <span className="font-bold text-ink">Apple Card</span>, leave the rest as it is, choose <span className="font-bold text-ink">Run Immediately</span>, and tap Next.
+              </li>
+              <li>
+                Tap <span className="font-bold text-ink">New Blank Automation</span>, then <span className="font-bold text-ink">Add Action</span>, and search for <span className="font-bold text-ink">Get Contents of URL</span>.
+              </li>
+              <li>
+                Tap <span className="font-bold text-ink">URL</span> and paste your link. Tap the arrow beside it to show more: set <span className="font-bold text-ink">Method</span> to POST and <span className="font-bold text-ink">Request Body</span> to JSON.
+              </li>
+              <li>
+                Tap <span className="font-bold text-ink">Add new field</span>, choose Text, type <span className="font-bold text-ink">amount</span> as the key, then tap the value and choose <span className="font-bold text-ink">Shortcut Input</span>, then <span className="font-bold text-ink">Amount</span>. Add a second field the same way: key <span className="font-bold text-ink">merchant</span>, value Shortcut Input, then <span className="font-bold text-ink">Merchant</span>.
+              </li>
+              <li>Tap Done. The next time you tap Apple Card, it shows up in Passbook within seconds, marked pending. (To stop the banner each time, switch off Notify When Run in the automation.)</li>
+            </ol>
+          </div>
+        )}
+      </Dialog>
+    </div>
   );
 }

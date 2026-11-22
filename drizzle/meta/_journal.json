@@ -71,6 +71,13 @@
       "when": 1795331152584,
       "tag": "0009_wealthy_storm",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1795372689209,
+      "tag": "0010_lowly_power_pack",
+      "breakpoints": true
     }
   ]
 }

@@ -1,6 +1,6 @@
 import { and, eq, gt, lt, ne } from "drizzle-orm";
 import { getDb, type DB } from "@/db";
-import { connectorTokens, sessions, users } from "@/db/schema";
+import { connectorTokens, sessions, tapKeys, users } from "@/db/schema";
 import { DEFAULT_TIMEZONE, DEMO_USER_ID, SESSION_COOKIE, isDemoMode } from "@/lib/config";
 import { isValidTimeZone, todayIn, type ISODate } from "@/lib/dates";
 import { hashPassword, passwordNeedsUpgrade, randomToken, sha256, verifyPassword } from "./crypto";
@@ -87,6 +87,7 @@ export async function startSession(db: DB, userId: string): Promise<string> {
 export async function signOutEverywhere(ctx: Ctx): Promise<string> {
   await ctx.db.delete(sessions).where(eq(sessions.userId, ctx.userId));
   await ctx.db.delete(connectorTokens).where(eq(connectorTokens.userId, ctx.userId));
+  await ctx.db.delete(tapKeys).where(eq(tapKeys.userId, ctx.userId));
   return sessionCookie("", 0);
 }
 
@@ -115,6 +116,7 @@ export async function changePassword(ctx: Ctx, current: string, next: string): P
   await ctx.db.delete(sessions).where(and(eq(sessions.userId, ctx.userId), ne(sessions.id, ctx.sessionId)));
   // A password is changed when someone else may have had it. Whatever they set up while they did goes too.
   await ctx.db.delete(connectorTokens).where(eq(connectorTokens.userId, ctx.userId));
+  await ctx.db.delete(tapKeys).where(eq(tapKeys.userId, ctx.userId));
   await ctx.db.update(sessions).set({ authAt: new Date() }).where(eq(sessions.id, ctx.sessionId));
 }
 

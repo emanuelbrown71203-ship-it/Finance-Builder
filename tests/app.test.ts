@@ -3,12 +3,15 @@ import { getDb, type DB } from "@/db";
 import { seedDemo } from "@/db/seed";
 import { DEMO_USER_ID } from "@/lib/config";
 import type { Ctx } from "@/server/auth";
-import { budgetState, deleteDeposit, setBudget, setBudgets, setDebtPlan, setDebtSettings, setRecurringOverride, setRollover, updateGoal, updateTransaction } from "@/server/mutations";
+import { budgetState, deleteDeposit, deleteManualAccount, setBudget, setBudgets, setDebtPlan, setDebtSettings, setRecurringOverride, setRollover, updateGoal, updateTransaction } from "@/server/mutations";
 import { loadRules } from "@/server/rules";
 import { countUnclear, createNameRule, deleteNameRule, getNames, previewNameRule, renameRule, restoreNameRule } from "@/server/names";
-import { budgets as budgetsTable, categoryRules as categoryRulesTable, playerWins as playerWinsTable, transactions as transactionsTable } from "@/db/schema";
+import { accounts as accountsTable, budgets as budgetsTable, categoryRules as categoryRulesTable, playerWins as playerWinsTable, tapKeys as tapKeysTable, transactions as transactionsTable } from "@/db/schema";
 import { importAppleCard, previewAppleCard, undoAppleCardImport } from "@/server/card-import";
-import { and, eq as eqOp } from "drizzle-orm";
+import { contextForTapKey, createTapKey, recordTap, revokeTapKey, tapStatus } from "@/server/card-taps";
+import { signOutEverywhere } from "@/server/auth";
+import { POST as tapRoute } from "@/app/api/tap/[key]/route";
+import { and, eq as eqOp, inArray as inArrayOp } from "drizzle-orm";
 import { addBill, addGoal, addToGoal, changeGoal, changeLoan, findCharge, findDebt, findGoal, listActivity, renameCharges, undoActivity } from "@/server/actions";
 import { bankMatch, createManualBill, deleteManualBill, manualSeries, nextDue, restoreManualBill, updateManualBill } from "@/server/manual-bills";
 import { upcomingBetween } from "@/lib/finance/recurring";
@@ -949,5 +952,114 @@ describe("Apple Card, brought in from its statements", () => {
     await undoAppleCardImport(real(), { batch: rows[0].createdAt.toISOString(), to: "2026-11-12", previousOwed: null, owed: card.owed, earned: true });
     expect((await getAccounts(real())).appleCard).toBeNull();
     expect(await wins()).toHaveLength(0);
+  });
+});
+
+describe("Apple Card taps, sent by an iPhone Shortcuts automation", () => {
+  const real = (today = "2026-11-19"): Ctx => ({ ...ctx, today, demo: false });
+  const cardRows = async () => {
+    const card = (await getAccounts(real())).appleCard;
+    return card ? (await getTransactions(real(), { accountId: card.accountId, limit: 100, offset: 0 })).transactions : [];
+  };
+
+  it("records a tap at once as a pending purchase, sorted, and the card owes more", async () => {
+    expect((await getAccounts(real())).appleCard).toBeNull();
+    expect(await recordTap(real(), { amount: "$6.50", merchant: "Blue Bottle Coffee" })).toEqual({ recorded: true });
+    expect((await getAccounts(real())).appleCard).toMatchObject({ owed: 650, pendingTaps: 1, transactions: 0 });
+    const [tap] = await cardRows();
+    expect(tap).toMatchObject({ name: "Blue Bottle Coffee", amount: -650, category: "dining", pending: true, date: "2026-11-19" });
+    // The same tap sent twice (Shortcuts sometimes repeats) is one purchase; a tap with no amount waits for the statement.
+    expect(await recordTap(real(), { amount: 6.5, merchant: "Blue Bottle Coffee" })).toMatchObject({ recorded: false });
+    expect(await recordTap(real(), { amount: 0, merchant: "Blue Bottle Coffee" })).toMatchObject({ recorded: false });
+    expect(await cardRows()).toHaveLength(1);
+    // Two taps arriving at the same moment both count toward what's owed.
+    const owedBefore = (await getAccounts(real())).appleCard!.owed;
+    await Promise.all([recordTap(real(), { amount: "1.00", merchant: "Kiosk A" }), recordTap(real(), { amount: "2.00", merchant: "Kiosk B" })]);
+    expect((await getAccounts(real())).appleCard!.owed).toBe(owedBefore + 300);
+    const extra = (await cardRows()).filter((t) => t.name.startsWith("Kiosk"));
+    await db.delete(transactionsTable).where(inArrayOp(transactionsTable.id, extra.map((t) => t.id)));
+    await db.update(accountsTable).set({ balance: -owedBefore }).where(and(eqOp(accountsTable.userId, DEMO_USER_ID), eqOp(accountsTable.name, "Apple Card")));
+  });
+
+  it("a statement confirms its taps, keeps a category the person picked, and drops taps that never went through; Undo puts them all back", async () => {
+    await db.insert(categoryRulesTable).values({ id: "rule-tap-test", userId: DEMO_USER_ID, merchantKey: "corner bakery", category: "groceries" });
+    await recordTap(real(), { amount: "9.25", merchant: "Corner Bakery" });
+    // A restaurant tap: the tip makes the statement's amount different.
+    await recordTap(real("2026-11-05"), { amount: "20.00", merchant: "Sushi Spot" });
+    const blue = (await cardRows()).find((t) => t.name === "Blue Bottle Coffee")!;
+    await db.update(transactionsTable).set({ category: "entertainment", categoryLocked: true }).where(eqOp(transactionsTable.id, blue.id));
+
+    const statement = [
+      "Transaction Date,Clearing Date,Description,Merchant,Category,Type,Amount (USD),Purchased By",
+      "11/19/2026,11/20/2026,BLUE BOTTLE COFFEE,Blue Bottle Coffee,Restaurants,Purchase,6.50,Sam",
+      "11/19/2026,11/20/2026,CORNER BAKERY 12,Corner Bakery,Restaurants,Purchase,9.25,Sam",
+      "11/05/2026,11/06/2026,SUSHI SPOT,Sushi Spot,Restaurants,Purchase,24.00,Sam",
+      "11/12/2026,11/13/2026,GREEN GROCER 44,Green Grocer,Grocery,Purchase,30.00,Sam",
+    ].join("\n");
+    const preview = await previewAppleCard(real("2026-11-22"), statement);
+    // Only taps so far, no statement: what's owed is just the taps, so it asks for Wallet's balance.
+    expect(preview).toMatchObject({ fresh: 4, confirmedTaps: 2, droppedTaps: 1, owedNow: 3_575, suggestedOwed: null });
+
+    const done = await importAppleCard(real("2026-11-22"), statement, 6_975);
+    expect(done).toMatchObject({ added: 2, skipped: 0, earned: true });
+    expect(done.confirmed).toHaveLength(2);
+    expect(done.removed.map((t) => [t.name, t.amount])).toEqual([["Sushi Spot", -2_000]]);
+    const after = await cardRows();
+    expect(after.map((t) => [t.name, t.amount, t.category, t.pending]).sort()).toEqual(
+      [
+        ["Blue Bottle Coffee", -650, "entertainment", false],
+        ["Corner Bakery", -925, "groceries", false],
+        ["Green Grocer", -3_000, "groceries", false],
+        ["Sushi Spot", -2_400, "dining", false],
+      ].sort(),
+    );
+    expect((await getAccounts(real())).appleCard).toMatchObject({ owed: 6_975, pendingTaps: 0, transactions: 4 });
+
+    await undoAppleCardImport(real("2026-11-22"), done);
+    const back = await cardRows();
+    expect(back.map((t) => [t.name, t.amount, t.pending]).sort()).toEqual(
+      [
+        ["Blue Bottle Coffee", -650, true],
+        ["Corner Bakery", -925, true],
+        ["Sushi Spot", -2_000, true],
+      ].sort(),
+    );
+    expect((await getAccounts(real())).appleCard).toMatchObject({ owed: 3_575, pendingTaps: 3 });
+    await db.delete(categoryRulesTable).where(eqOp(categoryRulesTable.id, "rule-tap-test"));
+  });
+
+  it("the tap link: only its hash is kept, it finds its owner, nobody else's, and switching it off stops it", async () => {
+    // The sample household has no link anyone could write to.
+    expect(await contextForTapKey("sample-household-key-that-is-long-enough")).toBeNull();
+    process.env.DEMO_MODE = "0";
+    try {
+      const key = await createTapKey(real());
+      expect(await tapStatus(real())).toMatchObject({ on: true });
+      const [stored] = await db.select().from(tapKeysTable).where(eqOp(tapKeysTable.userId, DEMO_USER_ID));
+      expect(stored.tokenHash).not.toContain(key);
+      expect((await contextForTapKey(key))?.userId).toBe(DEMO_USER_ID);
+      expect(await contextForTapKey(key.slice(0, -1) + (key.endsWith("a") ? "b" : "a"))).toBeNull();
+
+      // The address the automation calls: it adds a tap and says nothing about the account.
+      const call = (k: string, body: unknown) => tapRoute(new Request(`http://localhost/api/tap/${k}`, { method: "POST", body: JSON.stringify(body), headers: { "x-forwarded-for": "203.0.113.9" } }), { params: Promise.resolve({ key: k }) });
+      const ok = await call(key, { Amount: "$4.75", Merchant: "Corner Shop" });
+      expect(ok.status).toBe(200);
+      expect(await ok.json()).toEqual({ recorded: true });
+      expect((await cardRows()).some((t) => t.name === "Corner Shop" && t.pending)).toBe(true);
+      expect((await call("not-a-real-key-not-a-real-key-123", { amount: 1, merchant: "X" })).status).toBe(404);
+
+      await revokeTapKey(real());
+      expect(await contextForTapKey(key)).toBeNull();
+      expect((await call(key, { amount: 1, merchant: "X" })).status).toBe(404);
+
+      // Signing out everywhere switches a tap link off too, like the Claude link.
+      const again = await createTapKey(real());
+      await signOutEverywhere(real());
+      expect(await contextForTapKey(again)).toBeNull();
+    } finally {
+      delete process.env.DEMO_MODE;
+    }
+    // Tidy up: Apple Card and its taps go.
+    await deleteManualAccount(real(), (await getAccounts(real())).appleCard!.accountId);
   });
 });

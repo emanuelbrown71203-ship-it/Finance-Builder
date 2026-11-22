@@ -37,6 +37,8 @@ export type ParsedStatement = {
   rows: ImportedRow[];
   /** Purchases in the file that haven't cleared yet: left out until a later statement. */
   pending: number;
+  /** Those purchases' dates and amounts, so a tap waiting for one of them isn't mistaken for one that never went through. */
+  uncleared: { date: ISODate; amount: number }[];
 };
 
 /** A problem with the file itself, worded for the person who picked it. */
@@ -133,7 +135,7 @@ export function parseStatement(text: string): ParsedStatement {
   if (lines.length > MAX_ROWS) throw new StatementError("That file has more transactions than a card statement would. Export one month at a time.");
 
   const rows: ImportedRow[] = [];
-  let pending = 0;
+  const uncleared: { date: ISODate; amount: number }[] = [];
   lines.forEach((cells, i) => {
     const get = (column: (typeof COLUMNS)[number]) => (cells[at[column]] ?? "").trim();
     const line = i + 2;
@@ -142,11 +144,6 @@ export function parseStatement(text: string): ParsedStatement {
     const cents = toCents(get("amount (usd)"));
     if (cents === null) throw new StatementError(`Line ${line} of that file has an amount Passbook can’t read (“${get("amount (usd)")}”). Try exporting it again.`);
     const cleared = usDate(get("clearing date"));
-    // Not cleared yet: it may still change, so it waits for the statement it lands on.
-    if (!cleared) {
-      pending++;
-      return;
-    }
     const type = get("type").toLowerCase();
     const rawName = get("description");
     const name = get("merchant") || rawName || "Apple Card";
@@ -158,10 +155,12 @@ export function parseStatement(text: string): ParsedStatement {
     // Paying the card off (or a payment bouncing) is money moving between your own accounts; a refund
     // belongs with what it refunds; interest and fees are fees.
     const category: CategoryKey = /payment|daily cash/.test(type) ? "transfer" : /interest|fee/.test(type) ? "fees" : categoryFor(get("category"));
-    rows.push({ date, cleared, name, rawName: rawName || name, amount, category });
+    // Not cleared yet: it may still change, so it waits for the export it clears in.
+    if (!cleared) uncleared.push({ date, amount });
+    else rows.push({ date, cleared, name, rawName: rawName || name, amount, category });
   });
-  if (rows.length === 0) throw new StatementError(pending > 0 ? "Nothing in that file has cleared yet. Bring it in once the statement is ready." : "That file has no transactions in it. Pick a month that has a statement.");
-  return { rows, pending };
+  if (rows.length === 0) throw new StatementError(uncleared.length > 0 ? "Nothing in that file has cleared yet. Bring it in once the statement is ready." : "That file has no transactions in it. Pick a month that has a statement.");
+  return { rows, pending: uncleared.length, uncleared };
 }
 
 /** A key for each row that's the same in every export: when it was made, when it cleared, its amount, its place among identical ones. */
