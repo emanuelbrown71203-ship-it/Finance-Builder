@@ -33,8 +33,17 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
     window.location.assign("/login");
     throw new ApiError(401, "Sign in to continue.");
   }
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new ApiError(response.status, data.error ?? "Something went wrong. Try again.", data.reauth === true);
+  let data: unknown;
+  try {
+    data = await response.json();
+  } catch {
+    data = undefined;
+  }
+  const body = (data && typeof data === "object" ? data : {}) as { error?: string; reauth?: boolean };
+  if (!response.ok) throw new ApiError(response.status, body.error ?? "Something went wrong. Try again.", body.reauth === true);
+  // An answer that isn't data (a page instead of numbers, or nothing at all) is an error, never an empty
+  // result: screens can count on what they get having the shape they asked for.
+  if (!data || typeof data !== "object") throw new ApiError(502, "That didn’t load properly. Pull down to refresh.");
   return data as T;
 }
 

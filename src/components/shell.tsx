@@ -120,7 +120,7 @@ export function Shell({ children }: { children: ReactNode }) {
   const extras = NAV.slice(DOCK);
   const moreActive = extras.some((n) => isActive(n.href));
   // Bills due in the next three days show as a count on the Bills tab.
-  const dueSoon = overview ? overview.upcoming.filter((b) => diffDays(b.date, overview.today) <= 3).length : 0;
+  const dueSoon = Array.isArray(overview?.upcoming) ? overview.upcoming.filter((b) => diffDays(b.date, overview.today) <= 3).length : 0;
 
   return (
     <div className="mx-auto flex min-h-dvh w-full max-w-[1320px]">
