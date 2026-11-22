@@ -9,6 +9,8 @@ const Body = z.object({
   name: z.string().max(200).nullable().optional(),
   /** Also use this category for every other charge from the same merchant, now and in future. */
   remember: z.boolean().optional(),
+  /** Sent by Undo: takes back the XP the change being undone earned today. */
+  undo: z.boolean().optional(),
   /** Sent by Undo: what the remembered change replaced. */
   restore: z
     .object({

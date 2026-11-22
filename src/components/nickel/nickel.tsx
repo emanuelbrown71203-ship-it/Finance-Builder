@@ -104,6 +104,7 @@ export function Nickel() {
   const [walk, setWalk] = useState<{ dir: "l" | "r"; ms: number } | null>(null);
   /** Room an on-screen message takes at the bottom; he hops up over it. */
   const [toastSpace, setToastSpace] = useState(0);
+  const [toastTop, setToastTop] = useState<number | null>(null);
 
   const root = useRef<HTMLDivElement>(null);
   const lastActive = useRef(0);
@@ -421,7 +422,11 @@ export function Nickel() {
   };
 
   useEffect(() => {
-    const onSpace = (e: Event) => setToastSpace(Number((e as CustomEvent<number>).detail) || 0);
+    const onSpace = (e: Event) => {
+      const detail = (e as CustomEvent<{ space?: number; top?: number | null }>).detail ?? {};
+      setToastSpace(Number(detail.space) || 0);
+      setToastTop(typeof detail.top === "number" && detail.top > 0 ? detail.top : null);
+    };
     window.addEventListener("passbook-toast-space", onSpace);
     return () => window.removeEventListener("passbook-toast-space", onSpace);
   }, []);
@@ -611,8 +616,9 @@ export function Nickel() {
   const margin = wide ? 24 : 10;
   // Wherever he wandered, re-checked against today's screen width.
   const x = spot === null ? null : Math.max(wide ? 276 : margin, Math.min(screenW - margin - DOG_W, spot.x));
-  // Kept below the title bar and above the tab bar even after the screen turns.
-  const y = spot === null ? null : Math.max(wide ? 96 : 118, Math.min(screenH - (wide ? 20 : 80) - DOG_H - 8, spot.y));
+  // Kept below the title bar and above the tab bar even after the screen turns, and above a message while one shows.
+  const lowest = Math.min(screenH - (wide ? 20 : 80) - DOG_H - 8, !wide && toastTop !== null ? toastTop - DOG_H - 8 : Infinity);
+  const y = spot === null ? null : Math.max(wide ? 96 : 118, Math.min(lowest, spot.y));
   const sideStyle = useMemo(() => {
     const bottomBase = wide ? 20 : 80;
     if (drag) return { left: drag.x - 38, top: drag.y - 40 };

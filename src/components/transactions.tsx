@@ -50,7 +50,7 @@ export async function changeCategory(tx: TxView, next: { category: string; note?
   toast(message, {
     action: {
       label: "Undo",
-      run: () => send("PATCH", `/api/transactions/${tx.id}`, { ...before, ...(result.undo ? { restore: result.undo } : {}) }),
+      run: () => send("PATCH", `/api/transactions/${tx.id}`, { ...before, undo: true, ...(result.undo ? { restore: result.undo } : {}) }),
     },
   });
 }
@@ -315,6 +315,7 @@ function TxForm({ tx, onClose }: { tx: TxView; onClose: () => void }) {
             run: async () => {
               if (result) {
                 await send("PATCH", `/api/transactions/${tx.id}`, {
+                  undo: true,
                   ...(body.category !== undefined ? { category: tx.category } : {}),
                   ...(body.note !== undefined ? { note: tx.note ?? "" } : {}),
                   ...(body.name !== undefined ? { name: tx.customName } : {}),

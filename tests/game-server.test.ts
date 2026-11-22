@@ -5,12 +5,12 @@ import { playerWins, transactions } from "@/db/schema";
 import { seedDemo } from "@/db/seed";
 import { DEMO_USER_ID } from "@/lib/config";
 import { WINS } from "@/lib/game/progress";
-import { addBill, addToGoal, undoActivity } from "@/server/actions";
+import { addBill, addGoal, addToGoal, changeLoan, undoActivity } from "@/server/actions";
 import type { Ctx } from "@/server/auth";
 import { checkIn, getGame, milestonesCrossed, noSpendDays, win } from "@/server/game";
 import { createManualBill, deleteManualBill, restoreManualBill, updateManualBill } from "@/server/manual-bills";
-import { createGoal, deleteDeposit, setBudget, setRecurringOverride, updateGoal, updateTransaction } from "@/server/mutations";
-import { createNameRule } from "@/server/names";
+import { createGoal, deleteDeposit, deleteGoal, setBudget, setRecurringOverride, updateGoal, updateTransaction } from "@/server/mutations";
+import { createNameRule, deleteNameRule } from "@/server/names";
 
 /** The game layer over the real SQL: wins are recorded where things happen, once each, within daily limits. */
 const today = "2026-11-19";
@@ -119,9 +119,63 @@ describe("the game on the server", () => {
     await setBudget(ctx, "travel", 50_000);
     await setBudget(ctx, "travel", 60_000);
     expect(await xp()).toBe(start + WINS.budget.xp);
-    // Removing a limit isn't a win.
+    // Taking away a limit set today (its Undo) takes the XP back; setting it again can earn it once more.
     await setBudget(ctx, "travel", null);
+    expect(await xp()).toBe(start);
+    await setBudget(ctx, "travel", 50_000);
     expect(await xp()).toBe(start + WINS.budget.xp);
+  });
+
+  it("the screen's Undo takes back what a change to a charge earned today", async () => {
+    const [tx] = await db.select().from(transactions).where(and(eq(transactions.userId, DEMO_USER_ID), eq(transactions.category, "entertainment"))).limit(1);
+    const start = await xp();
+    // (Today's sorting limit was used up above, so this earns from the name and the note.)
+    await updateTransaction(ctx, tx.id, { name: "Concert tickets", note: "Concert" });
+    expect(await xp()).toBe(start + WINS.rename.xp + WINS.note.xp);
+    await updateTransaction(ctx, tx.id, { name: null, note: "", undo: true });
+    expect(await xp()).toBe(start);
+  });
+
+  it("removing a goal the day it was made takes back everything it earned, including when Nickel's Undo does it", async () => {
+    const start = await xp();
+    const id = await createGoal(ctx, { name: "Laptop", target: 100_000, saved: 100_000, monthlyContribution: 0, targetDate: null });
+    expect(await xp()).toBeGreaterThan(start);
+    await deleteGoal(ctx, id);
+    expect(await xp()).toBe(start);
+    const done = await addGoal(ctx, "nickel", { name: "Camera", target: 80_000, targetDate: null, saved: 40_000 });
+    expect(await xp()).toBeGreaterThan(start);
+    await undoActivity(ctx, done.activityId);
+    expect(await xp()).toBe(start);
+  });
+
+  it("deleting a cancelled bill takes back its cancel XP too, and Undo returns both", async () => {
+    const start = await xp();
+    const bill = await createManualBill(ctx, { name: "Magazine", amount: 900, frequency: "monthly", startDate: "2026-11-27", kind: "subscription" }, "you");
+    await updateManualBill(ctx, bill.id, { cancelled: true });
+    expect(await xp()).toBe(start + WINS.bill.xp + WINS.cancel.xp);
+    const removed = await deleteManualBill(ctx, bill.id);
+    expect(await xp()).toBe(start);
+    await restoreManualBill(ctx, removed);
+    expect(await xp()).toBe(start + WINS.bill.xp + WINS.cancel.xp);
+  });
+
+  it("never gives cancel XP for a bill that isn't in the person's charges", async () => {
+    const start = await xp();
+    await setRecurringOverride(ctx, "out:made up thing", { cancelled: true });
+    expect(await xp()).toBe(start);
+  });
+
+  it("stopping a name saved today, or Undo of a loan change, takes its XP back", async () => {
+    const [tx] = await db.select().from(transactions).where(and(eq(transactions.userId, DEMO_USER_ID), eq(transactions.name, "Trader Joe’s"))).limit(1);
+    const start = await xp();
+    const { ruleId } = await createNameRule(ctx, { transactionId: tx.id, name: "Groceries run" });
+    expect(await xp()).toBe(start + WINS.rename.xp);
+    await deleteNameRule(ctx, ruleId);
+    expect(await xp()).toBe(start);
+    const done = await changeLoan(ctx, "claude", "demo-auto-loan", { aprPercent: 5.9 });
+    expect(await xp()).toBe(start + WINS.plan.xp);
+    await undoActivity(ctx, done.activityId);
+    expect(await xp()).toBe(start);
   });
 
   it("counts names and things Nickel or Claude did when asked, and their Undo takes saves back", async () => {

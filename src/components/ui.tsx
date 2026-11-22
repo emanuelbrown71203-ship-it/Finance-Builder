@@ -345,8 +345,11 @@ export function Toaster() {
   // Tells Nickel how much room a message takes, so he hops up above it instead of hiding behind it.
   const box = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    const space = list.length > 0 && box.current ? box.current.offsetHeight + 8 : 0;
-    window.dispatchEvent(new CustomEvent("passbook-toast-space", { detail: space }));
+    const el = list.length > 0 ? box.current : null;
+    const space = el ? el.offsetHeight + 8 : 0;
+    // Where the top message starts on screen, for when he's out in the open rather than in his corner.
+    const top = el ? el.getBoundingClientRect().top : null;
+    window.dispatchEvent(new CustomEvent("passbook-toast-space", { detail: { space, top } }));
   }, [list]);
   return (
     <div ref={box} aria-live="polite" className="pointer-events-none fixed inset-x-0 bottom-[calc(84px+env(safe-area-inset-bottom))] z-50 flex flex-col items-center gap-2 px-3 lg:bottom-6">

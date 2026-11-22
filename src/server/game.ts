@@ -1,6 +1,6 @@
 import { and, desc, eq, gt, inArray, sql } from "drizzle-orm";
 import { playerWins, transactions } from "@/db/schema";
-import { addDays, type ISODate } from "@/lib/dates";
+import { addDays, formatShort, type ISODate } from "@/lib/dates";
 import { badgesFor, bestStreak, levelFor, streak, WINS, isWinKind, type GamePayload, type WinKind } from "@/lib/game/progress";
 import type { Ctx } from "./auth";
 import { describeError } from "./errors";
@@ -71,16 +71,16 @@ export async function undoGoalMilestones(ctx: Ctx, goal: { id: string; target: n
 
 /** Categories that are bills rather than everyday spending; a no-spend day can still have these. */
 const NOT_EVERYDAY = ["housing", "utilities", "insurance", "loans", "fees", "transfer", "income"];
-const NO_SPEND_LOOKBACK = 3;
-
 /**
- * No-spend days among the last few (not today, which isn't over): days with
- * nothing spent on everyday things. A day only counts once the bank has
- * reported something after it, so an account that isn't sending anything
- * can't look like a run of no-spend days.
+ * Whether yesterday was a no-spend day: nothing spent on everyday things. Only
+ * yesterday is judged, at the next day's check-in, while its purchases still
+ * show under their own date (a bank later files a settled purchase under the
+ * day it settled, which could make an older day look empty). It only counts
+ * once the bank has reported something after it, so an account that isn't
+ * sending anything can't look like a run of no-spend days.
  */
 export async function noSpendDays(ctx: Ctx): Promise<ISODate[]> {
-  const from = addDays(ctx.today, -NO_SPEND_LOOKBACK);
+  const from = addDays(ctx.today, -1);
   const rows = await ctx.db
     .select({ date: transactions.date, amount: transactions.amount, category: transactions.category })
     .from(transactions)
@@ -93,11 +93,12 @@ export async function noSpendDays(ctx: Ctx): Promise<ISODate[]> {
   return days;
 }
 
-/** Opening the app once a day: a check-in (for the streak), plus any no-spend days just finished. */
+/** Opening the app once a day: a check-in (for the streak), plus yesterday if it was a no-spend day. */
 export async function checkIn(ctx: Ctx): Promise<void> {
   await win(ctx, "checkin", ctx.today, null);
   try {
-    for (const day of await noSpendDays(ctx)) await win(ctx, "nospend", day, null, day);
+    // Counted today (so it shows in today's XP), and once for that day however late it's noticed.
+    for (const day of await noSpendDays(ctx)) await win(ctx, "nospend", day, formatShort(day));
   } catch (error) {
     console.error("game: no-spend days weren't checked:", describeError(error));
   }

@@ -142,13 +142,21 @@ export function GameWatcher() {
 
   useEffect(() => primeSounds(), []);
 
-  // Today's check-in, once the app knows it hasn't happened yet.
+  // Today's check-in, once the app knows it hasn't happened yet. The home-screen app can stay open
+  // for days, so this runs again whenever a fresh day shows up (and after a check-in that failed).
   useEffect(() => {
-    if (!data || data.checkedInToday || checking.current) return;
+    if (!data) return;
+    if (data.checkedInToday) {
+      checking.current = false;
+      return;
+    }
+    if (checking.current) return;
     checking.current = true;
     postQuietly<GamePayload>(GAME_URL)
       .then((fresh) => mutate(GAME_URL, fresh, { revalidate: false }))
-      .catch(() => {});
+      .catch(() => {
+        checking.current = false;
+      });
   }, [data]);
 
   useEffect(() => {

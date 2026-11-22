@@ -361,14 +361,15 @@ export async function seedDemo(db: DB, today: ISODate, now: Date = new Date()): 
   add("milestone", "demo-goal-emergency:25", "Emergency fund: 25%", 6);
   add("milestone", "demo-goal-emergency:50", "Emergency fund: 50%", 6);
   add("milestone", "demo-goal-japan:25", "Two weeks in Japan: 25%", 5);
-  for (const c of ["groceries", "dining", "shopping"]) add("budget", `${c}:${monthOf(today)}`, { groceries: "Groceries", dining: "Restaurants & coffee", shopping: "Shopping" }[c] ?? c, 5);
+  // Set this month (on the 1st, that's today).
+  for (const c of ["groceries", "dining", "shopping"]) add("budget", `${c}:${monthOf(today)}`, { groceries: "Groceries", dining: "Restaurants & coffee", shopping: "Shopping" }[c] ?? c, Math.min(5, dayOfMonth(today) - 1));
   depositRows.slice(-6).forEach((dep, i) => add("save", dep.id, goalSpecs.find((g) => g.id === dep.goalId)?.name ?? null, 4 - (i % 3)));
   ["Blue Bottle", "Trader Joe’s", "Shell", "Target", "Chipotle", "Amazon", "Whole Foods", "Lyft", "Sweetgreen", "Costco", "Uber Eats", "CVS"].forEach((name, i) => add("sort", `demo-sort-${i}`, name, 1 + (i % 4)));
   ["Gym membership", "Water bill", "Phone plan", "Car wash club"].forEach((name, i) => add("rename", `demo-rename-${i}`, name, 2 + (i % 2)));
   add("bill", "demo-bill-1", "Gym membership", 3);
   add("bill", "demo-bill-2", "Water bill", 2);
-  add("nospend", addDays(today, -4), null, 4);
-  add("nospend", addDays(today, -2), null, 2);
+  add("nospend", addDays(today, -5), null, 4);
+  add("nospend", addDays(today, -3), null, 2);
   await db.insert(playerWins).values(won);
 }
 

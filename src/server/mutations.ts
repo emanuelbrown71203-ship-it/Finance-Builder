@@ -1,11 +1,11 @@
-import { and, eq, inArray, isNull, ne, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, lt, ne, sql } from "drizzle-orm";
 import { accounts, balanceSnapshots, budgets, categoryRules, debtPlans, goalDeposits, goals, recurringOverrides, transactions, userSettings } from "@/db/schema";
 import { category as categoryOf, isCategoryKey } from "@/lib/categories";
 import { monthOf } from "@/lib/dates";
 import { cleanName, validName } from "@/lib/finance/names";
 import { merchantKey } from "@/lib/finance/recurring";
 import type { Ctx } from "./auth";
-import { goalMilestones, takeBack, undoGoalMilestones, win } from "./game";
+import { MILESTONES, goalMilestones, takeBack, undoGoalMilestones, win } from "./game";
 import { HttpError } from "./http";
 
 /** What a remembered change replaced, so Undo can put everything back exactly. */
@@ -21,7 +21,7 @@ const MAX_RULES = 500;
 export async function updateTransaction(
   ctx: Ctx,
   id: string,
-  patch: { category?: string; note?: string | null; name?: string | null; remember?: boolean; restore?: RememberUndo },
+  patch: { category?: string; note?: string | null; name?: string | null; remember?: boolean; restore?: RememberUndo; undo?: boolean },
 ): Promise<{ moved: number; undo: RememberUndo | null }> {
   if (patch.category !== undefined && !isCategoryKey(patch.category)) throw new HttpError(400, "Unknown category.");
   const [tx] = await ctx.db.select().from(transactions).where(and(eq(transactions.id, id), eq(transactions.userId, ctx.userId))).limit(1);
@@ -38,8 +38,12 @@ export async function updateTransaction(
   }
   if (Object.keys(set).length > 0) await ctx.db.update(transactions).set(set).where(eq(transactions.id, tx.id));
 
-  // Small wins, each once per transaction (an Undo puts things back but doesn't earn them twice).
-  if (!patch.restore) {
+  // Small wins, each once per transaction. The screen's Undo says so (`undo`), and takes back what today's change earned.
+  if (patch.undo || patch.restore) {
+    if (patch.category !== undefined) await takeBack(ctx, "sort", `tx:${tx.id}`);
+    if (patch.name !== undefined) await takeBack(ctx, "rename", `tx:${tx.id}`);
+    if (patch.note !== undefined) await takeBack(ctx, "note", `tx:${tx.id}`);
+  } else {
     const shown = set.customName ?? tx.customName ?? cleanName(tx.name);
     if (set.category !== undefined && set.category !== tx.category) await win(ctx, "sort", `tx:${tx.id}`, shown);
     if (set.customName && set.customName !== tx.customName) await win(ctx, "rename", `tx:${tx.id}`, shown);
@@ -109,8 +113,18 @@ export async function setRecurringOverride(ctx: Ctx, key: string, patch: { kind?
       set: { ...(patch.kind !== undefined ? { kind: patch.kind } : {}), ...(patch.cancelled !== undefined ? { cancelled: patch.cancelled } : {}) },
     });
   // Cancelling something you pay for is the biggest small win there is; Undo the same day takes it back.
-  if (key.startsWith("out:") && patch.cancelled === true) await win(ctx, "cancel", key, titleCase(key.slice(4)));
+  // Only for a bill or subscription that's really in the person's charges, never a made-up key.
+  if (patch.cancelled === true && key.startsWith("out:") && (await chargedAs(ctx, key))) await win(ctx, "cancel", key, titleCase(key.slice(4)));
   if (patch.cancelled === false) await takeBack(ctx, "cancel", key);
+}
+
+/** Whether any of the person's own payments goes by this bill key. */
+async function chargedAs(ctx: Ctx, key: string): Promise<boolean> {
+  const names = await ctx.db
+    .selectDistinct({ name: transactions.name })
+    .from(transactions)
+    .where(and(eq(transactions.userId, ctx.userId), lt(transactions.amount, 0)));
+  return names.some((n) => `out:${merchantKey(n.name)}` === key);
 }
 
 const titleCase = (words: string) => words.replace(/\b[a-z]/g, (c) => c.toUpperCase());
@@ -119,6 +133,8 @@ export async function setBudget(ctx: Ctx, category: string, monthlyLimit: number
   if (!isCategoryKey(category) || category === "transfer" || category === "income") throw new HttpError(400, "Unknown category.");
   if (monthlyLimit === null) {
     await ctx.db.delete(budgets).where(and(eq(budgets.userId, ctx.userId), eq(budgets.category, category)));
+    // Taking away a limit set today (its Undo) takes its XP back.
+    await takeBack(ctx, "budget", `${category}:${monthOf(ctx.today)}`);
     return;
   }
   await ctx.db
@@ -208,8 +224,12 @@ export async function deleteDeposit(ctx: Ctx, goalId: string, depositId: string)
 }
 
 export async function deleteGoal(ctx: Ctx, id: string) {
+  const deposits = await ctx.db.select({ id: goalDeposits.id }).from(goalDeposits).where(and(eq(goalDeposits.goalId, id), eq(goalDeposits.userId, ctx.userId)));
   await ctx.db.delete(goals).where(and(eq(goals.id, id), eq(goals.userId, ctx.userId)));
+  // A goal removed the day it was made (or its Undo) takes back everything it earned today.
   await takeBack(ctx, "goal", id);
+  await takeBack(ctx, "milestone", MILESTONES.map((pct) => `${id}:${pct}`));
+  await takeBack(ctx, "save", deposits.map((d) => d.id));
 }
 
 /** Things tracked by hand: a car, a house, a loan from a relative. */
@@ -249,7 +269,7 @@ export async function setDebtSettings(ctx: Ctx, patch: { extra?: number; strateg
   const set = { ...(patch.extra !== undefined ? { debtExtra: patch.extra } : {}), ...(patch.strategy ? { debtStrategy: patch.strategy } : {}) };
   if (Object.keys(set).length === 0) return;
   await ctx.db.insert(userSettings).values({ userId: ctx.userId, ...set }).onConflictDoUpdate({ target: userSettings.userId, set });
-  await win(ctx, "plan", `${ctx.today}:settings`, "Payoff plan");
+  await win(ctx, "plan", `${monthOf(ctx.today)}:settings`, "Payoff plan");
 }
 
 /** The interest rate and monthly payment for one debt, when the bank doesn't say or the owner knows better. */
@@ -260,5 +280,5 @@ export async function setDebtPlan(ctx: Ctx, accountId: string, patch: { aprPerce
     .insert(debtPlans)
     .values({ accountId, userId: ctx.userId, aprPercent: patch.aprPercent ?? null, monthlyPayment: patch.monthlyPayment ?? null })
     .onConflictDoUpdate({ target: debtPlans.accountId, set: { ...(patch.aprPercent !== undefined ? { aprPercent: patch.aprPercent } : {}), ...(patch.monthlyPayment !== undefined ? { monthlyPayment: patch.monthlyPayment } : {}) } });
-  await win(ctx, "plan", `${ctx.today}:${account.id}`, account.name);
+  await win(ctx, "plan", `${monthOf(ctx.today)}:${account.id}`, account.name);
 }

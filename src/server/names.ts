@@ -4,7 +4,7 @@ import { addDays } from "@/lib/dates";
 import { RULE_KEY_PATTERN, cleanName, looksUnclear, namer, validName, type NameRule, type Namer } from "@/lib/finance/names";
 import type { NameRuleView, NamesPayload, UnclearName } from "@/lib/types";
 import type { Ctx } from "./auth";
-import { win } from "./game";
+import { takeBack, win } from "./game";
 import { HttpError } from "./http";
 
 /*
@@ -166,6 +166,8 @@ export async function deleteNameRule(ctx: Ctx, id: string): Promise<{ rule: { ke
     .where(and(eq(nameRules.id, id), eq(nameRules.userId, ctx.userId)))
     .returning({ key: nameRules.merchantKey, amount: nameRules.amount, name: nameRules.name });
   if (!rule) throw new HttpError(404, "That name isn’t saved any more.");
+  // Stopping a name saved today (or Nickel's or Claude's Undo of it) takes its XP back.
+  await takeBack(ctx, "rename", `rule:${rule.key}`);
   return { rule };
 }
 

@@ -1,6 +1,6 @@
 import { and, asc, desc, eq, inArray, isNotNull, isNull, lt, or, sql } from "drizzle-orm";
 import { accounts, activityLog, debtPlans, goalDeposits, goals, nameRules, transactions } from "@/db/schema";
-import { formatShort, type ISODate } from "@/lib/dates";
+import { formatShort, monthOf, type ISODate } from "@/lib/dates";
 import { validName } from "@/lib/finance/names";
 import { FREQUENCY_LABEL, type Frequency } from "@/lib/finance/recurring";
 import { dollarsExact } from "@/lib/money";
@@ -8,7 +8,8 @@ import type { ActivityItem } from "@/lib/types";
 import type { Ctx } from "./auth";
 import { HttpError } from "./http";
 import { createManualBill, deleteManualBill, nextDue, type BillFrequencyChoice } from "./manual-bills";
-import { createGoal, deleteDeposit, setDebtPlan, updateGoal } from "./mutations";
+import { createGoal, deleteDeposit, deleteGoal, setDebtPlan, updateGoal } from "./mutations";
+import { takeBack } from "./game";
 import { createNameRule, deleteNameRule, loadNamer, renameRule, restoreNameRule, type NameUndo } from "./names";
 
 /*
@@ -270,7 +271,7 @@ async function reverse(ctx: Ctx, undo: Undo) {
       // Only take a goal away if nothing has been put into it since: that money would vanish from view.
       const [{ count }] = await ctx.db.select({ count: sql<number>`count(*)::int` }).from(goalDeposits).where(and(eq(goalDeposits.goalId, undo.goalId), eq(goalDeposits.userId, ctx.userId)));
       if (count > 0) throw new HttpError(409, "Money has been put into that goal since, so it wasn’t removed. Delete it from the goal itself if you’re sure.");
-      await ctx.db.delete(goals).where(and(eq(goals.id, undo.goalId), eq(goals.userId, ctx.userId)));
+      await deleteGoal(ctx, undo.goalId);
       return;
     }
     case "goal.restore": {
@@ -294,6 +295,7 @@ async function reverse(ctx: Ctx, undo: Undo) {
       if (undo.changes.monthlyPayment && (plan?.monthlyPayment ?? null) === undo.changes.monthlyPayment.to) back.monthlyPayment = undo.changes.monthlyPayment.from;
       if (Object.keys(back).length === 0) throw new HttpError(409, "That loan has been changed again since, so there’s nothing to put back.");
       await setDebtPlan(ctx, undo.accountId, back);
+      await takeBack(ctx, "plan", `${monthOf(ctx.today)}:${undo.accountId}`);
       return;
     }
     case "name.undo": {
