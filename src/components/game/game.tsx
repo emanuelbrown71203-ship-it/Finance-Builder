@@ -1,51 +1,21 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useRef, useSyncExternalStore } from "react";
 import { mutate } from "swr";
 import { celebrate } from "../celebrate";
 import { postQuietly, useApi } from "../use-api";
 import type { Badge, GamePayload, GameWin } from "@/lib/game/progress";
-import { LevelBlock, XpBar } from "./level";
 import { play, primeSounds } from "./sounds";
 import { Sprite, type SpriteId } from "./sprites";
 
 /*
- * The game layer in the app: a strip on Home with the level, XP and streak;
- * a "+XP" note whenever something earns some; a level-up party; and a note for
- * each new badge. The server decides what earns XP (src/server/game.ts); this
+ * The game layer in the app: a "+XP" note whenever something earns some, a
+ * level-up party, and a note for each new badge. (Your level shows on the You
+ * tab, at the top of Home, and in full on the You screen.) The server decides what earns XP (src/server/game.ts); this
  * only notices the total going up after a change and says so.
  */
 
 export const GAME_URL = "/api/game";
-
-/** The strip at the top of Home. Taps through to Progress. */
-export function GameStrip() {
-  const { data, error } = useApi<GamePayload>(GAME_URL);
-  if (error && !data) return null;
-  if (!data) return <div aria-hidden className="mb-4 h-[76px] rounded-sheet border border-line-soft bg-sheet shadow-card" />;
-  const toGo = data.needed - data.into;
-  return (
-    <Link
-      href="/progress"
-      aria-label={`Level ${data.level}. ${toGo} XP to level ${data.level + 1}. ${data.streak > 0 ? `${data.streak}-day streak.` : ""} See your progress and badges.`}
-      className="mb-4 flex items-center gap-3 rounded-sheet border border-line-soft bg-sheet p-3 pr-4 shadow-card active:bg-sunk"
-    >
-      <LevelBlock level={data.level} size={52} />
-      <span className="min-w-0 flex-1">
-        <span className="flex items-baseline justify-between gap-2">
-          <span className="truncate font-bold">{toGo} XP to level {data.level + 1}</span>
-          {data.todayXp > 0 && <span className="pixel shrink-0 text-[8px] text-accent-text">+{data.todayXp} today</span>}
-        </span>
-        <XpBar into={data.into} needed={data.needed} className="mt-2" />
-      </span>
-      <span aria-hidden className={data.streak > 0 ? "flex flex-col items-center gap-1" : "flex flex-col items-center gap-1 opacity-50"}>
-        <Sprite id="flame" size={24} locked={data.streak === 0} />
-        <span className="pixel text-[10px]">{data.streak}</span>
-      </span>
-    </Link>
-  );
-}
 
 /* ---------- Notes that pop up ---------- */
 
@@ -171,8 +141,13 @@ export function GameWatcher() {
       const fresh = data.recent.filter((w) => !seen.has(w.id));
       const newest = fresh[0];
       const checkIn = fresh.length > 0 && fresh.every((w) => w.kind === "checkin" || w.kind === "nospend");
-      const text = !newest ? "Nice work" : newest.kind === "checkin" ? `Checked in: ${data.streak}-day streak` : winText(newest);
-      pushNote({ kind: "xp", xp: gained, text, more: Math.max(0, fresh.length - 1) });
+      // A new month's first visit brings last month's budget results with the check-in: lead with those.
+      const kept = fresh.filter((w) => w.kind === "under");
+      const swept = fresh.find((w) => w.kind === "allunder");
+      const lead = swept ? `Kept every budget in ${swept.label}` : kept.length > 0 ? `Stayed under budget in ${kept.length} ${kept.length === 1 ? "category" : "categories"}` : null;
+      const text = lead ?? (!newest ? "Nice work" : newest.kind === "checkin" ? `Checked in: ${data.streak}-day streak` : winText(newest));
+      const counted = lead ? kept.length + (swept ? 1 : 0) : 1;
+      pushNote({ kind: "xp", xp: gained, text, more: Math.max(0, fresh.length - counted) });
       play(checkIn ? "streak" : "coin");
     }
     if (data.level > old.level) {

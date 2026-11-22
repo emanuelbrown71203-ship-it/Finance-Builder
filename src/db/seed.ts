@@ -318,6 +318,9 @@ export async function seedDemo(db: DB, today: ISODate, now: Date = new Date()): 
       userId: DEMO_USER_ID,
       category,
       monthlyLimit: cents(limit),
+      // Set up months ago; groceries carries what's left from month to month.
+      createdAt: new Date(`${addMonths(today, -6)}T15:00:00Z`),
+      rolloverSince: category === "groceries" ? monthOf(addMonths(today, -2)) : null,
     })),
   );
 

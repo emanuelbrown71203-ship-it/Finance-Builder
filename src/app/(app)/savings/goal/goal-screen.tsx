@@ -1,5 +1,7 @@
 "use client";
 
+import { XpTag } from "@/components/game/level";
+import { WINS } from "@/lib/game/progress";
 import { Check, CircleDashed, Flag, Lightbulb, X } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -101,6 +103,7 @@ export function GoalScreen() {
             {!done && (
               <Button variant="primary" onClick={() => setSheet({ kind: "add", goal })}>
                 Add money
+                <XpTag xp={WINS.save.xp} />
               </Button>
             )}
             {goal.saved > 0 && <Button onClick={() => setSheet({ kind: "withdraw", goal })}>Take some out</Button>}

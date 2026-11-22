@@ -1,8 +1,6 @@
 "use client";
 
-import { ArrowDownRight, ArrowUpRight, CalendarCheck, ChevronRight, X } from "lucide-react";
-import Link from "next/link";
-import { useSyncExternalStore } from "react";
+import { ArrowDownRight, ArrowUpRight } from "lucide-react";
 import { addDays, weekday, type ISODate } from "@/lib/dates";
 
 const KEY = "passbook-recap-seen";
@@ -18,47 +16,6 @@ export function markRecapSeen(today: ISODate) {
     localStorage.setItem(KEY, weekId(today));
   } catch {}
   window.dispatchEvent(new Event(EVENT));
-}
-
-function useSeenWeek(): string | null {
-  return useSyncExternalStore(
-    (l) => {
-      window.addEventListener(EVENT, l);
-      return () => window.removeEventListener(EVENT, l);
-    },
-    () => {
-      try {
-        return localStorage.getItem(KEY);
-      } catch {
-        return null;
-      }
-    },
-    // Until the page is live in the browser, assume it has been seen so nothing flashes.
-    () => "unknown",
-  );
-}
-
-/** On Home, once a week: a nudge that last week's recap is ready. It goes away once opened or closed. */
-export function RecapCard({ today }: { today: ISODate }) {
-  const seen = useSeenWeek();
-  if (seen === "unknown" || seen === weekId(today)) return null;
-  return (
-    <div className="mb-4 flex items-center gap-1 rounded-sheet border border-line-soft bg-sheet p-1.5 shadow-card">
-      <Link href="/recap" className="flex min-h-[56px] min-w-0 flex-1 items-center gap-3 rounded-2xl px-2 active:bg-sunk">
-        <span aria-hidden className="inline-flex size-10 shrink-0 items-center justify-center rounded-xl bg-sky text-sky-ink">
-          <CalendarCheck size={20} />
-        </span>
-        <span className="min-w-0 flex-1">
-          <span className="block font-bold">Your week in money is ready</span>
-          <span className="block truncate text-small text-ink-3">What you spent, saved and paid last week</span>
-        </span>
-        <ChevronRight size={18} className="shrink-0 text-ink-3" />
-      </Link>
-      <button type="button" aria-label="Not now" onClick={() => markRecapSeen(today)} className="inline-flex size-11 shrink-0 items-center justify-center rounded-full text-ink-3 active:bg-sunk">
-        <X size={18} />
-      </button>
-    </div>
-  );
 }
 
 /** More or less than before: always an arrow and words, never colour alone. Spending less is the good direction. */

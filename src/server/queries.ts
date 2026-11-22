@@ -6,6 +6,7 @@ import { addDays, addMonths, addMonthsToMonth, dayOfMonth, daysInMonth, diffDays
 import { goalIdeas, goalPlan } from "@/lib/finance/goalplan";
 import { dollars, dollarsExact } from "@/lib/money";
 import { buildMonthPlan, spendingByCategory } from "@/lib/finance/plan";
+import { budgetPlan, categoryBudgets, monthProgress, suggestLimits, type Limit } from "@/lib/finance/budget";
 import { payoffPlan, payoffOrder, type Debt, type Strategy } from "@/lib/finance/payoff";
 import { FREQUENCY_LABEL, detectRecurring, monthlyEquivalent, seriesKeyFor, upcomingBetween, type RecurringKind } from "@/lib/finance/recurring";
 import { cancelHelp, isKnownSubscription } from "@/lib/finance/subscriptions";
@@ -22,7 +23,6 @@ import type {
   RecapPayload,
   AccountsPayload,
   BudgetPayload,
-  BudgetRow,
   GoalDetailPayload,
   GoalView,
   GoalsPayload,
@@ -295,50 +295,76 @@ export async function getRecurring(ctx: Ctx): Promise<RecurringPayload> {
 
 /* ---------- budget ---------- */
 
-function budgetRows(history: { date: ISODate; amount: number; category: string }[], limits: Map<string, number>, month: string): BudgetRow[] {
-  const inMonth = (m: string) => history.filter((t) => monthOf(t.date) === m);
-  const current = new Map(spendingByCategory(inMonth(month)).map((c) => [c.category, c.spent]));
-  const last = new Map(spendingByCategory(inMonth(addMonthsToMonth(month, -1))).map((c) => [c.category, c.spent]));
-  const prior3 = [1, 2, 3].map((n) => new Map(spendingByCategory(inMonth(addMonthsToMonth(month, -n))).map((c) => [c.category, c.spent])));
-
-  const keys = new Set([...current.keys(), ...limits.keys()]);
-  return [...keys]
-    .map((category) => ({
-      category,
-      spent: current.get(category) ?? 0,
-      limit: limits.get(category) ?? null,
-      lastMonth: last.get(category) ?? 0,
-      average: Math.round(prior3.reduce((sum, m) => sum + (m.get(category) ?? 0), 0) / 3),
-    }))
-    .sort((a, b) => b.spent - a.spent);
+/** The ids of every bill and subscription payment: they're planned on their own, not counted against a category's budget. */
+function billIdsOf(bundle: RecurringBundle): Set<string> {
+  return new Set(bundle.series.filter((s) => s.kind !== "income").flatMap((s) => s.history.map((h) => h.id)));
 }
 
-async function loadLimits(ctx: Ctx): Promise<Map<string, number>> {
+export async function loadLimits(ctx: Ctx): Promise<(Limit & { createdAt: Date })[]> {
   const rows = await ctx.db.select().from(budgets).where(eq(budgets.userId, ctx.userId));
-  return new Map(rows.map((b) => [b.category, b.monthlyLimit]));
+  return rows.map((b) => ({ category: b.category, limit: b.monthlyLimit, rolloverSince: b.rolloverSince, createdAt: b.createdAt }));
+}
+
+/** What goals are set to put aside this month. */
+const savingPlanned = (goalList: GoalView[]) => goalList.filter((g) => g.saved < g.target).reduce((s, g) => s + g.monthlyContribution, 0);
+
+/** Everything the budget screen and Home need for one month, from one load. */
+function budgetFor(ctx: Ctx, bundle: RecurringBundle, limits: Limit[], goalList: GoalView[], month: string) {
+  const rows = categoryBudgets({ month, today: ctx.today, history: bundle.history, billIds: billIdsOf(bundle), limits });
+  const monthPlan = buildMonthPlan({ month, today: ctx.today, transactions: bundle.history.filter((t) => monthOf(t.date) === month), recurring: bundle.series, savingsPlanned: savingPlanned(goalList) });
+  const plan = { ...budgetPlan({ income: monthPlan.incomeExpected, bills: monthPlan.billsExpected, saving: monthPlan.savingsPlanned, rows }), everydaySpent: monthPlan.everydaySpent, leftToSpend: monthPlan.leftToSpend };
+  return { rows, monthPlan, plan };
 }
 
 export async function getBudget(ctx: Ctx, month: string): Promise<BudgetPayload> {
-  const from = monthStart(addMonthsToMonth(month, -5));
-  const [history, limits] = await Promise.all([analysisRows(ctx, from), loadLimits(ctx)]);
-  const rows = budgetRows(history, limits, month);
+  const [bundle, limits, goalList] = await Promise.all([loadRecurring(ctx), loadLimits(ctx), listGoals(ctx)]);
+  const { rows, monthPlan, plan } = budgetFor(ctx, bundle, limits, goalList, month);
   const months = Array.from({ length: 6 }, (_, i) => addMonthsToMonth(month, i - 5)).map((m) => {
-    const txs = history.filter((t) => monthOf(t.date) === m);
+    const txs = bundle.history.filter((t) => monthOf(t.date) === m);
     return {
       month: m,
       income: txs.filter((t) => t.category === "income").reduce((s, t) => s + t.amount, 0),
       spending: spendingByCategory(txs).reduce((s, c) => s + c.spent, 0),
     };
   });
+  const progress = monthProgress(month, ctx.today);
+  // A starting budget is offered for this month while some everyday spending has no limit yet.
+  const room = plan.income - plan.bills - plan.saving;
+  const suggested = progress.isCurrent ? suggestLimits(rows, room > 0 ? room : null) : null;
+  const missing = suggested ? suggested.limits.filter((l) => !rows.some((r) => r.category === l.category && r.limit !== null)) : [];
   return {
     month,
     today: ctx.today,
+    isCurrent: progress.isCurrent,
+    daysLeft: progress.daysLeft,
+    days: progress.days,
     rows,
-    totalSpent: rows.reduce((s, r) => s + r.spent, 0),
+    plan,
+    totalSpent: rows.reduce((s, r) => s + Math.max(0, r.spent), 0),
     totalLimit: rows.reduce((s, r) => s + (r.limit ?? 0), 0),
     income: months[months.length - 1].income,
     months,
+    monthPlan: progress.isCurrent ? monthPlan : null,
+    suggestion: suggested && missing.length > 0 ? { limits: suggested.limits, trimmed: suggested.trimmed, room } : null,
   };
+}
+
+/**
+ * Last month's budgets, judged once it's over: which limits held. Only limits
+ * that were set by the 8th of that month count, and only when the bank
+ * reported enough of that month to judge it.
+ */
+export async function lastMonthBudgets(ctx: Ctx): Promise<{ month: string; kept: string[]; judged: number } | null> {
+  const month = addMonthsToMonth(monthOf(ctx.today), -1);
+  const [bundle, limits] = await Promise.all([loadRecurring(ctx), loadLimits(ctx)]);
+  const days = new Set(bundle.history.filter((t) => monthOf(t.date) === month).map((t) => t.date));
+  if (days.size < 10) return null;
+  const cutoff = new Date(`${month}-08T00:00:00Z`);
+  const eligible = limits.filter((l) => l.createdAt < cutoff);
+  if (eligible.length === 0) return null;
+  const rows = categoryBudgets({ month, today: ctx.today, history: bundle.history, billIds: billIdsOf(bundle), limits: eligible });
+  const judged = rows.filter((r) => r.limit !== null);
+  return { month, kept: judged.filter((r) => (r.left ?? -1) >= 0).map((r) => r.category), judged: judged.length };
 }
 
 /* ---------- net worth ---------- */
@@ -582,15 +608,7 @@ export async function getOverview(ctx: Ctx): Promise<Overview> {
     ctx.db.select({ total: sql<number>`coalesce(sum(coalesce(${holdings.costBasis}, ${holdings.value})), 0)::float8` }).from(holdings).where(eq(holdings.userId, ctx.userId)),
   ]);
 
-  const plan = buildMonthPlan({
-    month,
-    today: ctx.today,
-    transactions: bundle.history.filter((t) => monthOf(t.date) === month),
-    recurring: bundle.series,
-    savingsPlanned: goalList.filter((g) => g.saved < g.target).reduce((s, g) => s + g.monthlyContribution, 0),
-  });
-
-  const rows = budgetRows(bundle.history, limits, month);
+  const { rows, monthPlan: plan, plan: budget } = budgetFor(ctx, bundle, limits, goalList, month);
   const due = upcomingBills(bundle, ctx.today, 30);
   const end = worth.series[worth.series.length - 1] ?? { assets: 0, debts: 0, net: 0 };
 
@@ -616,8 +634,11 @@ export async function getOverview(ctx: Ctx): Promise<Overview> {
     attention.push({ kind: "new", title: `${p.name} looks like a new subscription`, detail: `${dollarsExact(-p.amount)} on ${formatShort(p.date)}`, href: "/bills" });
   }
   for (const row of rows) {
-    if (row.limit !== null && row.spent > row.limit) {
-      attention.push({ kind: "budget", title: `${category(row.category).label} is over its limit`, detail: `${dollars(row.spent)} spent of ${dollars(row.limit)}`, href: "/budget" });
+    const name = category(row.category).label;
+    if (row.status === "over" && row.left !== null) {
+      attention.push({ kind: "budget", title: `${name} is over budget`, detail: `${dollars(-row.left)} over, with ${dollars(row.spent)} spent`, href: `/budget?category=${row.category}` });
+    } else if (row.status === "watch" && row.limit !== null) {
+      attention.push({ kind: "pace", title: `${name} is on pace to go over`, detail: `${dollars(row.left ?? 0)} left, heading for about ${dollars(row.forecast)} of ${dollars(row.limit + row.carried)}`, href: `/budget?category=${row.category}` });
     }
   }
 
@@ -631,9 +652,10 @@ export async function getOverview(ctx: Ctx): Promise<Overview> {
     upcoming: due.slice(0, 5),
     upcomingTotal: due.reduce((s, b) => s - b.amount, 0),
     budget: {
-      rows: rows.filter((r) => r.limit !== null).slice(0, 5),
-      totalSpent: rows.filter((r) => r.limit !== null).reduce((s, r) => s + r.spent, 0),
-      totalLimit: rows.reduce((s, r) => s + (r.limit ?? 0), 0),
+      rows: rows.filter((r) => r.limit !== null),
+      totalSpent: budget.budgetedSpent,
+      totalLimit: budget.budgeted,
+      unplanned: budget.unplanned,
     },
     goals: goalList,
     investments: {

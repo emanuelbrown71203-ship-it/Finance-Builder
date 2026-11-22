@@ -1,5 +1,6 @@
 "use client";
 
+import { SectionTabs } from "@/components/nav";
 import { PencilLine, Search, SlidersHorizontal } from "lucide-react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
@@ -107,7 +108,7 @@ function Transactions() {
   return (
     <>
       <PageHeader
-        title="Transactions"
+        title="Spending"
         lead="Every charge and deposit, newest first. Tap one to rename it, change its category or add a note."
         action={
           <Link href="/transactions/names" className="inline-flex min-h-10 items-center gap-1.5 rounded-control border border-line bg-sheet px-3.5 text-small font-bold text-ink active:scale-[0.98] active:bg-sunk">
@@ -116,6 +117,7 @@ function Transactions() {
           </Link>
         }
       />
+      <SectionTabs />
 
       {/* On a phone: a search box and one Filter button. The choices open in a sheet. */}
       <div className="mb-4 flex gap-2 lg:hidden">

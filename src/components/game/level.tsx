@@ -37,3 +37,23 @@ export function XpBar({ into, needed, blocks = 10, label = "XP toward the next l
     </div>
   );
 }
+
+/** The level as a small pixel block: the You tab's icon, so your level is in view on every screen. */
+export function LevelChip({ level, size = 24 }: { level: number | null; size?: number }) {
+  return (
+    <span aria-hidden className="inline-flex shrink-0 items-center justify-center bg-accent text-on-accent" style={{ width: size, height: size, borderRadius: Math.round(size / 4), boxShadow: `inset 0 -${Math.max(2, Math.round(size / 10))}px 0 var(--accent-strong)` }}>
+      <span className="pixel" style={{ fontSize: level !== null && level >= 10 ? Math.round(size / 3) : Math.round(size / 2.4) }}>
+        {level ?? ""}
+      </span>
+    </span>
+  );
+}
+
+/** A small "+50 XP" on a button that earns some, so the win is in view before it's done. */
+export function XpTag({ xp, className }: { xp: number; className?: string }) {
+  return (
+    <span aria-label={`earns ${xp} XP`} className={cx("pixel ml-1 text-[8px] leading-none opacity-80", className)}>
+      +{xp} XP
+    </span>
+  );
+}

@@ -29,12 +29,18 @@ If a rule here and an app's own existing look disagree, the app's existing look 
 
 ## 3. Getting around
 
-- **Phone and upright tablet: a bar along the bottom.** Four sections plus **More**. Icon above a short
+- **Phone and upright tablet: a bar along the bottom with every place in it, at most five.** No "More"
+  menu: when an app grows, group its screens into places instead of hiding them. Icon above a short
   label. The active one is tinted with its section's colour. A count badge when something is waiting.
-- **Wide screens: a menu down the left side** (about 230–260px) instead of the bottom bar.
-- **More** opens a sheet listing the remaining screens, each with **one line saying what it is for**.
-- **Settings is not a tab.** It opens from More (or a gear) and holds Appearance, the account and the
-  version number.
+- **A place with several screens switches between them with tabs under its title** (like Budget /
+  Transactions), one tap each. Never more than four tabs.
+- **Wide screens: a menu down the left side** (about 230–260px) with the same places.
+- **The last place is "You"**: the person's level and badges up top (in apps with the game layer), then
+  one-tap rows to the recap, accounts, history and Settings. Its tab shows the level instead of an icon.
+- **Settings is not a tab.** It opens from You (or a gear) and holds Appearance, the account and the
+  version number, with a Back button.
+- **Home is short:** the one number, what needs a look, a few things coming up, the latest few. Everything
+  else lives in its place, a tap away. Don't grow Home with every new feature.
 - Every screen has a **big bold title pinned to the top** on a phone, with at most one action beside it.
 - A label must say what the thing does ("Equipment Issues", not "Notes"). If the owner has to guess
   what a button does, rename it.
@@ -164,7 +170,8 @@ Ask before anything that changes or deletes real data.
 | Pattern | In Passbook | First built in |
 | --- | --- | --- |
 | Pull to refresh | `src/components/pull-to-refresh.tsx` | Tasks for Two, YouTube Dashboard |
-| Bottom bar, More sheet, side menu | `src/components/shell.tsx` | all four |
+| Bottom bar, side menu | `src/components/shell.tsx` | all four |
+| The five places and the tabs under a title | `src/components/nav.tsx` | Passbook |
 | Sheet pop-up with drag handle | `Dialog` in `src/components/ui.tsx` | Roux |
 | Undo messages | `toast()` in `src/components/ui.tsx` | Tasks for Two, Roux, YouTube Dashboard |
 | "Are you sure?" for permanent things | `confirm()` in `src/components/ui.tsx` | Tasks for Two, HOH Hub |

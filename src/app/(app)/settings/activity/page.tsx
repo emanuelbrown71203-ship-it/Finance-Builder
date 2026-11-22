@@ -36,7 +36,7 @@ export default function ActivityPage() {
 
   return (
     <>
-      <PageHeader title="Activity" back={{ href: "/settings", label: "Settings" }} lead="What Nickel and Claude changed when you asked them to. Undo any of it here for 30 days." />
+      <PageHeader title="Activity" back={{ href: "/you", label: "You" }} lead="What Nickel and Claude changed when you asked them to. Undo any of it here for 30 days." />
       {error && !data ? (
         <ErrorNote message={error.message} onRetry={() => mutate()} />
       ) : !data ? (

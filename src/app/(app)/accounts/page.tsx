@@ -96,7 +96,7 @@ export default function AccountsPage() {
 
   return (
     <>
-      <PageHeader title="Accounts" lead="The banks, cards, lenders and brokerages feeding Passbook. Add as many as you have." action={<LinkBankButton />} />
+      <PageHeader title="Accounts" back={{ href: "/you", label: "You" }} lead="The banks, cards, lenders and brokerages feeding Passbook. Add as many as you have." action={<LinkBankButton />} />
 
       <div className="grid grid-cols-1 items-start gap-5 lg:grid-cols-[1.6fr_1fr]">
         <div className="grid grid-cols-1 gap-5">

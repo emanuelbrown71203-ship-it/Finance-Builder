@@ -125,6 +125,9 @@ export const budgets = pgTable(
     userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
     category: text("category").notNull(),
     monthlyLimit: cents("monthly_limit").notNull(),
+    /** With rollover on, the first month (YYYY-MM) whose leftover or overspend carries into the next. Null: off. */
+    rolloverSince: text("rollover_since"),
+    createdAt: createdAt(),
   },
   (t) => [uniqueIndex("budgets_user_category_idx").on(t.userId, t.category)],
 );

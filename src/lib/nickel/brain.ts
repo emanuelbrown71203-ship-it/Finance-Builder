@@ -33,7 +33,8 @@ export type NickelInput = {
   /** Money in today (a paycheck), if any. */
   paidToday: number;
   attention: { kind: string; title: string; detail: string }[];
-  budget: { category: string; label: string; spent: number; limit: number | null }[];
+  /** Everyday spending against each budget (with anything carried over), and whether it's heading over at its usual pace. */
+  budget: { category: string; label: string; spent: number; limit: number | null; onPaceOver?: boolean }[];
   goals: { id: string; name: string; saved: number; target: number; status: string; gap: number | null; perMonth: number | null; perPayday: number | null; targetDate: ISODate | null }[];
   upcoming: { name: string; date: ISODate; amount: number }[];
   /** Days in a row, up to yesterday, with no everyday spending. */
@@ -93,6 +94,7 @@ export function thinkAbout(input: NickelInput): { mood: Mood; tips: Tip[] } {
     if (!b.limit) continue;
     const k = `budget-${b.category}`;
     if (b.spent > b.limit) say({ key: k, priority: 2, mood: "worried", text: `${b.label} is ${money(b.spent - b.limit)} over its ${money(b.limit)} limit this month.`, href: "/budget", link: "See budget" });
+    else if (b.onPaceOver && input.daysLeft > 3) say({ key: k, priority: 3, mood: "curious", text: `${b.label} is heading over its ${money(b.limit)} budget at this pace: ${money(b.limit - b.spent)} left for ${input.daysLeft} days.`, href: "/budget", link: "See budget" });
     else if (b.spent >= b.limit * 0.9 && input.daysLeft > 3) say({ key: k, priority: 3, mood: "curious", text: `${b.label} is at ${Math.round((b.spent / b.limit) * 100)}% of its limit with ${input.daysLeft} days to go.`, href: "/budget", link: "See budget" });
   }
 

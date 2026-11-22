@@ -22,7 +22,10 @@ Sample data resets each day.
 Passbook follows the same house style as the owner's other apps (written down in
 `docs/house-style.md`):
 
-- A bar along the bottom on a phone, a menu down the side on a wide screen.
+- Five places, all in the bar along the bottom on a phone (a menu down the side on a wide screen):
+  **Home**, **Spending** (Budget and Transactions), **Bills**, **Wealth** (Net worth, Savings,
+  Investing, Debt) and **You** (your level and badges, the weekly recap, accounts, names, activity and
+  Settings). No "More" menu. Places with several screens switch with tabs under the title.
 - **Pull down at the top of any screen to refresh.** It checks the banks, reloads every number and
   loads a newer version of the app if one is out.
 - Pop-ups slide up from the bottom and can be dragged down to close.
@@ -32,22 +35,32 @@ Passbook follows the same house style as the owner's other apps (written down in
 
 ## The screens
 
-| Screen | What it does |
-| --- | --- |
-| Home | What's left to spend this month after bills and savings, what needs a look (bills due, price increases, categories over their limit), what's coming up and the latest activity. |
-| Transactions | Everything from every account, live. Search and filter. Tap one to rename it, change its category or add a note. |
-| Names | Bank code that could be clearer, with a suggested name to keep or change, and every name you've given. Reached from Transactions and Settings. |
-| Bills | Recurring bills, subscriptions and income, found from history, plus any you add by hand (repeating or a one-off coming up). Upcoming due dates, price-increase alerts, rename, "I cancelled this". |
-| Budget | Spending by category against monthly limits, month over month, and six months of money in vs money out. |
-| Net worth | What you own minus what you owe over time, by account. Add things no bank reports (a car, a house) by hand. |
-| Savings | Savings balance, monthly saving history, and goals. Each goal with a date gets a **track**: what to put away a month, a week and each payday to make it, whether you're ahead or behind, month-end checkpoints, 25/50/75/100% milestones, and ideas for where the money could come from. |
-| Investing | Total, trend, split by type, and holdings with gain or loss. |
-| Debt payoff | When the loans will be paid off at today's payments, and what a little extra each month changes. |
-| Weekly recap | Last week in money: spent against the week before, money in, bills paid, no-spend days. |
-| Progress | Your level, XP toward the next one, check-in streak, badges (won ones in colour, the rest with how to win them), what earns XP and where to go to do it, and the latest wins. |
-| Accounts | Linked banks, their status, and linking or removing one. |
-| Settings | Light or dark, Face ID sign-in, Connect to Claude, Tasks for Two, Names, Activity, remembered categories, your account, version. |
-| Activity | What Nickel and Claude changed when asked, newest first, each with Undo for 30 days. |
+| Place | Screen | What it does |
+| --- | --- | --- |
+| Home | Home | What's left to spend this month after bills and savings, what needs a look (bills due, price rises, budgets over or on pace to go over, the weekly recap), your budgets that need a look most, what's coming up and the latest activity. Your level sits at the top. |
+| Spending | Budget | The plan for the month's money (money in, bills, saving for goals, everyday budgets, and what has no job yet) and each everyday category: what's left, what that is a day, where it's heading at the usual pace, and On track / Heads up / Over. Tap a category for its charges, six months, its budget and rollover. "Suggest a budget" fills in amounts from the last three months, sized to fit. The month's spending pace chart and six months of money in and out. |
+| Spending | Transactions | Everything from every account, live. Search and filter. Tap one to rename it, change its category or add a note. |
+| Spending | Names | Bank code that could be clearer, with a suggested name to keep or change, and every name you've given. Reached from Transactions and You. |
+| Bills | Bills | Recurring bills, subscriptions and income, found from history, plus any you add by hand (repeating or a one-off coming up). Upcoming due dates, price-increase alerts, rename, "I cancelled this". |
+| Wealth | Net worth | What you own minus what you owe over time, by account. Add things no bank reports (a car, a house) by hand. |
+| Wealth | Savings | Savings balance, monthly saving history, and goals. Each goal with a date gets a **track**: what to put away a month, a week and each payday to make it, whether you're ahead or behind, month-end checkpoints, 25/50/75/100% milestones, and ideas for where the money could come from. |
+| Wealth | Investing | Total, trend, split by type, and holdings with gain or loss. |
+| Wealth | Debt | When the loans will be paid off at today's payments, and what a little extra each month changes. |
+| You | You | Your level, XP, streak and badges, then one tap to the weekly recap, accounts, names, activity and Settings. |
+| You | Badges | Every badge (won ones in colour, the rest with how to win them), what earns XP and where to go to do it, and the latest wins. |
+| You | Weekly recap | Last week in money: spent against the week before, money in, bills paid, no-spend days. |
+| You | Accounts | Linked banks, their status, and linking or removing one. |
+| You | Activity | What Nickel and Claude changed when asked, newest first, each with Undo for 30 days. |
+| You | Settings | Light or dark, celebrations, game sounds, Nickel, Face ID sign-in, Connect to Claude, Tasks for Two, remembered categories, your account, version. |
+
+**How the budget works.** A category's budget is for everyday spending; bills and subscriptions come out
+of the month first and are planned in Bills, so Netflix never eats the entertainment budget (it's shown
+beside it). The plan adds up to Home's number: what's left in your budgets, plus money not planned yet,
+less spending with no budget, is "left to spend". **Rollover** (per category) carries what's left, or
+what was overspent, into the next month. Each category's forecast blends its usual pace (the last three
+months) with this month's. Worked out on read by `src/lib/finance/budget.ts`; only the limits and
+rollover choice are stored. At the start of each month, every budget kept last month earns XP, and
+keeping all of them earns more ("On Budget" and "Clean Sweep" badges).
 
 Smaller things that make it easier to live with:
 

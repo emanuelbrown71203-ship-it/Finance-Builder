@@ -1,5 +1,7 @@
 "use client";
 
+import { XpTag } from "@/components/game/level";
+import { WINS } from "@/lib/game/progress";
 import { ExternalLink, PencilLine, Plus } from "lucide-react";
 import { useState } from "react";
 import { BillForm, type SavedBill } from "@/components/bill-form";
@@ -174,6 +176,7 @@ function SeriesDialog({ series, today, onClose: close }: { series: RecurringView
               ) : (
                 <Button size="sm" disabled={busy} onClick={() => update({ cancelled: true }, `${series.name} marked as cancelled`)}>
                   I cancelled this
+                  <XpTag xp={WINS.cancel.xp} />
                 </Button>
               )}
               <Button size="sm" disabled={busy} onClick={() => update({ kind: series.kind === "bill" ? "subscription" : "bill" }, `${series.name} moved to ${series.kind === "bill" ? "subscriptions" : "bills"}`)}>
@@ -264,6 +267,7 @@ function ManualBillDialog({ series, today, onClose }: { series: RecurringView; t
               ) : (
                 <Button size="sm" disabled={busy} onClick={() => cancel(true)}>
                   I cancelled this
+                  <XpTag xp={WINS.cancel.xp} />
                 </Button>
               ))}
             <Button size="sm" variant="danger" disabled={busy} onClick={remove}>

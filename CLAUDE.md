@@ -39,6 +39,11 @@ for it to be remembered and used whenever an app is built.
   "transfer" and is neither income nor spending.
 - Bills and subscriptions are worked out from transaction history each time; only the person's own
   choices ("I cancelled this") are stored.
+- **Budgets are for everyday spending.** Bill and subscription payments are planned separately and never
+  counted against a category's budget (`src/lib/finance/budget.ts`, worked out on read; only limits and
+  rollover are stored). The budget's plan must always add up to Home's "left to spend".
+- **The app has five places** (`src/components/nav.tsx`): Home, Spending, Bills, Wealth, You. No "More"
+  menu. A new screen joins a place (as a tab under its title, or a row on You), and Home stays short.
 - Bank access tokens are stored encrypted. The app can read accounts and can never move money.
 - **Nickel (the robo dog) points things out** from the person's own numbers, and never gives
   investment advice (no stock, fund or crypto picks); he says he isn't a financial advisor. His wording

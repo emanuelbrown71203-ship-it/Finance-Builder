@@ -1,18 +1,22 @@
 "use client";
 
-import { ArrowDownRight, ArrowUpRight, CalendarClock, ChevronRight, CircleCheck, Landmark, PieChart, PiggyBank, RefreshCcw, Scale, Sparkles, Tag as TagIcon, TrendingUp, type LucideIcon } from "lucide-react";
+import { CalendarCheck, CalendarClock, ChevronRight, CircleCheck, Gauge, Landmark, PieChart, RefreshCcw, Sparkles, Tag as TagIcon, type LucideIcon } from "lucide-react";
 import Link from "next/link";
-import type { ReactNode } from "react";
+import { useSyncExternalStore, type ReactNode } from "react";
 import { BillRow } from "@/components/bills";
-import { GameStrip } from "@/components/game/game";
-import { Runway } from "@/components/charts";
+import { BudgetBar, available } from "@/components/budget";
+import { CategoryIcon } from "@/components/category-icon";
+import { GAME_URL } from "@/components/game/game";
+import { LevelBlock } from "@/components/game/level";
 import { LinkBankButton } from "@/components/link-bank";
 import { LiveStatus } from "@/components/shell";
-import { RecapCard } from "@/components/recap";
+import { markRecapSeen, weekId } from "@/components/recap";
 import { TxList } from "@/components/transactions";
-import { EmptyState, ErrorNote, Fold, PageHeader, Sheet, SheetHeader, Skeleton, Tag, cx } from "@/components/ui";
+import { Button, EmptyState, ErrorNote, Fold, PageHeader, Sheet, SheetHeader, Skeleton, Tag, cx } from "@/components/ui";
 import { LIVE_INTERVAL, useApi, useNow } from "@/components/use-api";
+import { category } from "@/lib/categories";
 import { dayOfMonth, formatShort, monthEnd, monthName } from "@/lib/dates";
+import type { GamePayload } from "@/lib/game/progress";
 import { dollars } from "@/lib/money";
 import type { AttentionItem, Me, Overview } from "@/lib/types";
 
@@ -29,19 +33,6 @@ function More({ href, children }: { href: string; children: ReactNode }) {
       {children}
       <ChevronRight size={15} />
     </Link>
-  );
-}
-
-/** Up or down: always an arrow and a number, never colour alone. */
-function Change({ cents, period }: { cents: number; period: string }) {
-  if (cents === 0) return <span className="text-small text-ink-3">No change {period}</span>;
-  const up = cents > 0;
-  const Icon = up ? ArrowUpRight : ArrowDownRight;
-  return (
-    <span className="inline-flex items-center gap-0.5 text-small text-ink-2">
-      <Icon size={15} className={up ? "text-good" : "text-bad"} />
-      <span className="tabular font-bold text-ink">{dollars(Math.abs(cents))}</span>&nbsp;{period}
-    </span>
   );
 }
 
@@ -112,23 +103,11 @@ function Hero({ data }: { data: Overview }) {
           <PlanLine label="Set aside for goals" amount={plan.savingsPlanned} sign="−" />
           <PlanLine label="Spent so far" amount={plan.everydaySpent} sign="−" />
         </dl>
+        <Link href="/budget" className="mb-2 inline-flex min-h-11 items-center gap-1 font-bold underline underline-offset-4">
+          See it all in your budget <ChevronRight size={16} />
+        </Link>
       </Fold>
     </section>
-  );
-}
-
-function Tile({ href, section, icon: Icon, label, value, children }: { href: string; section: string; icon: LucideIcon; label: string; value: string; children: ReactNode }) {
-  return (
-    <Link href={href} className={cx(section, "flex min-w-0 flex-col rounded-sheet border border-line-soft bg-sheet p-3.5 shadow-card transition-transform active:scale-[0.98] sm:p-4")}>
-      <span className="flex items-center gap-2 text-small font-bold text-ink-2">
-        <span aria-hidden className="inline-flex size-8 shrink-0 items-center justify-center rounded-[10px]" style={{ background: "color-mix(in srgb, var(--sec) 14%, transparent)", color: "var(--sec)" }}>
-          <Icon size={17} strokeWidth={2.2} />
-        </span>
-        <span className="truncate">{label}</span>
-      </span>
-      <span className="figure mt-3 truncate text-[1.75rem] sm:text-[2rem]">{value}</span>
-      <span className="mt-1.5 truncate">{children}</span>
-    </Link>
   );
 }
 
@@ -137,14 +116,47 @@ const ATTENTION: Record<AttentionItem["kind"], { icon: LucideIcon; tone: string 
   due: { icon: CalendarClock, tone: "bg-pink text-pink-ink" },
   price: { icon: TagIcon, tone: "bg-canary text-canary-ink" },
   budget: { icon: PieChart, tone: "bg-pink text-pink-ink" },
+  pace: { icon: Gauge, tone: "bg-canary text-canary-ink" },
   renewal: { icon: RefreshCcw, tone: "bg-canary text-canary-ink" },
   new: { icon: Sparkles, tone: "bg-sky text-sky-ink" },
 };
 
-function NeedsALook({ items }: { items: AttentionItem[] }) {
+/** Whether this week's recap is ready and not opened yet (kept on this device). */
+function useRecapReady(today: string): boolean {
+  const seen = useSyncExternalStore(
+    (l) => {
+      window.addEventListener("passbook-recap-seen-change", l);
+      return () => window.removeEventListener("passbook-recap-seen-change", l);
+    },
+    () => {
+      try {
+        return localStorage.getItem("passbook-recap-seen");
+      } catch {
+        return null;
+      }
+    },
+    () => "unknown",
+  );
+  return seen !== "unknown" && seen !== weekId(today);
+}
+
+function NeedsALook({ items, today }: { items: AttentionItem[]; today: string }) {
+  const recap = useRecapReady(today);
   return (
     <Sheet className="order-3">
       <SheetHeader title="Needs a look" action={items.length > 0 ? <Tag tone="canary">{items.length}</Tag> : undefined} />
+      {recap && (
+        <Link href="/recap" onClick={() => markRecapSeen(today)} className="mb-2 flex min-h-[60px] items-center gap-3 rounded-2xl border border-line-soft px-2.5 py-2 active:bg-sunk">
+          <span aria-hidden className="inline-flex size-10 shrink-0 items-center justify-center rounded-xl bg-sky text-sky-ink">
+            <CalendarCheck size={19} />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block font-bold leading-snug">Your week in money is ready</span>
+            <span className="block truncate text-small text-ink-3">What you spent, saved and paid last week</span>
+          </span>
+          <ChevronRight size={18} className="shrink-0 text-ink-3" />
+        </Link>
+      )}
       {items.length === 0 ? (
         <p className="flex items-center gap-2 rounded-2xl bg-mint px-4 py-3 font-bold text-mint-ink">
           <CircleCheck size={19} /> All clear. Nothing needs you right now.
@@ -175,6 +187,45 @@ function NeedsALook({ items }: { items: AttentionItem[] }) {
   );
 }
 
+/** The budgets that need a look most, a tap from the whole budget. */
+function Budgets({ data }: { data: Overview }) {
+  const rows = data.budget.rows.slice(0, 4);
+  return (
+    <Sheet className="order-4 sec-budget">
+      <SheetHeader title="Budgets" hint={rows.length > 0 ? `${dollars(Math.max(0, data.budget.totalLimit - data.budget.totalSpent))} left across ${data.budget.rows.length} ${data.budget.rows.length === 1 ? "budget" : "budgets"}.` : undefined} action={rows.length > 0 ? <More href="/budget">All</More> : undefined} />
+      {rows.length > 0 ? (
+        <ul className="flex flex-col gap-1">
+          {rows.map((r) => (
+            <li key={r.category}>
+              <Link href={`/budget?category=${r.category}`} className="-mx-1 flex items-center gap-3 rounded-2xl px-1 py-2 active:bg-sunk">
+                <CategoryIcon category={r.category} />
+                <span className="min-w-0 flex-1">
+                  <span className="mb-1.5 flex items-baseline justify-between gap-3">
+                    <span className="truncate font-bold">{category(r.category).label}</span>
+                    <span className={cx("tabular shrink-0 text-small", (r.left ?? 0) < 0 ? "font-bold text-bad" : "text-ink-2")}>
+                      {(r.left ?? 0) < 0 ? `${dollars(-(r.left ?? 0))} over` : `${dollars(r.left ?? 0)} left of ${dollars(available(r))}`}
+                    </span>
+                  </span>
+                  <BudgetBar row={r} />
+                </span>
+              </Link>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <div className="flex flex-col items-start gap-3 rounded-control bg-sunk px-4 py-4">
+          <p className="text-ink-2">Give your everyday spending a plan. Passbook can suggest one from your last three months in one tap.</p>
+          <Link href="/budget">
+            <Button variant="primary" tabIndex={-1}>
+              Set up my budget
+            </Button>
+          </Link>
+        </div>
+      )}
+    </Sheet>
+  );
+}
+
 function Welcome() {
   return (
     <>
@@ -199,6 +250,7 @@ function greeting(now: number): string {
 export default function HomePage() {
   const { data, error, mutate } = useApi<Overview>("/api/overview", { refreshInterval: LIVE_INTERVAL });
   const { data: me } = useApi<Me>("/api/me");
+  const { data: game } = useApi<GamePayload>(GAME_URL);
   const now = useNow(60_000);
 
   if (error && !data) {
@@ -223,14 +275,20 @@ export default function HomePage() {
   }
   if (data.sync.linkedInstitutions === 0 && data.recent.length === 0) return <Welcome />;
 
-  const budgetLeft = data.budget.totalLimit - data.budget.totalSpent;
-  const goalsSaved = data.goals.reduce((s, g) => s + g.saved, 0);
-  const goalsTarget = data.goals.reduce((s, g) => s + g.target, 0);
   const hello = greeting(now);
 
   return (
     <>
-      <PageHeader title={hello === "Home" ? "Home" : `${hello}, ${data.firstName}`} />
+      <PageHeader
+        title={hello === "Home" ? "Home" : `${hello}, ${data.firstName}`}
+        action={
+          game ? (
+            <Link href="/you" aria-label={`Level ${game.level}: ${game.needed - game.into} XP to the next. See your progress.`} className="rounded-[12px] transition-transform active:scale-95">
+              <LevelBlock level={game.level} size={44} />
+            </Link>
+          ) : undefined
+        }
+      />
 
       {me?.demo && (
         <p className="mb-4 rounded-2xl border-2 border-dashed border-line bg-sheet/60 px-4 py-3 text-small text-ink-2 lg:hidden">
@@ -238,43 +296,22 @@ export default function HomePage() {
         </p>
       )}
 
-      <GameStrip />
-      <RecapCard today={data.today} />
-
       <div className="flex flex-col gap-4 xl:grid xl:grid-cols-[1.3fr_1fr] xl:items-start xl:gap-5">
         <div className="contents xl:flex xl:flex-col xl:gap-5">
           <Hero data={data} />
 
-          <Sheet className="order-6">
-            <SheetHeader title="Spending pace" hint="What’s left as the month goes on, against spending it evenly." />
-            <Runway plan={data.plan} height={240} />
-          </Sheet>
+          <Budgets data={data} />
 
-          <Sheet className="order-5">
+          <Sheet className="order-6">
             <SheetHeader title="Latest activity" hint="New transactions show up here as they happen." action={<More href="/transactions">All</More>} />
-            {data.recent.length > 0 ? <TxList transactions={data.recent.slice(0, 6)} today={data.today} grouped={false} /> : <EmptyState title="No transactions yet">They show up here as soon as your bank reports them.</EmptyState>}
+            {data.recent.length > 0 ? <TxList transactions={data.recent.slice(0, 5)} today={data.today} grouped={false} /> : <EmptyState title="No transactions yet">They show up here as soon as your bank reports them.</EmptyState>}
           </Sheet>
         </div>
 
         <div className="contents xl:flex xl:flex-col xl:gap-5">
-          <div className="order-2 grid grid-cols-2 gap-3 sm:gap-4">
-            <Tile href="/net-worth" section="sec-worth" icon={Scale} label="Net worth" value={dollars(data.netWorth.net)}>
-              <Change cents={data.netWorth.change} period="in 30 days" />
-            </Tile>
-            <Tile href="/investing" section="sec-investing" icon={TrendingUp} label="Investing" value={data.investments.total > 0 ? dollars(data.investments.total) : "None yet"}>
-              {data.investments.total > 0 ? <Change cents={data.investments.change} period="in 30 days" /> : <span className="text-small text-ink-3">Link an account</span>}
-            </Tile>
-            <Tile href="/savings" section="sec-savings" icon={PiggyBank} label="Saved for goals" value={goalsTarget > 0 ? dollars(goalsSaved) : "No goals"}>
-              <span className="tabular text-small text-ink-2">{goalsTarget > 0 ? `of ${dollars(goalsTarget)}` : "Add one to start"}</span>
-            </Tile>
-            <Tile href="/budget" section="sec-budget" icon={PieChart} label="Budget" value={data.budget.totalLimit > 0 ? dollars(Math.abs(budgetLeft)) : "No limits"}>
-              <span className={cx("tabular text-small", budgetLeft < 0 ? "font-bold text-bad" : "text-ink-2")}>{data.budget.totalLimit > 0 ? (budgetLeft >= 0 ? `left of ${dollars(data.budget.totalLimit)}` : "over your limits") : "Set one to track it"}</span>
-            </Tile>
-          </div>
+          <NeedsALook items={data.attention} today={data.today} />
 
-          <NeedsALook items={data.attention} />
-
-          <Sheet className="order-4">
+          <Sheet className="order-5">
             <SheetHeader title="Coming up" hint={data.upcomingTotal > 0 ? `${dollars(data.upcomingTotal)} due in the next 30 days.` : undefined} action={<More href="/bills">All bills</More>} />
             {data.upcoming.length > 0 ? (
               <ul className="flex flex-col gap-2">
@@ -286,27 +323,6 @@ export default function HomePage() {
               <EmptyState title="Nothing due soon">Bills are picked up on their own once a charge repeats a few times.</EmptyState>
             )}
           </Sheet>
-
-          {data.goals.length > 0 && (
-            <Sheet className="order-7">
-              <SheetHeader title="Savings goals" action={<More href="/savings">All</More>} />
-              <ul className="flex flex-col gap-4">
-                {data.goals.slice(0, 3).map((goal) => (
-                  <li key={goal.id}>
-                    <div className="mb-1.5 flex items-baseline justify-between gap-3">
-                      <span className="truncate font-bold">{goal.name}</span>
-                      <span className="tabular shrink-0 text-small text-ink-2">
-                        {dollars(goal.saved)} of {dollars(goal.target)}
-                      </span>
-                    </div>
-                    <div role="meter" aria-label={`${goal.name} progress`} aria-valuemin={0} aria-valuemax={goal.target} aria-valuenow={Math.min(goal.saved, goal.target)} className="h-2.5 overflow-hidden rounded-full bg-sky">
-                      <div className="h-full rounded-full bg-[var(--c-savings)]" style={{ width: `${Math.min(100, (goal.saved / goal.target) * 100)}%` }} />
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            </Sheet>
-          )}
         </div>
       </div>
     </>

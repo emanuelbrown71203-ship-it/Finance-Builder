@@ -2,7 +2,6 @@
 
 import { ChevronRight } from "lucide-react";
 import Link from "next/link";
-import { LevelBlock, XpBar } from "@/components/game/level";
 import { Sprite, type SpriteId } from "@/components/game/sprites";
 import { GAME_URL } from "@/components/game/game";
 import { EmptyState, ErrorNote, PageHeader, Sheet, SheetHeader, Skeleton, cx } from "@/components/ui";
@@ -27,20 +26,13 @@ const DO: Record<WinKind, { what: string; href: string | null }> = {
   save: { what: "Put money toward a goal", href: "/savings" },
   milestone: { what: "Get a goal to 25%, 50%, 75% or done", href: "/savings" },
   budget: { what: "Set a budget limit", href: "/budget" },
+  under: { what: "Finish a month under budget in a category", href: "/budget" },
+  allunder: { what: "Keep every budget for a whole month", href: "/budget" },
   plan: { what: "Tune your debt payoff plan", href: "/debt" },
   nospend: { what: "Have a day with no everyday spending", href: null },
 };
 
-const ORDER: WinKind[] = ["checkin", "sort", "rename", "note", "bill", "cancel", "budget", "goal", "save", "milestone", "plan", "nospend"];
-
-function Stat({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="min-w-0 rounded-control bg-sunk px-3 py-2.5">
-      <p className="text-micro font-bold text-ink-3">{label}</p>
-      <p className="mt-1.5 truncate">{children}</p>
-    </div>
-  );
-}
+const ORDER: WinKind[] = ["checkin", "budget", "under", "allunder", "sort", "rename", "note", "bill", "cancel", "goal", "save", "milestone", "plan", "nospend"];
 
 export default function ProgressPage() {
   const { data, error, mutate } = useApi<GamePayload>(GAME_URL);
@@ -48,7 +40,7 @@ export default function ProgressPage() {
   if (error && !data) {
     return (
       <>
-        <PageHeader title="Progress" />
+        <PageHeader title="Badges" back={{ href: "/you", label: "You" }} />
         <ErrorNote message={error.message} onRetry={() => mutate()} />
       </>
     );
@@ -56,7 +48,7 @@ export default function ProgressPage() {
   if (!data) {
     return (
       <>
-        <PageHeader title="Progress" />
+        <PageHeader title="Badges" back={{ href: "/you", label: "You" }} />
         <div className="grid grid-cols-1 gap-4">
           <Skeleton className="h-56 rounded-sheet" />
           <Skeleton className="h-80 rounded-sheet" />
@@ -69,45 +61,8 @@ export default function ProgressPage() {
 
   return (
     <div className="sec-budget">
-      <PageHeader title="Progress" lead="Small wins with your money add up to XP, levels and badges." />
+      <PageHeader title="Badges" back={{ href: "/you", label: "You" }} lead="Small wins with your money add up to XP, levels and badges." />
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 lg:items-start">
-        <Sheet>
-          <div className="flex items-center gap-4">
-            <LevelBlock level={data.level} size={80} />
-            <div className="min-w-0 flex-1">
-              <h2 className="display text-title">Level {data.level}</h2>
-              <p className="mt-1 text-ink-2">
-                <span className="tabular font-bold text-ink">{data.needed - data.into} XP</span> to level {data.level + 1}
-              </p>
-            </div>
-          </div>
-          <XpBar into={data.into} needed={data.needed} blocks={16} className="mt-5" />
-          <p className="mt-2 flex justify-between text-small text-ink-3">
-            <span className="tabular">
-              {data.into} of {data.needed} XP
-            </span>
-            <span className="tabular">{data.xp} XP in all</span>
-          </p>
-          <div className="mt-4 grid grid-cols-3 gap-2">
-            <Stat label="Today">
-              <span className="pixel text-[12px] text-accent-text">+{data.todayXp}</span>
-            </Stat>
-            <Stat label="Streak">
-              <span className="inline-flex items-center gap-1.5">
-                <Sprite id="flame" size={18} locked={data.streak === 0} />
-                <span className="font-bold">
-                  {data.streak} {data.streak === 1 ? "day" : "days"}
-                </span>
-              </span>
-            </Stat>
-            <Stat label="Best streak">
-              <span className="font-bold">
-                {data.bestStreak} {data.bestStreak === 1 ? "day" : "days"}
-              </span>
-            </Stat>
-          </div>
-        </Sheet>
-
         <Sheet className="lg:row-span-2">
           <SheetHeader title="Badges" hint={`${won} of ${data.badges.length} won. The grey ones say how to win them.`} />
           <ul className="grid grid-cols-3 gap-2 sm:grid-cols-4">

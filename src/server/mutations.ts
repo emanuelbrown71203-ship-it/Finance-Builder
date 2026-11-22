@@ -129,20 +129,55 @@ async function chargedAs(ctx: Ctx, key: string): Promise<boolean> {
 
 const titleCase = (words: string) => words.replace(/\b[a-z]/g, (c) => c.toUpperCase());
 
-export async function setBudget(ctx: Ctx, category: string, monthlyLimit: number | null) {
-  if (!isCategoryKey(category) || category === "transfer" || category === "income") throw new HttpError(400, "Unknown category.");
+const isBudgetCategory = (category: string) => isCategoryKey(category) && category !== "transfer" && category !== "income";
+const MONTH = /^\d{4}-(0[1-9]|1[0-2])$/;
+
+/**
+ * Sets or removes one category's monthly limit. `rolloverSince` is only sent
+ * by Undo, to put rollover back exactly as it was.
+ */
+export async function setBudget(ctx: Ctx, category: string, monthlyLimit: number | null, opts: { rolloverSince?: string | null } = {}) {
+  if (!isBudgetCategory(category)) throw new HttpError(400, "Unknown category.");
+  if (opts.rolloverSince != null && (!MONTH.test(opts.rolloverSince) || opts.rolloverSince > monthOf(ctx.today))) throw new HttpError(400, "That rollover month isn’t right.");
   if (monthlyLimit === null) {
     await ctx.db.delete(budgets).where(and(eq(budgets.userId, ctx.userId), eq(budgets.category, category)));
     // Taking away a limit set today (its Undo) takes its XP back.
     await takeBack(ctx, "budget", `${category}:${monthOf(ctx.today)}`);
     return;
   }
+  const keep = opts.rolloverSince !== undefined ? { rolloverSince: opts.rolloverSince } : {};
   await ctx.db
     .insert(budgets)
-    .values({ id: crypto.randomUUID(), userId: ctx.userId, category, monthlyLimit })
-    .onConflictDoUpdate({ target: [budgets.userId, budgets.category], set: { monthlyLimit } });
+    .values({ id: crypto.randomUUID(), userId: ctx.userId, category, monthlyLimit, ...keep })
+    .onConflictDoUpdate({ target: [budgets.userId, budgets.category], set: { monthlyLimit, ...keep } });
   // Once per category per month.
   await win(ctx, "budget", `${category}:${monthOf(ctx.today)}`, categoryOf(category).label);
+}
+
+/**
+ * Rollover on or off for one category. On, what's left at the end of this
+ * month (or overspent) carries into next month's budget, and so on.
+ */
+export async function setRollover(ctx: Ctx, category: string, on: boolean): Promise<{ previous: string | null }> {
+  if (!isBudgetCategory(category)) throw new HttpError(400, "Unknown category.");
+  const [row] = await ctx.db.select({ rolloverSince: budgets.rolloverSince }).from(budgets).where(and(eq(budgets.userId, ctx.userId), eq(budgets.category, category))).limit(1);
+  if (!row) throw new HttpError(400, "Set a limit for this category first.");
+  // Switching it on again keeps the month it started; off forgets it.
+  const next = on ? (row.rolloverSince ?? monthOf(ctx.today)) : null;
+  await ctx.db.update(budgets).set({ rolloverSince: next }).where(and(eq(budgets.userId, ctx.userId), eq(budgets.category, category)));
+  return { previous: row.rolloverSince };
+}
+
+export type BudgetChange = { category: string; monthlyLimit: number | null; rolloverSince?: string | null };
+
+/** Several limits at once (a starting budget, or its Undo). Returns what each was before, for Undo. */
+export async function setBudgets(ctx: Ctx, changes: BudgetChange[]): Promise<{ previous: BudgetChange[] }> {
+  if (changes.some((c) => !isBudgetCategory(c.category)) || new Set(changes.map((c) => c.category)).size !== changes.length) throw new HttpError(400, "Unknown category.");
+  const current = await ctx.db.select().from(budgets).where(eq(budgets.userId, ctx.userId));
+  const before = new Map(current.map((b) => [b.category, b]));
+  const previous = changes.map((c) => ({ category: c.category, monthlyLimit: before.get(c.category)?.monthlyLimit ?? null, rolloverSince: before.get(c.category)?.rolloverSince ?? null }));
+  for (const c of changes) await setBudget(ctx, c.category, c.monthlyLimit, c.rolloverSince !== undefined ? { rolloverSince: c.rolloverSince } : {});
+  return { previous };
 }
 
 type GoalInput = { name: string; target: number; saved: number; monthlyContribution: number; targetDate: string | null };

@@ -1,5 +1,6 @@
 "use client";
 
+import { SectionTabs } from "@/components/nav";
 import { useState } from "react";
 import { SegmentedBar, TrendChart } from "@/components/charts";
 import { LinkBankButton } from "@/components/link-bank";
@@ -57,7 +58,8 @@ export default function InvestingPage() {
   if (data.accounts.length === 0) {
     return (
       <>
-        <PageHeader title="Investing" />
+        <PageHeader title="Wealth" />
+        <SectionTabs />
         <Sheet>
           <EmptyState title="No investment accounts linked" action={<LinkBankButton>Link an account</LinkBankButton>}>
             Link a brokerage, IRA or 401(k) to see what you hold, how it’s split, and how it has moved.
@@ -76,7 +78,8 @@ export default function InvestingPage() {
 
   return (
     <>
-      <PageHeader title="Investing" lead="Every brokerage and retirement account together. Balances include contributions, so a rise isn’t all market growth." />
+      <PageHeader title="Wealth" lead="Every brokerage and retirement account together. Balances include contributions, so a rise isn’t all market growth." />
+      <SectionTabs />
 
       <div className="grid grid-cols-1 gap-5">
         <Sheet>

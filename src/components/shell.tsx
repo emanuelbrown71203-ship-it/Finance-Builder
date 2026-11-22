@@ -1,6 +1,6 @@
 "use client";
 
-import { CalendarCheck, CalendarClock, ChevronRight, Flag, Ellipsis, House, Landmark, ListOrdered, PieChart, PiggyBank, RefreshCw, Scale, Settings, TrendingUp, Trophy, type LucideIcon } from "lucide-react";
+import { RefreshCw, type LucideIcon } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState, type ReactNode } from "react";
@@ -8,34 +8,15 @@ import { APP_NAME } from "@/lib/config";
 import { diffDays } from "@/lib/dates";
 import type { Me, Overview } from "@/lib/types";
 import { Celebrations } from "./celebrate";
-import { GameWatcher } from "./game/game";
+import { GAME_URL, GameWatcher } from "./game/game";
+import { LevelChip } from "./game/level";
+import type { GamePayload } from "@/lib/game/progress";
+import { SECTIONS, sectionFor } from "./nav";
 import { Nickel } from "./nickel/nickel";
 import { ReauthHost } from "./reauth";
 import { PullToRefresh } from "./pull-to-refresh";
-import { ConfirmHost, Dialog, IconButton, Tag, Toaster, cx } from "./ui";
+import { ConfirmHost, IconButton, Tag, Toaster, cx } from "./ui";
 import { send, useApi, useNow } from "./use-api";
-
-/**
- * Every screen, in menu order. The first four sit in the phone's bottom bar;
- * the rest open from More. `hint` is one line saying what the screen is for.
- */
-type NavItem = { href: string; label: string; hint: string; icon: LucideIcon; section: string };
-
-export const NAV: NavItem[] = [
-  { href: "/", label: "Home", hint: "What’s left to spend and what needs a look", icon: House, section: "sec-home" },
-  { href: "/transactions", label: "Transactions", hint: "Every charge and deposit, as it happens", icon: ListOrdered, section: "sec-activity" },
-  { href: "/bills", label: "Bills", hint: "Bills and subscriptions, and when they’re due", icon: CalendarClock, section: "sec-bills" },
-  { href: "/budget", label: "Budget", hint: "Spending by category against your limits", icon: PieChart, section: "sec-budget" },
-  { href: "/net-worth", label: "Net worth", hint: "Everything you own minus everything you owe", icon: Scale, section: "sec-worth" },
-  { href: "/savings", label: "Savings", hint: "What you’ve put away and your goals", icon: PiggyBank, section: "sec-savings" },
-  { href: "/investing", label: "Investing", hint: "Brokerage and retirement accounts together", icon: TrendingUp, section: "sec-investing" },
-  { href: "/debt", label: "Debt payoff", hint: "When you’ll be debt-free, and how to get there sooner", icon: Flag, section: "sec-bills" },
-  { href: "/recap", label: "Weekly recap", hint: "Last week in money: spent, saved and paid", icon: CalendarCheck, section: "sec-home" },
-  { href: "/progress", label: "Progress", hint: "Your level, streak and badges", icon: Trophy, section: "sec-budget" },
-  { href: "/accounts", label: "Accounts", hint: "Link or remove banks, cards and lenders", icon: Landmark, section: "sec-accounts" },
-  { href: "/settings", label: "Settings", hint: "Light or dark, your account, app version", icon: Settings, section: "sec-accounts" },
-];
-const DOCK = 4;
 
 /** The mark: a passbook page with its perforated stub. */
 export function Logo({ size = 28 }: { size?: number }) {
@@ -115,14 +96,11 @@ export function Shell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const { data: me } = useApi<Me>("/api/me");
   const { data: overview } = useApi<Overview>("/api/overview");
-  const [moreOpen, setMoreOpen] = useState(false);
-  const isActive = (href: string) => (href === "/" ? pathname === "/" : pathname.startsWith(href));
-  const current = NAV.find((n) => isActive(n.href)) ?? NAV[0];
-  const dock = NAV.slice(0, DOCK);
-  const extras = NAV.slice(DOCK);
-  const moreActive = extras.some((n) => isActive(n.href));
+  const { data: game } = useApi<GamePayload>(GAME_URL);
+  const current = sectionFor(pathname);
   // Bills due in the next three days show as a count on the Bills tab.
   const dueSoon = Array.isArray(overview?.upcoming) ? overview.upcoming.filter((b) => diffDays(b.date, overview.today) <= 3).length : 0;
+  const level = game?.level ?? null;
 
   return (
     <div className="mx-auto flex min-h-dvh w-full max-w-[1320px]">
@@ -130,20 +108,23 @@ export function Shell({ children }: { children: ReactNode }) {
         Skip to content
       </a>
 
-      {/* Wide screens: a menu down the side. */}
+      {/* Wide screens: the same five places down the side, each with its screens under it. */}
       <aside className="sticky top-0 hidden h-dvh w-[252px] shrink-0 flex-col gap-5 px-4 py-6 lg:flex">
         <Link href="/" className="flex items-center gap-2.5 px-2">
           <Logo size={34} />
           <span className="display text-title">{APP_NAME}</span>
         </Link>
         <nav aria-label="Main" className="no-scrollbar flex flex-1 flex-col gap-1 overflow-y-auto">
-          {NAV.map((item) => {
-            const active = isActive(item.href);
+          {SECTIONS.map((section) => {
+            const active = current.key === section.key;
             return (
-              <Link key={item.href} href={item.href} aria-current={active ? "page" : undefined} className={cx(item.section, "flex min-h-12 items-center gap-3 rounded-2xl px-2.5 font-bold transition-colors", active ? "bg-sheet text-ink shadow-card" : "text-ink-2 hover:bg-sheet/60 hover:text-ink", item.href === "/settings" && "mt-auto")}>
-                <IconTile icon={item.icon} active={active} />
-                {item.label}
-              </Link>
+              <div key={section.key} className={cx(section.key === "you" && "mt-auto")}>
+                <Link href={section.href} aria-current={active ? "page" : undefined} className={cx(section.color, "flex min-h-12 items-center gap-3 rounded-2xl px-2.5 font-bold transition-colors", active ? "bg-sheet text-ink shadow-card" : "text-ink-2 hover:bg-sheet/60 hover:text-ink")}>
+                  {section.icon ? <IconTile icon={section.icon} active={active} /> : <LevelChip level={level} size={36} />}
+                  {section.label}
+                  {section.key === "bills" && dueSoon > 0 && <span className="tabular ml-auto rounded-full bg-[var(--c-bills)] px-2 text-micro font-extrabold leading-5 text-sheet">{dueSoon}</span>}
+                </Link>
+              </div>
             );
           })}
         </nav>
@@ -156,27 +137,28 @@ export function Shell({ children }: { children: ReactNode }) {
           <LiveStatus />
         </div>
 
-        <main id="main" className={cx(current.section, "flex-1 px-4 pb-[calc(96px+var(--nickel-space,0px)+env(safe-area-inset-bottom))] sm:px-6 lg:px-8 lg:pb-[calc(48px+var(--nickel-space,0px))]")}>
+        <main id="main" className={cx(current.color, "flex-1 px-4 pb-[calc(96px+var(--nickel-space,0px)+env(safe-area-inset-bottom))] sm:px-6 lg:px-8 lg:pb-[calc(48px+var(--nickel-space,0px))]")}>
           {children}
         </main>
       </div>
 
-      {/* Phones and upright tablets: a bar along the bottom. */}
+      {/* Phones and upright tablets: all five places along the bottom. Nothing hides under "More". */}
       <nav aria-label="Main" className="fixed inset-x-0 bottom-0 z-40 grid grid-cols-5 gap-1 border-t border-line-soft bg-sheet/90 px-2 pb-[max(6px,env(safe-area-inset-bottom))] pt-1.5 backdrop-blur-xl lg:hidden">
-        {dock.map((item) => {
-          const active = isActive(item.href);
-          const Icon = item.icon;
+        {SECTIONS.map((section) => {
+          const active = current.key === section.key;
+          const Icon = section.icon;
           return (
             <Link
-              key={item.href}
-              href={item.href}
+              key={section.key}
+              href={section.href}
               aria-current={active ? "page" : undefined}
-              className={cx(item.section, "relative flex min-h-14 flex-col items-center justify-center gap-0.5 rounded-2xl text-[11px] font-bold transition-transform active:scale-95", !active && "text-ink-3")}
+              aria-label={section.key === "you" && level ? `You, level ${level}` : undefined}
+              className={cx(section.color, "relative flex min-h-14 flex-col items-center justify-center gap-0.5 rounded-2xl text-[11px] font-bold transition-transform active:scale-95", !active && "text-ink-3")}
               style={active ? { color: "var(--sec)", background: "color-mix(in srgb, var(--sec) 13%, transparent)" } : undefined}
             >
-              <Icon size={23} strokeWidth={active ? 2.4 : 1.9} />
-              {item.label}
-              {item.href === "/bills" && dueSoon > 0 && (
+              {Icon ? <Icon size={23} strokeWidth={active ? 2.4 : 1.9} /> : <LevelChip level={level} size={24} />}
+              {section.label}
+              {section.key === "bills" && dueSoon > 0 && (
                 <span className="tabular absolute right-[18%] top-1 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-[var(--c-bills)] px-1 text-[11px] font-extrabold text-sheet" aria-label={`${dueSoon} due soon`}>
                   {dueSoon}
                 </span>
@@ -184,28 +166,7 @@ export function Shell({ children }: { children: ReactNode }) {
             </Link>
           );
         })}
-        <button type="button" onClick={() => setMoreOpen(true)} aria-haspopup="dialog" className={cx("flex min-h-14 flex-col items-center justify-center gap-0.5 rounded-2xl text-[11px] font-bold transition-transform active:scale-95", moreActive ? "bg-accent-soft text-accent-text" : "text-ink-3")}>
-          <Ellipsis size={23} strokeWidth={moreActive ? 2.6 : 2.1} />
-          More
-        </button>
       </nav>
-
-      <Dialog open={moreOpen} onClose={() => setMoreOpen(false)} title="More">
-        <ul className="flex flex-col gap-2">
-          {extras.map((item) => (
-            <li key={item.href}>
-              <Link href={item.href} onClick={() => setMoreOpen(false)} className={cx(item.section, "flex min-h-[64px] items-center gap-3 rounded-2xl border border-line-soft px-3 py-2 active:bg-sunk")}>
-                <IconTile icon={item.icon} active={isActive(item.href)} />
-                <span className="min-w-0 flex-1">
-                  <span className="block font-bold">{item.label}</span>
-                  <span className="block text-small leading-snug text-ink-3">{item.hint}</span>
-                </span>
-                <ChevronRight size={18} className="shrink-0 text-ink-3" />
-              </Link>
-            </li>
-          ))}
-        </ul>
-      </Dialog>
 
       <PullToRefresh />
       <Celebrations />

@@ -19,8 +19,8 @@ export type Snapshot = {
   incomeExpected: number;
   /** Bills and subscriptions that repeat (or were added by hand), with when each is next due. */
   bills: { name: string; nextDate: ISODate; amount: number; active: boolean; category: string }[];
-  /** This month's spending by category. */
-  spending: { category: string; label: string; spent: number; limit: number | null; lastMonth?: number }[];
+  /** This month's everyday spending by category, its budget (with anything carried over), and bills paid from it. */
+  spending: { category: string; label: string; spent: number; limit: number | null; lastMonth?: number; bills?: number }[];
   goals: { id: string; name: string; saved: number; target: number; status: string; perMonth: number | null; targetDate: ISODate | null; projectedDate: ISODate | null }[];
   netWorth: number;
   netWorthChange: number;
@@ -268,12 +268,16 @@ export function answerQuestion(question: string, s: Snapshot, last?: LastVerdict
       const label = row?.label ?? cat[0];
       if (lastMonth) return { text: `You spent ${money(row?.lastMonth ?? 0)} on ${label} last month.`, href: `/transactions?category=${cat[0]}`, link: "See them" };
       const spent = row?.spent ?? 0;
+      const bills = row?.bills ?? 0;
+      // A budget is for everyday spending; bills paid from the same category are said separately.
       const limit = row?.limit ? ` of your ${money(row.limit)} limit` : "";
-      return { text: `You’ve spent ${money(spent)} on ${label} this month${limit}.`, href: `/transactions?category=${cat[0]}`, link: "See them" };
+      const plus = bills > 0 ? (row?.limit ? `, plus ${money(bills)} in bills` : "") : "";
+      const shown = row?.limit ? spent : spent + bills;
+      return { text: `You’ve spent ${money(shown)} on ${label} this month${limit}${plus}.`, href: `/transactions?category=${cat[0]}`, link: "See them" };
     }
     const place = /\b(?:at|on)\s+(.+?)(?:\s+(?:this|last)\s+(?:month|week|year))?$/.exec(q);
     if (place && place[1].length >= 2 && !/^(the )?(month|week|year|today|average|total)$/.test(place[1])) return { merchant: place[1] };
-    const total = s.spending.reduce((sum, r) => sum + r.spent, 0);
+    const total = s.spending.reduce((sum, r) => sum + r.spent + (r.bills ?? 0), 0);
     return { text: `${money(total)} spent so far this month, not counting transfers.`, href: "/budget", link: "See budget" };
   }
 

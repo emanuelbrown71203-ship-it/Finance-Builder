@@ -84,5 +84,7 @@ export const MIGRATION_STATEMENTS: string[] = [
   "ALTER TABLE \"player_wins\" ADD CONSTRAINT \"player_wins_user_id_users_id_fk\" FOREIGN KEY (\"user_id\") REFERENCES \"public\".\"users\"(\"id\") ON DELETE cascade ON UPDATE no action;",
   "CREATE INDEX \"player_wins_user_created_idx\" ON \"player_wins\" USING btree (\"user_id\",\"created_at\");",
   "CREATE INDEX \"player_wins_user_kind_day_idx\" ON \"player_wins\" USING btree (\"user_id\",\"kind\",\"day\");",
-  "CREATE UNIQUE INDEX \"player_wins_user_kind_ref_idx\" ON \"player_wins\" USING btree (\"user_id\",\"kind\",\"ref\");"
+  "CREATE UNIQUE INDEX \"player_wins_user_kind_ref_idx\" ON \"player_wins\" USING btree (\"user_id\",\"kind\",\"ref\");",
+  "ALTER TABLE \"budgets\" ADD COLUMN \"rollover_since\" text;",
+  "ALTER TABLE \"budgets\" ADD COLUMN \"created_at\" timestamp with time zone DEFAULT now() NOT NULL;"
 ];

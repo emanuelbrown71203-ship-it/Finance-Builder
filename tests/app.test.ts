@@ -3,7 +3,7 @@ import { getDb, type DB } from "@/db";
 import { seedDemo } from "@/db/seed";
 import { DEMO_USER_ID } from "@/lib/config";
 import type { Ctx } from "@/server/auth";
-import { deleteDeposit, setBudget, setDebtPlan, setDebtSettings, setRecurringOverride, updateGoal, updateTransaction } from "@/server/mutations";
+import { deleteDeposit, setBudget, setBudgets, setDebtPlan, setDebtSettings, setRecurringOverride, setRollover, updateGoal, updateTransaction } from "@/server/mutations";
 import { loadRules } from "@/server/rules";
 import { countUnclear, createNameRule, deleteNameRule, getNames, previewNameRule, renameRule, restoreNameRule } from "@/server/names";
 import { transactions as transactionsTable } from "@/db/schema";
@@ -70,7 +70,7 @@ describe("sample household", () => {
     expect(attention.map((a) => a.kind)).toEqual(expect.arrayContaining(["due", "price", "budget"]));
     expect(attention.find((a) => a.kind === "price")).toMatchObject({ title: "Netflix raised its price", href: "/bills" });
     expect(attention.find((a) => a.kind === "due")?.title).toMatch(/is due (today|tomorrow|in 2 days)$/);
-    expect(attention.find((a) => a.kind === "budget")).toMatchObject({ title: "Groceries is over its limit", href: "/budget" });
+    expect(attention.find((a) => a.kind === "budget")).toMatchObject({ title: "Groceries is over budget", href: "/budget?category=groceries" });
     expect(attention.every((a) => a.href.startsWith("/") && a.detail.length > 0)).toBe(true);
     // Most urgent first: what's due comes before budget warnings.
     expect(attention.findIndex((a) => a.kind === "due")).toBeLessThan(attention.findIndex((a) => a.kind === "budget"));
@@ -291,6 +291,75 @@ describe("sample household", () => {
     expect(after.series.find((s) => s.name === "Spotify")).toMatchObject({ cancelled: true, active: false });
     expect(after.monthlySubscriptions).toBe(before.monthlySubscriptions - 1199);
     expect(after.upcoming.some((u) => u.name === "Spotify")).toBe(false);
+    await setRecurringOverride(ctx, spotify.key, { cancelled: false });
+  });
+
+  it("lays out the month's money in one plan that agrees with Home", async () => {
+    const [budget, overview] = await Promise.all([getBudget(ctx, "2026-11"), getOverview(ctx)]);
+    const p = budget.plan;
+    expect(p.leftToSpend).toBe(overview.plan.leftToSpend);
+    expect(p.income).toBe(overview.plan.incomeExpected);
+    expect(p.unplanned).toBe(p.income - p.bills - p.saving - p.budgeted);
+    expect(budget.isCurrent).toBe(true);
+    expect(budget.daysLeft).toBe(12);
+    expect(budget.monthPlan?.days).toHaveLength(30);
+    // Netflix is a bill: it shows beside entertainment's budget but isn't counted against it.
+    const ent = budget.rows.find((r) => r.category === "entertainment")!;
+    expect(ent.bills).toBeGreaterThan(0);
+    // Groceries rolls over in the sample household, so last month's leftover (or overspend) is carried in.
+    const groceries = budget.rows.find((r) => r.category === "groceries")!;
+    expect(groceries.rollover).toBe(true);
+    expect(groceries.carried).not.toBe(0);
+    expect(groceries.left).toBe(groceries.limit! + groceries.carried - groceries.spent);
+    // Every row with a limit says whether it's on track.
+    expect(budget.rows.filter((r) => r.limit !== null).every((r) => ["good", "watch", "over"].includes(r.status))).toBe(true);
+    // A past month is final.
+    const oct = await getBudget(ctx, "2026-10");
+    expect(oct.isCurrent).toBe(false);
+    expect(oct.monthPlan).toBeNull();
+    expect(oct.suggestion).toBeNull();
+    expect(oct.rows.filter((r) => r.limit !== null).every((r) => r.perDay === null && r.forecast === r.spent)).toBe(true);
+  });
+
+  it("suggests a starting budget for spending with no limit, and applies several at once with Undo", async () => {
+    // The sample household budgets everything it spends on; take one away to see it suggested.
+    const shopping = (await getBudget(ctx, "2026-11")).rows.find((r) => r.category === "shopping")!;
+    expect((await getBudget(ctx, "2026-11")).suggestion).toBeNull();
+    await setBudget(ctx, "shopping", null);
+    const budget = await getBudget(ctx, "2026-11");
+    expect(budget.suggestion).not.toBeNull();
+    const pick = budget.suggestion!.limits.find((l) => l.category === "shopping")!;
+    // What's usually spent, rounded up to the next $10, or trimmed to fit what the month has room for.
+    if (budget.suggestion!.trimmed) expect(pick.limit).toBeLessThan(Math.ceil(shopping.average / 1000) * 1000);
+    else expect(pick.limit).toBe(Math.ceil(shopping.average / 1000) * 1000);
+    expect(budget.suggestion!.room).toBe(budget.plan.income - budget.plan.bills - budget.plan.saving);
+    const { previous } = await setBudgets(ctx, [{ category: "shopping", monthlyLimit: pick.limit }]);
+    expect((await getBudget(ctx, "2026-11")).rows.find((r) => r.category === "shopping")?.limit).toBe(pick.limit);
+    expect(previous).toEqual([{ category: "shopping", monthlyLimit: null, rolloverSince: null }]);
+    await setBudgets(ctx, previous);
+    expect((await getBudget(ctx, "2026-11")).rows.find((r) => r.category === "shopping")?.limit).toBeNull();
+    await setBudget(ctx, "shopping", shopping.limit);
+    // The same category twice, or one that isn't spending, is refused.
+    await expect(setBudgets(ctx, [{ category: "dining", monthlyLimit: 1 }, { category: "dining", monthlyLimit: 2 }])).rejects.toThrow();
+    await expect(setBudgets(ctx, [{ category: "income", monthlyLimit: 1 }])).rejects.toThrow();
+  });
+
+  it("switches rollover on and off, and Undo puts it back exactly", async () => {
+    const { previous } = await setRollover(ctx, "dining", true);
+    expect(previous).toBeNull();
+    expect((await getBudget(ctx, "2026-11")).rows.find((r) => r.category === "dining")?.rollover).toBe(true);
+    // Switching on starts from this month: nothing is carried until it ends.
+    expect((await getBudget(ctx, "2026-11")).rows.find((r) => r.category === "dining")?.carried).toBe(0);
+    await setRollover(ctx, "dining", false);
+    expect((await getBudget(ctx, "2026-11")).rows.find((r) => r.category === "dining")?.rollover).toBe(false);
+    // Undo of turning groceries off puts back the month it started.
+    const g = await setRollover(ctx, "groceries", false);
+    expect(g.previous).toMatch(/^\d{4}-\d{2}$/);
+    await setBudget(ctx, "groceries", 65000, { rolloverSince: g.previous });
+    expect((await getBudget(ctx, "2026-11")).rows.find((r) => r.category === "groceries")?.carried).not.toBe(0);
+    // Rollover needs a limit, and a month in the future can't be set.
+    await expect(setRollover(ctx, "travel", true)).rejects.toThrow(/limit/);
+    await expect(setBudget(ctx, "dining", 28000, { rolloverSince: "2030-01" })).rejects.toThrow();
   });
 });
 

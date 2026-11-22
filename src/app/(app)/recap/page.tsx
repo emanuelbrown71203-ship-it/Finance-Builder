@@ -34,7 +34,7 @@ export default function RecapPage() {
   if (error && !data) {
     return (
       <>
-        <PageHeader title="Weekly recap" />
+        <PageHeader title="Weekly recap" back={{ href: "/you", label: "You" }} />
         <ErrorNote message={error.message} onRetry={() => mutate()} />
       </>
     );
@@ -42,7 +42,7 @@ export default function RecapPage() {
   if (!data) {
     return (
       <>
-        <PageHeader title="Weekly recap" />
+        <PageHeader title="Weekly recap" back={{ href: "/you", label: "You" }} />
         <Skeleton className="h-64 rounded-[26px]" />
       </>
     );
@@ -55,6 +55,7 @@ export default function RecapPage() {
     <>
       <PageHeader
         title="Weekly recap"
+        back={{ href: "/you", label: "You" }}
         action={
           <div className="flex items-center gap-1 rounded-full border border-line bg-sheet p-0.5">
             <IconButton label="The week before" onClick={() => setBack(back + 1)} disabled={back >= 12} className="size-10">

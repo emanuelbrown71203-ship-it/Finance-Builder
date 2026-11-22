@@ -290,9 +290,22 @@ async function callTool(name: string, args: Record<string, unknown>, ctx: Ctx): 
       const b = await getBudget(ctx, month);
       return {
         month: b.month,
-        spent: usd(b.totalSpent),
+        note: "Budgets are for everyday spending; bills and subscriptions are planned separately (bills_paid).",
+        everyday_spent: usd(b.totalSpent),
         money_in: usd(b.income),
-        categories: b.rows.map((r) => ({ category: category(r.category).label, spent: usd(r.spent), limit: r.limit === null ? null : usd(r.limit), over_by: r.limit !== null && r.spent > r.limit ? usd(r.spent - r.limit) : undefined, last_month: usd(r.lastMonth), three_month_average: usd(r.average) })),
+        plan: { money_in: usd(b.plan.income), bills: usd(b.plan.bills), saving_for_goals: usd(b.plan.saving), everyday_budgets: usd(b.plan.budgeted), not_planned_yet: usd(b.plan.unplanned), left_to_spend: usd(b.plan.leftToSpend) },
+        categories: b.rows.map((r) => ({
+          category: category(r.category).label,
+          everyday_spent: usd(r.spent),
+          bills_paid: r.bills ? usd(r.bills) : undefined,
+          limit: r.limit === null ? null : usd(r.limit),
+          carried_over: r.carried ? usd(r.carried) : undefined,
+          left: r.left === null ? undefined : usd(r.left),
+          on_track: r.status === "none" ? undefined : r.status === "good" ? "yes" : r.status === "watch" ? "on pace to go over" : "over",
+          likely_by_month_end: b.isCurrent ? usd(r.forecast) : undefined,
+          last_month: usd(r.lastMonth),
+          three_month_average: usd(r.average),
+        })),
         last_six_months: b.months.map((m) => ({ month: m.month, money_in: usd(m.income), money_out: usd(m.spending) })),
       };
     }

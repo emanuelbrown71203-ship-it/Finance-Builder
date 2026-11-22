@@ -7,7 +7,8 @@ import { DEMO_USER_ID } from "@/lib/config";
 import { WINS } from "@/lib/game/progress";
 import { addBill, addGoal, addToGoal, changeLoan, undoActivity } from "@/server/actions";
 import type { Ctx } from "@/server/auth";
-import { checkIn, getGame, milestonesCrossed, noSpendDays, win } from "@/server/game";
+import { budgetWins, checkIn, getGame, milestonesCrossed, noSpendDays, win } from "@/server/game";
+import { lastMonthBudgets } from "@/server/queries";
 import { createManualBill, deleteManualBill, restoreManualBill, updateManualBill } from "@/server/manual-bills";
 import { createGoal, deleteDeposit, deleteGoal, setBudget, setRecurringOverride, updateGoal, updateTransaction } from "@/server/mutations";
 import { createNameRule, deleteNameRule } from "@/server/names";
@@ -41,7 +42,30 @@ describe("the game on the server", () => {
     expect(after.streak).toBe(7);
     expect(after.checkedInToday).toBe(true);
     expect(after.badges.find((b) => b.id === "streak-7")?.earned).toBe(true);
-    expect(after.recent[0].kind === "checkin" || after.recent[0].kind === "nospend").toBe(true);
+    expect(after.recent.some((w) => w.kind === "checkin")).toBe(true);
+  });
+
+  it("judges last month's budgets at the check-in: a win for each limit kept, once", async () => {
+    const result = await lastMonthBudgets(ctx);
+    expect(result).not.toBeNull();
+    // The sample household set its seven limits months ago, so all of last month is judged.
+    expect(result!.judged).toBe(7);
+    const wins = await db.select().from(playerWins).where(and(eq(playerWins.userId, DEMO_USER_ID), eq(playerWins.kind, "under")));
+    expect(wins.map((w) => w.ref).sort()).toEqual(result!.kept.map((c) => `${result!.month}:${c}`).sort());
+    const all = await db.select().from(playerWins).where(and(eq(playerWins.userId, DEMO_USER_ID), eq(playerWins.kind, "allunder")));
+    expect(all).toHaveLength(result!.kept.length === result!.judged ? 1 : 0);
+    // Checking in again (another day this month) doesn't judge it twice.
+    await budgetWins(ctx);
+    expect(await db.select().from(playerWins).where(and(eq(playerWins.userId, DEMO_USER_ID), eq(playerWins.kind, "under")))).toHaveLength(wins.length);
+  });
+
+  it("only judges limits set by the 8th of last month", async () => {
+    const fresh: Ctx = { ...ctx, today: "2026-12-03" };
+    // A limit set today can't win November.
+    await setBudget(fresh, "travel", 100_000);
+    const result = await lastMonthBudgets(fresh);
+    expect(result?.kept ?? []).not.toContain("travel");
+    await setBudget(fresh, "travel", null);
   });
 
   it("gives XP for sorting a charge once, however often it's changed", async () => {

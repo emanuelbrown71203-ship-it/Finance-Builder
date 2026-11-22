@@ -1,6 +1,7 @@
 import type { NameSource } from "./finance/names";
 import type { ISODate } from "./dates";
 import type { MonthPlan } from "./finance/plan";
+import type { CategoryBudget } from "./finance/budget";
 import type { RecurringSeries } from "./finance/recurring";
 import type { CancelHelp } from "./finance/subscriptions";
 
@@ -138,7 +139,7 @@ export type UpcomingBill = {
 export type NetWorthPoint = { date: ISODate; assets: number; debts: number; net: number };
 
 /** Something on Home that wants the person's attention, with where to go to deal with it. */
-export type AttentionItem = { kind: "bank" | "due" | "price" | "budget" | "renewal" | "new"; title: string; detail: string; href: string };
+export type AttentionItem = { kind: "bank" | "due" | "price" | "budget" | "pace" | "renewal" | "new"; title: string; detail: string; href: string };
 
 export type Overview = {
   today: ISODate;
@@ -150,7 +151,8 @@ export type Overview = {
   upcoming: UpcomingBill[];
   /** Everything due in the next 30 days, not just the few listed. */
   upcomingTotal: number;
-  budget: { rows: BudgetRow[]; totalSpent: number; totalLimit: number };
+  /** Categories with a limit (ones needing a look first); everyday spent in them; what's budgeted; money with no job yet. */
+  budget: { rows: BudgetRow[]; totalSpent: number; totalLimit: number; unplanned: number };
   goals: GoalView[];
   investments: { total: number; change: number; costBasis: number; series: { date: ISODate; value: number }[] };
   sync: SyncStatus;
@@ -158,17 +160,43 @@ export type Overview = {
 
 export type SyncStatus = { lastSyncedAt: string | null; linkedInstitutions: number; needsAttention: number };
 
-export type BudgetRow = { category: string; spent: number; limit: number | null; lastMonth: number; average: number };
+export type BudgetRow = CategoryBudget;
+
+export type BudgetPlanView = {
+  income: number;
+  bills: number;
+  saving: number;
+  /** Everyday budgets for the month, with anything carried over. */
+  budgeted: number;
+  /** Positive: money with no job yet. Negative: the plan asks for more than comes in. */
+  unplanned: number;
+  budgetedSpent: number;
+  unbudgetedSpent: number;
+  everydaySpent: number;
+  /** The same number as Home's "left to spend". */
+  leftToSpend: number;
+};
 
 export type BudgetPayload = {
   month: string;
   today: ISODate;
+  isCurrent: boolean;
+  /** Days left in the month, today included, and days in it. */
+  daysLeft: number;
+  days: number;
+  /** Over and on-pace-to-go-over first, then the rest with limits, then spending with no limit. */
   rows: BudgetRow[];
+  plan: BudgetPlanView;
+  /** Everyday spending this month, and the limits added up. */
   totalSpent: number;
   totalLimit: number;
   income: number;
-  /** Money in vs money out for recent months, oldest first. */
+  /** Money in vs money out (bills included) for recent months, oldest first. */
   months: { month: string; income: number; spending: number }[];
+  /** This month only: day by day, for the pace chart. */
+  monthPlan: MonthPlan | null;
+  /** This month only, while some everyday spending has no limit: a starting budget from what's usually spent. */
+  suggestion: { limits: { category: string; limit: number }[]; trimmed: boolean; room: number } | null;
 };
 
 export type TransactionsPayload = {

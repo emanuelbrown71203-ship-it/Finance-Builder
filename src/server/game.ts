@@ -1,9 +1,11 @@
-import { and, desc, eq, gt, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, like, sql } from "drizzle-orm";
 import { playerWins, transactions } from "@/db/schema";
-import { addDays, formatShort, type ISODate } from "@/lib/dates";
+import { category } from "@/lib/categories";
+import { addDays, addMonthsToMonth, formatShort, monthName, monthOf, type ISODate } from "@/lib/dates";
 import { badgesFor, bestStreak, levelFor, streak, WINS, isWinKind, type GamePayload, type WinKind } from "@/lib/game/progress";
 import type { Ctx } from "./auth";
 import { describeError } from "./errors";
+import { lastMonthBudgets } from "./queries";
 
 /*
  * The game layer on the server: small wins are written down where they happen
@@ -93,9 +95,32 @@ export async function noSpendDays(ctx: Ctx): Promise<ISODate[]> {
   return days;
 }
 
+/**
+ * Last month's budgets, once it's over: each limit that held is a win, and
+ * keeping every one (two or more) is a bigger one. Judged until it has been.
+ */
+export async function budgetWins(ctx: Ctx): Promise<void> {
+  const month = addMonthsToMonth(monthOf(ctx.today), -1);
+  const [done] = await ctx.db
+    .select({ id: playerWins.id })
+    .from(playerWins)
+    .where(and(eq(playerWins.userId, ctx.userId), inArray(playerWins.kind, ["under", "allunder"]), like(playerWins.ref, `${month}:%`)))
+    .limit(1);
+  if (done) return;
+  const result = await lastMonthBudgets(ctx);
+  if (!result) return;
+  for (const c of result.kept) await win(ctx, "under", `${month}:${c}`, `${category(c).label}, ${monthName(month)}`);
+  if (result.judged >= 2 && result.kept.length === result.judged) await win(ctx, "allunder", `${month}:all`, monthName(month));
+}
+
 /** Opening the app once a day: a check-in (for the streak), plus yesterday if it was a no-spend day. */
 export async function checkIn(ctx: Ctx): Promise<void> {
   await win(ctx, "checkin", ctx.today, null);
+  try {
+    await budgetWins(ctx);
+  } catch (error) {
+    console.error("game: last month's budgets weren't checked:", describeError(error));
+  }
   try {
     // Counted today (so it shows in today's XP), and once for that day however late it's noticed.
     for (const day of await noSpendDays(ctx)) await win(ctx, "nospend", day, formatShort(day));

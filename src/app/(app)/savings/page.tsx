@@ -1,5 +1,8 @@
 "use client";
 
+import { XpTag } from "@/components/game/level";
+import { WINS } from "@/lib/game/progress";
+import { SectionTabs } from "@/components/nav";
 import { ChevronRight, Plus } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
@@ -35,6 +38,7 @@ function GoalCard({ goal, onAdd }: { goal: GoalView; onAdd: () => void }) {
         {!done && (
           <Button size="sm" variant="primary" onClick={onAdd}>
             Add money
+            <XpTag xp={WINS.save.xp} />
           </Button>
         )}
         <Link href={`/savings/goal?id=${encodeURIComponent(goal.id)}`} className="inline-flex min-h-11 items-center gap-1 rounded-control px-3 text-small font-bold text-accent-text active:scale-[0.98]">
@@ -66,7 +70,7 @@ export default function SavingsPage() {
   return (
     <>
       <PageHeader
-        title="Savings"
+        title="Wealth"
         lead="What you’ve put away, and what it’s for."
         action={
           <Button variant="primary" onClick={() => setSheet({ kind: "new" })}>
@@ -74,6 +78,7 @@ export default function SavingsPage() {
           </Button>
         }
       />
+      <SectionTabs />
 
       <div className="grid grid-cols-1 gap-5">
         <Sheet className="grid grid-cols-1 gap-x-10 gap-y-6 lg:grid-cols-[minmax(15rem,20rem)_1fr]">

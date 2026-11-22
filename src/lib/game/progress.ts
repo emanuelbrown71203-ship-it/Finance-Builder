@@ -6,7 +6,7 @@ import { addDays, type ISODate } from "../dates";
  * come from what's been won. Pure, so it's tested and works on sample data.
  */
 
-export type WinKind = "sort" | "rename" | "note" | "bill" | "cancel" | "goal" | "save" | "milestone" | "budget" | "plan" | "checkin" | "nospend";
+export type WinKind = "sort" | "rename" | "note" | "bill" | "cancel" | "goal" | "save" | "milestone" | "budget" | "under" | "allunder" | "plan" | "checkin" | "nospend";
 
 /** XP for each kind of win, and how many of that kind count in a day (so busywork doesn't farm XP). */
 export const WINS: Record<WinKind, { xp: number; perDay: number; label: string }> = {
@@ -19,6 +19,8 @@ export const WINS: Record<WinKind, { xp: number; perDay: number; label: string }
   save: { xp: 20, perDay: 5, label: "Put money toward a goal" },
   milestone: { xp: 40, perDay: 5, label: "Hit a goal milestone" },
   budget: { xp: 15, perDay: 5, label: "Set a budget limit" },
+  under: { xp: 20, perDay: 16, label: "Stayed under budget" },
+  allunder: { xp: 50, perDay: 1, label: "Kept every budget" },
   plan: { xp: 15, perDay: 3, label: "Tuned the debt plan" },
   checkin: { xp: 5, perDay: 1, label: "Checked in" },
   nospend: { xp: 15, perDay: 1, label: "A no-spend day" },
@@ -56,6 +58,8 @@ export type BadgeId =
   | "saver"
   | "milestone"
   | "budget-boss"
+  | "on-budget"
+  | "clean-sweep"
   | "planner"
   | "streak-7"
   | "streak-30"
@@ -76,6 +80,8 @@ const BADGES: { id: BadgeId; name: string; how: string; test: (c: Counts, best: 
   { id: "saver", name: "Saver", how: "Put money toward goals 10 times", test: (c) => (c.save ?? 0) >= 10 },
   { id: "milestone", name: "Milestone", how: "Get a goal to 25%", test: (c) => (c.milestone ?? 0) >= 1 },
   { id: "budget-boss", name: "Budget Boss", how: "Set 3 budget limits", test: (c) => (c.budget ?? 0) >= 3 },
+  { id: "on-budget", name: "On Budget", how: "Finish a month under budget in a category", test: (c) => (c.under ?? 0) >= 1 },
+  { id: "clean-sweep", name: "Clean Sweep", how: "Keep every budget for a whole month", test: (c) => (c.allunder ?? 0) >= 1 },
   { id: "planner", name: "Planner", how: "Tune the debt plan", test: (c) => (c.plan ?? 0) >= 1 },
   { id: "streak-7", name: "7-Day Streak", how: "Check in 7 days in a row", test: (_c, best) => best >= 7 },
   { id: "streak-30", name: "30-Day Streak", how: "Check in 30 days in a row", test: (_c, best) => best >= 30 },
