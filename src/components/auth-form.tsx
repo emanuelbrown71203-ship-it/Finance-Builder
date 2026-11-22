@@ -83,7 +83,7 @@ export function AuthForm({ mode }: { mode: "login" | "signup" }) {
       )}
       {!signup && <p className="mt-4 text-center text-small text-ink-3">or use your password</p>}
 
-      <form onSubmit={submit} className={`${signup ? "mt-8" : "mt-4"} flex flex-col gap-4 rounded-sheet border border-line-soft bg-sheet p-6 shadow-card`}>
+      <form onSubmit={submit} className={`${signup ? "mt-8" : "mt-4"} flex flex-col gap-4 edge rounded-sheet bg-sheet p-6 shadow-card`}>
         {signup && (
           <Field label="Invite code" hint="Passbook is by invitation. The code came from whoever set it up.">
             {(id) => <Input id={id} value={code} onChange={(e) => setCode(e.target.value)} autoComplete="off" autoCapitalize="none" autoCorrect="off" spellCheck={false} required maxLength={100} />}

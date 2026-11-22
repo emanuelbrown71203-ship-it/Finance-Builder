@@ -19,7 +19,7 @@ import type { RecurringPayload, RecurringView } from "@/lib/types";
 
 function Stat({ label, value, note, tone }: { label: string; value: string; note: string; tone: string }) {
   return (
-    <div className={`min-w-0 rounded-sheet px-4 py-3.5 shadow-card sm:px-5 sm:py-4 ${tone}`}>
+    <div className={`edge min-w-0 rounded-sheet px-4 py-3.5 shadow-card sm:px-5 sm:py-4 ${tone}`}>
       <p className="text-small font-bold">{label}</p>
       <p className="figure mt-2 text-[1.75rem] sm:text-[2rem]">{value}</p>
       <p className="mt-1.5 truncate text-small opacity-85">{note}</p>
@@ -179,8 +179,8 @@ function SeriesDialog({ series, today, onClose: close }: { series: RecurringView
                   <XpTag xp={WINS.cancel.xp} />
                 </Button>
               )}
-              <Button size="sm" disabled={busy} onClick={() => update({ kind: series.kind === "bill" ? "subscription" : "bill" }, `${series.name} moved to ${series.kind === "bill" ? "subscriptions" : "bills"}`)}>
-                {series.kind === "bill" ? "Move to subscriptions" : "Move to bills"}
+              <Button size="sm" disabled={busy} onClick={() => update({ kind: series.kind === "bill" ? "subscription" : "bill" }, series.kind === "bill" ? `${series.name} moved to Extras: it comes out of your budget now` : `${series.name} moved to Bills: it’s set aside each month now`)}>
+                {series.kind === "bill" ? "Move to Extras" : "I need this: move to Bills"}
               </Button>
               <Button size="sm" variant="danger" disabled={busy} onClick={() => update({ kind: "ignore" }, `${series.name} hidden from bills`)}>
                 This doesn’t repeat
@@ -322,7 +322,7 @@ export default function BillsPage() {
     <>
       <PageHeader
         title="Bills"
-        lead="Bills and subscriptions, found on their own from charges that repeat. Tap one to rename it, see past charges or say you cancelled it. Add any the bank can’t show yet."
+        lead="Bills are what you must pay; they’re set aside each month. Extras are subscriptions you could live without; they come out of your budget. Tap one to move it, rename it or say you cancelled it."
         action={
           <Button size="sm" onClick={() => setAdding(true)}>
             <Plus size={16} aria-hidden />
@@ -333,8 +333,8 @@ export default function BillsPage() {
 
       <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-3 [&>*:last-child]:col-span-2 sm:[&>*:last-child]:col-span-1">
         <Stat label="Bills a month" value={dollars(data.monthlyBills)} note={`${bills.length} regular bills`} tone="bg-pink text-pink-ink" />
-        <Stat label="Subscriptions a month" value={dollars(data.monthlySubscriptions)} note={`${dollars(data.monthlySubscriptions * 12)} a year across ${subscriptions.length}`} tone="bg-sky text-sky-ink" />
-        <Stat label="Due in the next 30 days" value={dollars(next30.reduce((s, u) => s - u.amount, 0))} note={next30[0] ? `Next: ${next30[0].name}, ${formatDistance(next30[0].date, data.today)}` : "Nothing scheduled"} tone="border border-line-soft bg-sheet" />
+        <Stat label="Extras a month" value={dollars(data.monthlySubscriptions)} note={`${dollars(data.monthlySubscriptions * 12)} a year across ${subscriptions.length}`} tone="bg-sky text-sky-ink" />
+        <Stat label="Due in the next 30 days" value={dollars(next30.reduce((s, u) => s - u.amount, 0))} note={next30[0] ? `Next: ${next30[0].name}, ${formatDistance(next30[0].date, data.today)}` : "Nothing scheduled"} tone="bg-sheet" />
       </div>
 
       {renewing.length > 0 && (
@@ -392,8 +392,8 @@ export default function BillsPage() {
         </Sheet>
 
         <div className="grid grid-cols-1 gap-5">
-          {list("Bills", "Rent, utilities, insurance and loans.", bills, "No bills found yet")}
-          {list("Subscriptions", "Memberships and services that renew on their own.", subscriptions, "No subscriptions found yet")}
+          {list("Bills", "What you must pay: rent, utilities, insurance, loans, your phone. Set aside each month.", bills, "No bills found yet")}
+          {list("Extras", "Subscriptions you could live without. They count against your budget, like Netflix in Entertainment.", subscriptions, "No extras found yet")}
           {data.possible.length > 0 && (
             <Sheet>
               <SheetHeader title="Might be new" hint="A first charge from a service that usually renews. If you started a free trial, this is it turning into a paid plan." />

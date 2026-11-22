@@ -690,13 +690,13 @@ export function Nickel() {
                   <p className="mt-0.5 leading-relaxed">{bubble.text}</p>
                   <div className="mt-2.5 flex flex-wrap items-center gap-2">
                     {bubble.kind === "intro" ? (
-                      <button type="button" onClick={() => (nickelSettings.finishIntro(), setBubble(null), act("hop"))} className="min-h-10 rounded-full bg-accent px-4 text-small font-bold text-on-accent active:scale-[0.97]">
+                      <button type="button" onClick={() => (nickelSettings.finishIntro(), setBubble(null), act("hop"))} className="min-h-10 rounded-control bg-accent px-4 text-small font-bold text-on-accent active:scale-[0.97]">
                         Nice to meet you
                       </button>
                     ) : (
                       <>
                         {bubble.href && (
-                          <Link href={bubble.href} onClick={() => setBubble(null)} className="inline-flex min-h-10 items-center rounded-full bg-accent-soft px-3.5 text-small font-bold text-accent-text active:scale-[0.97]">
+                          <Link href={bubble.href} onClick={() => setBubble(null)} className="inline-flex min-h-10 items-center rounded-control bg-accent-soft px-3.5 text-small font-bold text-accent-text active:scale-[0.97]">
                             {bubble.link ?? "Show me"}
                           </Link>
                         )}
@@ -713,13 +713,13 @@ export function Nickel() {
                                 say({ kind: "talk", text: e instanceof Error ? e.message : "I couldn’t undo that. It’s under Settings, Activity.", sticky: true });
                               }
                             }}
-                            className="inline-flex min-h-10 items-center rounded-full px-3 text-small font-bold text-ink-2 underline underline-offset-2 active:bg-sunk"
+                            className="inline-flex min-h-10 items-center rounded-control px-3 text-small font-bold text-ink-2 underline underline-offset-2 active:bg-sunk"
                           >
                             Undo
                           </button>
                         )}
                         {bubble.kind === "tip" && (
-                          <button type="button" onClick={() => (act("bark"), say(nextLine()))} className="inline-flex min-h-10 items-center rounded-full px-3 text-small font-bold text-ink-2 active:bg-sunk">
+                          <button type="button" onClick={() => (act("bark"), say(nextLine()))} className="inline-flex min-h-10 items-center rounded-control px-3 text-small font-bold text-ink-2 active:bg-sunk">
                             Anything else?
                           </button>
                         )}
@@ -1041,14 +1041,14 @@ function NickelDo({ today, goals, loans, talksBack, onDone, onBill, onGoal, onLe
     });
   };
 
-  const chip = "inline-flex min-h-10 items-center rounded-full border border-line px-3 text-small font-bold text-ink-2 active:bg-sunk";
+  const chip = "inline-flex min-h-10 items-center rounded-control border-2 border-line px-3 text-small font-bold text-ink-2 active:bg-sunk";
   if (pending) {
     return (
       <div className="mt-1">
         <p className="text-micro font-extrabold uppercase tracking-wide text-ink-3">Got it</p>
         <p className="mt-1 leading-relaxed">{pending.read}</p>
         <div className="mt-3 flex flex-wrap items-center gap-2">
-          <button type="button" disabled={busy} onClick={() => void doIt(pending.body, pending.byVoice)} className="min-h-11 rounded-full bg-accent px-5 font-bold text-on-accent active:scale-[0.97] disabled:opacity-50">
+          <button type="button" disabled={busy} onClick={() => void doIt(pending.body, pending.byVoice)} className="min-h-11 rounded-control bg-accent px-5 font-bold text-on-accent active:scale-[0.97] disabled:opacity-50">
             {busy ? "Doing it…" : "Do it"}
           </button>
           <button type="button" disabled={busy} onClick={() => (stop.current(), pending.form ? onBill(pending.form) : setPending(null))} className={chip}>
@@ -1070,7 +1070,7 @@ function NickelDo({ today, goals, loans, talksBack, onDone, onBill, onGoal, onLe
               {reply.verdict && <span className={cx("mb-1 inline-block rounded-md px-2 py-0.5 text-micro font-extrabold tracking-wider", VERDICT_CHIP[reply.verdict.verdict].className)}>{VERDICT_CHIP[reply.verdict.verdict].label}</span>}
               <p className="leading-relaxed">{reply.text}</p>
               {reply.href && (
-                <Link href={reply.href} onClick={onLeave} className="mt-1.5 inline-flex min-h-10 items-center rounded-full bg-accent-soft px-3.5 text-small font-bold text-accent-text">
+                <Link href={reply.href} onClick={onLeave} className="mt-1.5 inline-flex min-h-10 items-center rounded-control bg-accent-soft px-3.5 text-small font-bold text-accent-text">
                   {reply.link ?? "Show me"}
                 </Link>
               )}
@@ -1138,7 +1138,7 @@ function AskClaude({ onDone }: { onDone: () => void }) {
     return (
       <div className="mt-1">
         <p className="leading-relaxed">I can open a chat with Claude about your numbers, on your own Claude plan. Connect Claude once in Settings first. It can look, and it can’t change anything.</p>
-        <Link href="/settings#claude" onClick={onDone} className="mt-2.5 inline-flex min-h-10 items-center rounded-full bg-accent px-4 text-small font-bold text-on-accent active:scale-[0.97]">
+        <Link href="/settings#claude" onClick={onDone} className="mt-2.5 inline-flex min-h-10 items-center rounded-control bg-accent px-4 text-small font-bold text-on-accent active:scale-[0.97]">
           Set up Claude
         </Link>
       </div>

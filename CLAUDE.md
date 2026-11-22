@@ -26,8 +26,13 @@ for it to be remembered and used whenever an app is built.
   practice: `ProductivityApp` (Tasks for Two), `Grocery-List` (Roux), `YouTube-Dashboard`,
   `HOHOperationsHub`. The work in each sits on its `claude/…` branch, not on `main`.
 - Reuse the shared pieces in `src/components/ui.tsx` (`Sheet`, `PageHeader`, `Button`, `Dialog`, `Fold`,
-  `toast`, `confirm`, `Segmented`, `Field`) before making anything new. Only use the colour tokens in
+  `toast`, `confirm`, `Segmented`, `Field`, `Blocks`) before making anything new. Only use the colour tokens in
   `src/app/globals.css`.
+- **The look is Neon Arcade** (house style, section 8), chosen by the owner because the old one felt
+  bland: a daytime arcade in light mode, neon at night. Cards take `edge` + `shadow-card`, headline
+  cards `hero-card` / `hero-figure`, bars are `Blocks`, menu and category icons are `PixelIcon`, titles
+  and big numbers use `display` / `figure` (Bungee). Nickel (`nickel/robo-dog.tsx`) and the app icon
+  (`nickel/mark.tsx`, `public/nickel-*`) are the neon pup the owner picked: keep them that way.
 - If the owner says something about how an app should feel that isn't in the file yet, add it there.
 
 ## Things that must keep working
@@ -39,9 +44,11 @@ for it to be remembered and used whenever an app is built.
   "transfer" and is neither income nor spending.
 - Bills and subscriptions are worked out from transaction history each time; only the person's own
   choices ("I cancelled this") are stored.
-- **Budgets are for everyday spending.** Bill and subscription payments are planned separately and never
-  counted against a category's budget (`src/lib/finance/budget.ts`, worked out on read; only limits and
-  rollover are stored). The budget's plan must always add up to Home's "left to spend" (what rollover
+- **Budgets are for everyday spending.** Bills are necessities only (rent, utilities, insurance, loans,
+  phone): their payments are planned separately and never counted against a category's budget.
+  Subscriptions you could live without are **Extras**: everyday spending that counts in its category
+  (Netflix in Entertainment). The Bills screen lists both, and one tap moves a charge between them.
+  Worked out on read (`src/lib/finance/budget.ts`); only limits and rollover are stored. The budget's plan must always add up to Home's "left to spend" (what rollover
   carried in from earlier months is shown separately). Removed budgets stay as rows with `removed_at`:
   read them through `loadLimits` / `budgetState`, never straight from the table.
 - **The app has five places** (`src/components/nav.tsx`): Home, Spending, Bills, Wealth, You. No "More"

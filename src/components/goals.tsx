@@ -176,7 +176,7 @@ function GoalForm({ goal, today, onClose, onDeleted }: { goal: GoalView | null; 
               role="radio"
               aria-checked={targetDate === c.date}
               onClick={() => setTargetDate(c.date)}
-              className={cx("min-h-11 rounded-full border px-4 text-small font-bold active:scale-[0.97]", targetDate === c.date ? "border-accent bg-accent-soft text-accent-text" : "border-line bg-sheet text-ink-2")}
+              className={cx("min-h-11 rounded-control border-2 px-4 text-small font-bold active:scale-[0.97]", targetDate === c.date ? "border-accent bg-accent-soft text-accent-text" : "border-line bg-sheet text-ink-2")}
             >
               {c.label}
             </button>

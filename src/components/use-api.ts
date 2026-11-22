@@ -108,7 +108,7 @@ function currentTheme(): ThemeChoice {
 
 /** Keeps the phone's status bar the same colour as the page. */
 function paintStatusBar(choice: ThemeChoice) {
-  const colors = { light: "#eef1f8", dark: "#0d1220" };
+  const colors = { light: "#f1eeff", dark: "#0b0d26" };
   document.querySelectorAll<HTMLMetaElement>('meta[name="theme-color"]').forEach((meta) => {
     const own = meta.media.includes("dark") ? colors.dark : colors.light;
     meta.content = choice === "system" ? own : colors[choice];

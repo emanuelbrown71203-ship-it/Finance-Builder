@@ -32,7 +32,7 @@ export type MonthPlan = {
   /** Income received so far plus paychecks still expected this month. */
   incomeExpected: number;
   incomeReceived: number;
-  /** Bills and subscriptions paid so far plus those still due this month. */
+  /** Bills (necessities) paid so far plus those still due this month. Extras are everyday spending. */
   billsExpected: number;
   billsPaid: number;
   /** What goals are set to put aside each month. */

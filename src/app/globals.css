@@ -1,14 +1,18 @@
 @import "tailwindcss";
-@import "@fontsource-variable/archivo/wdth.css";
+@import "@fontsource-variable/rubik/wght.css";
+@import "@fontsource/bungee/latin-400.css";
 @import "@fontsource/press-start-2p/latin-400.css";
 
 /*
-  Passbook follows the same house style as the owner's other apps: phone
-  first, bright, bold titles, chunky cards, big tap targets. The rules are
-  written down in docs/house-style.md.
+  Passbook's look is "Neon Arcade": a night arcade in dark mode (navy with a
+  faint grid, neon colours that glow where it matters, chunky cards with hard
+  shadows) and a daytime arcade in light mode (lavender grid, white cards with
+  thick ink outlines). It still follows the owner's house style (phone first,
+  bold titles, big tap targets): docs/house-style.md.
 
   Colour jobs, used the same way everywhere:
-    accent (green) = the app itself: main buttons, links, "you are here"
+    accent = the app itself: main buttons, links, "you are here"
+             (violet in light, neon mint in dark)
     mint   = money coming in
     pink   = bills and money owed
     canary = needs a look
@@ -16,170 +20,269 @@
   Each section also has its own colour (--sec) for the tab bar and menu.
 */
 
+
 :root {
   color-scheme: light;
-  --paper: #eef1f8;
+  --paper: #f1eeff;
+  --bg-grid: rgb(91 61 245 / 0.06);
   --sheet: #ffffff;
-  --sunk: #f3f5fa;
-  --ink: #131a2e;
-  --ink-2: #434d66;
-  --ink-3: #5d6781;
-  --line: #d5dbe8;
-  --line-soft: #e4e8f1;
+  --sunk: #f2effc;
+  --ink: #1a1530;
+  --ink-2: #433c66;
+  --ink-3: #5c5480;
+  --line: #c9c1ec;
+  --line-soft: #e4dff7;
+  /* Card outlines: thick ink in daylight. */
+  --edge: #1a1530;
+  --edge-w: 3px;
 
-  --accent: #08835a;
-  --accent-strong: #066b49;
-  --accent-text: #077a50;
-  --accent-soft: #dff5ea;
+  --accent: #5b3df5;
+  --accent-strong: #4528d6;
+  --accent-text: #4b2fd9;
+  --accent-soft: #e7e1ff;
   --on-accent: #ffffff;
 
-  --mint: #d8f5e6;
-  --mint-ink: #0a6642;
-  --pink: #ffe1e6;
-  --pink-ink: #a3233f;
-  --canary: #fff0b8;
-  --canary-ink: #6b4d00;
-  --sky: #dfe7ff;
-  --sky-ink: #2b41b8;
+  --mint: #d7fbef;
+  --mint-ink: #0b6e4f;
+  --pink: #ffe1ec;
+  --pink-ink: #b0124f;
+  --canary: #fff1bf;
+  --canary-ink: #6e4a00;
+  --sky: #e2e6ff;
+  --sky-ink: #3a2fb8;
 
-  --good: #0a7a4e;
-  --warn: #a35d00;
-  --bad: #c9302c;
+  --good: #0b7a57;
+  --warn: #9a5b00;
+  --bad: #d0215b;
 
-  /* The big band at the top of Home. */
-  --hero-a: #0a7d55;
-  --hero-b: #0b6672;
-  --hero-over-a: #b3332d;
-  --hero-over-b: #8f2748;
+  /* The big card at the top of Home: violet with a yellow number. */
+  --hero-a: #5b3df5;
+  --hero-b: #1a1530;
+  --hero-over-a: #d0215b;
+  --hero-over-b: #9e1446;
+  --hero-edge: #1a1530;
+  --hero-figure: #ffd23f;
+  --hero-text: #ffffff;
+  --hero-muted: #e3ddff;
 
   /* One colour per section, for wayfinding. */
-  --c-home: #08835a;
-  --c-activity: #2459d6;
-  --c-bills: #cf2f5b;
+  --c-home: #5b3df5;
+  --c-activity: #2558e8;
+  --c-bills: #c81e5e;
   --c-budget: #b85c00;
-  --c-worth: #4c3fd1;
-  --c-savings: #0b7c8a;
-  --c-investing: #8a3fc7;
-  --c-accounts: #46536e;
+  --c-worth: #7c3aed;
+  --c-savings: #0b7c7a;
+  --c-investing: #9030c2;
+  --c-accounts: #4d4a6e;
 
-  /* Chart series, validated for color-vision deficiency on --sheet. */
-  --series-1: #2746d9;
-  --series-2: #eb6834;
-  --series-3: #1baf7a;
-  --series-4: #eda100;
-  --series-5: #e87ba4;
-  --series-6: #008300;
-  --series-muted: #a4aec6;
-  --grid: #e4e8f1;
-  --axis: #c3cbdb;
+  /* Chart series. series-3 is always money coming in. */
+  --series-1: #5b3df5;
+  --series-2: #ff7a00;
+  --series-3: #12b886;
+  --series-4: #e0a800;
+  --series-5: #e0246a;
+  --series-6: #2558e8;
+  --series-muted: #b3acd6;
+  --series-1-ink: #ffffff;
+  --series-2-ink: #1a1530;
+  --series-3-ink: #1a1530;
+  --series-4-ink: #1a1530;
+  --series-5-ink: #ffffff;
+  --series-6-ink: #ffffff;
+  --grid: #e7e3f7;
+  --axis: #cbc4ea;
 
-  --sh-card: 0 1px 2px rgb(19 26 46 / 0.05), 0 6px 18px rgb(19 26 46 / 0.06);
-  --sh-float: 0 12px 40px rgb(19 26 46 / 0.2);
+  /* Hard arcade shadows; glows only in the dark. */
+  --sh-card: 4px 4px 0 #1a1530;
+  --sh-float: 6px 6px 0 #1a1530;
+  --glow-figure: 3px 3px 0 #1a1530;
+  --glow-accent: 0 0 0 transparent;
+  --glow-line: none;
+  --block-glow: inset 0 0 0 1.5px #1a1530;
+  --tab-glow: 2px 2px 0 var(--edge);
+  --glow-soft: none;
+  --lv-bg: #1a1530;
+  --lv-edge: #1a1530;
+  --lv-shadow: 4px 4px 0 #5b3df5;
+  --lv-label: #b8b0e8;
+  --lv-num: #3dffb5;
+  --lv-num-glow: none;
+  --xp: #12b886;
+  --nk-floor: rgb(26 21 48 / 0.16);
+  --bright: #ffffff;
+  /* Amber for block meters: brighter than --warn (which is dark enough for text); lit blocks carry an ink outline by day. */
+  --meter-warn: #ffb020;
+  --hero-glow: 0 0 0 transparent;
+  --hero-over-edge: #1a1530;
 }
+
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     color-scheme: dark;
-    --paper: #0d1220;
-    --sheet: #161e30;
-    --sunk: #1c2539;
-    --ink: #e9eef8;
-    --ink-2: #b4bfd6;
-    --ink-3: #8f9bb5;
-    --line: #2a3550;
-    --line-soft: #212b42;
-    --accent: #0b855b;
-    --accent-strong: #0e9a6a;
-    --accent-text: #5fe0ae;
-    --accent-soft: #12382b;
-    --on-accent: #ffffff;
-    --mint: #12382b;
-    --mint-ink: #8ee6bd;
-    --pink: #45202b;
-    --pink-ink: #ffb3c1;
-    --canary: #42360e;
-    --canary-ink: #f6d877;
-    --sky: #1f2b5c;
-    --sky-ink: #b7c4ff;
-    --good: #4fd49a;
-    --warn: #f3b548;
-    --bad: #ff8a80;
-    --hero-a: #0a6d4b;
-    --hero-b: #0a5560;
-    --hero-over-a: #8f2a26;
-    --hero-over-b: #6f2039;
-    --c-home: #4fd49a;
-    --c-activity: #7da2ff;
-    --c-bills: #ff7d9c;
-    --c-budget: #ffab4d;
-    --c-worth: #9d94ff;
-    --c-savings: #4ccad8;
-    --c-investing: #c592f5;
-    --c-accounts: #a9b6d1;
-    --series-1: #5b7bf2;
-    --series-2: #d95926;
-    --series-3: #199e70;
-    --series-4: #c98500;
-    --series-5: #d55181;
-    --series-6: #0ca30c;
-    --series-muted: #56627f;
-    --grid: #212b42;
-    --axis: #34405e;
-    --sh-card: 0 1px 2px rgb(0 0 0 / 0.3);
-    --sh-float: 0 12px 40px rgb(0 0 0 / 0.55);
+    --paper: #0b0d26;
+    --bg-grid: rgb(124 92 255 / 0.07);
+    --sheet: #15183d;
+    --sunk: #1c2050;
+    --ink: #f1f2ff;
+    --ink-2: #c9ccf2;
+    --ink-3: #a3a8da;
+    --line: #2e3375;
+    --line-soft: #23275a;
+    --edge: #2e3375;
+    --edge-w: 2px;
+    --accent: #3dffb5;
+    --accent-strong: #1fe09a;
+    --accent-text: #3dffb5;
+    --accent-soft: #10392f;
+    --on-accent: #06281c;
+    --mint: #0f3a33;
+    --mint-ink: #3dffb5;
+    --pink: #3d1838;
+    --pink-ink: #ff8fe0;
+    --canary: #3a3410;
+    --canary-ink: #ffe45e;
+    --sky: #1e2366;
+    --sky-ink: #b7beff;
+    --good: #3dffb5;
+    --warn: #ffe45e;
+    --bad: #ff6fa8;
+    --hero-a: #15183d;
+    --hero-b: #06071a;
+    --hero-over-a: #3d1838;
+    --hero-over-b: #2a1030;
+    --hero-edge: #3dffb5;
+    --hero-figure: #ffe45e;
+    --hero-text: #f1f2ff;
+    --hero-muted: #a3a8da;
+    --c-home: #3dffb5;
+    --c-activity: #5a8cff;
+    --c-bills: #ff5fd2;
+    --c-budget: #ffe45e;
+    --c-worth: #9b8cff;
+    --c-savings: #4fe3f0;
+    --c-investing: #c792ff;
+    --c-accounts: #a3a8da;
+    --series-1: #5a8cff;
+    --series-2: #ff5fd2;
+    --series-3: #3dffb5;
+    --series-4: #ffe45e;
+    --series-5: #c792ff;
+    --series-6: #4fe3f0;
+    --series-muted: #4a5098;
+  --series-1-ink: #06071a;
+  --series-2-ink: #06071a;
+  --series-3-ink: #06071a;
+  --series-4-ink: #06071a;
+  --series-5-ink: #06071a;
+  --series-6-ink: #06071a;
+    --grid: #23275a;
+    --axis: #3a4085;
+    --sh-card: 5px 5px 0 #04050f;
+    --sh-float: 0 0 0 1px #2e3375, 8px 8px 0 #04050f;
+    --glow-figure: 0 0 20px rgb(255 228 94 / 0.5), 3px 3px 0 #04050f;
+    --glow-accent: 0 0 14px rgb(61 255 181 / 0.45);
+    --glow-line: drop-shadow(0 0 4px rgb(61 255 181 / 0.55));
+  --block-glow: 0 0 7px currentColor;
+  --tab-glow: 0 0 12px color-mix(in srgb, var(--sec) 45%, transparent);
+  --glow-soft: 0 0 12px rgb(124 92 255 / 0.7);
+  --lv-bg: #15183d;
+  --lv-edge: #3dffb5;
+  --lv-shadow: 0 0 14px rgb(61 255 181 / 0.45), 4px 4px 0 #04050f;
+  --lv-label: #a3a8da;
+  --lv-num: #3dffb5;
+  --lv-num-glow: 0 0 8px rgb(61 255 181 / 0.8);
+  --xp: #3dffb5;
+  --nk-floor: rgb(61 255 181 / 0.18);
+  --bright: #f1f2ff;
+  --meter-warn: #ffe45e;
+  --hero-glow: 0 0 22px rgb(61 255 181 / 0.22);
+  --hero-over-edge: #ff5fd2;
   }
 }
 
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --paper: #0d1220;
-  --sheet: #161e30;
-  --sunk: #1c2539;
-  --ink: #e9eef8;
-  --ink-2: #b4bfd6;
-  --ink-3: #8f9bb5;
-  --line: #2a3550;
-  --line-soft: #212b42;
-  --accent: #0b855b;
-  --accent-strong: #0e9a6a;
-  --accent-text: #5fe0ae;
-  --accent-soft: #12382b;
-  --on-accent: #ffffff;
-  --mint: #12382b;
-  --mint-ink: #8ee6bd;
-  --pink: #45202b;
-  --pink-ink: #ffb3c1;
-  --canary: #42360e;
-  --canary-ink: #f6d877;
-  --sky: #1f2b5c;
-  --sky-ink: #b7c4ff;
-  --good: #4fd49a;
-  --warn: #f3b548;
-  --bad: #ff8a80;
-  --hero-a: #0a6d4b;
-  --hero-b: #0a5560;
-  --hero-over-a: #8f2a26;
-  --hero-over-b: #6f2039;
-  --c-home: #4fd49a;
-  --c-activity: #7da2ff;
-  --c-bills: #ff7d9c;
-  --c-budget: #ffab4d;
-  --c-worth: #9d94ff;
-  --c-savings: #4ccad8;
-  --c-investing: #c592f5;
-  --c-accounts: #a9b6d1;
-  --series-1: #5b7bf2;
-  --series-2: #d95926;
-  --series-3: #199e70;
-  --series-4: #c98500;
-  --series-5: #d55181;
-  --series-6: #0ca30c;
-  --series-muted: #56627f;
-  --grid: #212b42;
-  --axis: #34405e;
-  --sh-card: 0 1px 2px rgb(0 0 0 / 0.3);
-  --sh-float: 0 12px 40px rgb(0 0 0 / 0.55);
+  --paper: #0b0d26;
+  --bg-grid: rgb(124 92 255 / 0.07);
+  --sheet: #15183d;
+  --sunk: #1c2050;
+  --ink: #f1f2ff;
+  --ink-2: #c9ccf2;
+  --ink-3: #a3a8da;
+  --line: #2e3375;
+  --line-soft: #23275a;
+  --edge: #2e3375;
+  --edge-w: 2px;
+  --accent: #3dffb5;
+  --accent-strong: #1fe09a;
+  --accent-text: #3dffb5;
+  --accent-soft: #10392f;
+  --on-accent: #06281c;
+  --mint: #0f3a33;
+  --mint-ink: #3dffb5;
+  --pink: #3d1838;
+  --pink-ink: #ff8fe0;
+  --canary: #3a3410;
+  --canary-ink: #ffe45e;
+  --sky: #1e2366;
+  --sky-ink: #b7beff;
+  --good: #3dffb5;
+  --warn: #ffe45e;
+  --bad: #ff6fa8;
+  --hero-a: #15183d;
+  --hero-b: #06071a;
+  --hero-over-a: #3d1838;
+  --hero-over-b: #2a1030;
+  --hero-edge: #3dffb5;
+  --hero-figure: #ffe45e;
+  --hero-text: #f1f2ff;
+  --hero-muted: #a3a8da;
+  --c-home: #3dffb5;
+  --c-activity: #5a8cff;
+  --c-bills: #ff5fd2;
+  --c-budget: #ffe45e;
+  --c-worth: #9b8cff;
+  --c-savings: #4fe3f0;
+  --c-investing: #c792ff;
+  --c-accounts: #a3a8da;
+  --series-1: #5a8cff;
+  --series-2: #ff5fd2;
+  --series-3: #3dffb5;
+  --series-4: #ffe45e;
+  --series-5: #c792ff;
+  --series-6: #4fe3f0;
+  --series-muted: #4a5098;
+  --series-1-ink: #06071a;
+  --series-2-ink: #06071a;
+  --series-3-ink: #06071a;
+  --series-4-ink: #06071a;
+  --series-5-ink: #06071a;
+  --series-6-ink: #06071a;
+  --grid: #23275a;
+  --axis: #3a4085;
+  --sh-card: 5px 5px 0 #04050f;
+  --sh-float: 0 0 0 1px #2e3375, 8px 8px 0 #04050f;
+  --glow-figure: 0 0 20px rgb(255 228 94 / 0.5), 3px 3px 0 #04050f;
+  --glow-accent: 0 0 14px rgb(61 255 181 / 0.45);
+  --glow-line: drop-shadow(0 0 4px rgb(61 255 181 / 0.55));
+  --block-glow: 0 0 7px currentColor;
+  --tab-glow: 0 0 12px color-mix(in srgb, var(--sec) 45%, transparent);
+  --glow-soft: 0 0 12px rgb(124 92 255 / 0.7);
+  --lv-bg: #15183d;
+  --lv-edge: #3dffb5;
+  --lv-shadow: 0 0 14px rgb(61 255 181 / 0.45), 4px 4px 0 #04050f;
+  --lv-label: #a3a8da;
+  --lv-num: #3dffb5;
+  --lv-num-glow: 0 0 8px rgb(61 255 181 / 0.8);
+  --xp: #3dffb5;
+  --nk-floor: rgb(61 255 181 / 0.18);
+  --bright: #f1f2ff;
+  --meter-warn: #ffe45e;
+  --hero-glow: 0 0 22px rgb(61 255 181 / 0.22);
+  --hero-over-edge: #ff5fd2;
 }
+
 
 @theme inline {
   --color-paper: var(--paper);
@@ -190,6 +293,7 @@
   --color-ink-3: var(--ink-3);
   --color-line: var(--line);
   --color-line-soft: var(--line-soft);
+  --color-edge: var(--edge);
   --color-accent: var(--accent);
   --color-accent-strong: var(--accent-strong);
   --color-accent-text: var(--accent-text);
@@ -208,20 +312,18 @@
   --color-bad: var(--bad);
   --color-sec: var(--sec, var(--accent-text));
 
-  --font-sans: "Archivo Variable", ui-sans-serif, system-ui, -apple-system, sans-serif;
-  --font-display: "Archivo Variable", ui-sans-serif, system-ui, -apple-system, sans-serif;
-  /* The game's numbers only: level, XP. An 8-bit face, used small and sparingly. */
-  --font-pixel: "Press Start 2P", ui-monospace, monospace;
+  --font-sans: "Rubik Variable", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-display: "Bungee", "Rubik Variable", ui-sans-serif, system-ui, sans-serif;
 
   --text-micro: 0.75rem;
   --text-small: 0.875rem;
   --text-body: 1rem;
   --text-lead: 1.125rem;
-  --text-title: 1.375rem;
-  --text-headline: 1.875rem;
+  --text-title: 1.25rem;
+  --text-headline: 1.75rem;
 
-  --radius-sheet: 20px;
-  --radius-control: 14px;
+  --radius-sheet: 14px;
+  --radius-control: 10px;
 
   --shadow-card: var(--sh-card);
   --shadow-float: var(--sh-float);
@@ -246,7 +348,10 @@ html {
 }
 
 body {
-  background: var(--paper);
+  /* The arcade floor: a faint grid under everything. */
+  background-color: var(--paper);
+  background-image: linear-gradient(var(--bg-grid) 1px, transparent 1px), linear-gradient(90deg, var(--bg-grid) 1px, transparent 1px);
+  background-size: 24px 24px;
   color: var(--ink);
   font-family: var(--font-sans);
   font-size: var(--text-body);
@@ -267,22 +372,94 @@ body {
   }
 }
 
-/* Titles: Archivo, heavy and a little wide. */
+/* Titles: Bungee, an arcade marquee face. */
 .display {
   font-family: var(--font-display);
-  font-weight: 800;
-  font-stretch: 108%;
-  letter-spacing: -0.02em;
-  line-height: 1.1;
+  font-weight: 400;
+  letter-spacing: 0.01em;
+  line-height: 1.12;
 }
 
-/* Money figures: heavy and condensed, like a scoreboard, so long sums stay compact. */
+/* Money figures: the same marquee face, so the numbers that matter read like a scoreboard. */
 .figure {
   font-family: var(--font-display);
-  font-weight: 800;
-  font-stretch: 82%;
-  letter-spacing: -0.015em;
+  font-weight: 400;
+  letter-spacing: 0;
   line-height: 1;
+}
+
+/* A card's outline: thick ink in daylight, a dim edge at night (see --edge). */
+.edge {
+  border: var(--edge-w) solid var(--edge);
+}
+
+/* What should shine: the number that matters, and where you are. */
+.glow-figure {
+  text-shadow: var(--glow-figure);
+}
+.glow-accent {
+  box-shadow: var(--glow-accent);
+}
+.glow-line {
+  filter: var(--glow-line);
+}
+/* The tab you're on: its section colour, outlined, glowing at night. */
+.tab-on {
+  color: var(--sec);
+  background: color-mix(in srgb, var(--sec) 14%, transparent);
+  border-color: var(--sec);
+  box-shadow: var(--tab-glow);
+}
+.tab-bar {
+  border-top: var(--edge-w) solid var(--edge);
+}
+.glow-figure-soft {
+  text-shadow: var(--glow-soft);
+}
+
+/* Home's top card: violet with a yellow number by day, a neon-edged screen at night. */
+.hero-card {
+  background: var(--hero-a);
+  color: var(--hero-text);
+  border: var(--edge-w) solid var(--hero-edge);
+  box-shadow: var(--hero-glow), var(--sh-card);
+}
+.hero-over {
+  background: var(--hero-over-a);
+  border-color: var(--hero-over-edge);
+}
+/* Lines inside a hero card, in the card's own text colour. */
+.hero-rule {
+  border-color: color-mix(in srgb, var(--hero-text) 24%, transparent);
+}
+.hero-rules > * + * {
+  border-top: 1px solid color-mix(in srgb, var(--hero-text) 20%, transparent);
+}
+.hero-figure {
+  color: var(--hero-figure);
+  text-shadow: var(--glow-figure);
+}
+
+/* The level block: an arcade score box. Ink with a mint number by day, a glowing mint box at night. */
+.lv-block {
+  background: var(--lv-bg);
+  border: 2px solid var(--lv-edge);
+  box-shadow: var(--lv-shadow);
+}
+.lv-chip {
+  box-shadow: none;
+}
+.lv-label {
+  color: var(--lv-label);
+}
+.lv-num {
+  color: var(--lv-num);
+  text-shadow: var(--lv-num-glow);
+}
+
+/* A lit block in a block bar: outlined in daylight, glowing its own colour at night. */
+.block-on {
+  box-shadow: var(--block-glow);
 }
 
 /* The game layer's retro touch: levels and XP in a pixel face. Sized in steps of 8px, where it stays crisp. */
@@ -382,8 +559,8 @@ dialog.sheet {
   width: 100%;
   max-width: 100%;
   max-height: min(92dvh, var(--sheet-max, 92dvh));
-  border-radius: 26px 26px 0 0;
-  border: 1px solid var(--line);
+  border-radius: 18px 18px 0 0;
+  border: var(--edge-w) solid var(--edge);
   border-bottom: 0;
   background: var(--sheet);
   color: var(--ink);
@@ -396,7 +573,7 @@ dialog.sheet[open] {
   animation: sheet-up 0.26s cubic-bezier(0.32, 0.72, 0, 1);
 }
 dialog.sheet::backdrop {
-  background: rgb(13 18 32 / 0.45);
+  background: rgb(6 7 26 / 0.55);
   animation: fade-in 0.2s ease;
 }
 @keyframes sheet-up {
@@ -414,8 +591,8 @@ dialog.sheet::backdrop {
     margin: auto;
     width: min(32rem, calc(100vw - 2rem));
     max-height: 85dvh;
-    border-radius: 26px;
-    border-bottom: 1px solid var(--line);
+    border-radius: 18px;
+    border-bottom: var(--edge-w) solid var(--edge);
   }
   dialog.sheet[open] {
     animation: sheet-pop 0.2s cubic-bezier(0.23, 1, 0.32, 1);
@@ -550,12 +727,12 @@ input[type="number"]::-webkit-inner-spin-button {
 .nk-sleep .nk-head { transform: translateY(3.5px) rotate(6deg); }
 
 /* Floppy ears hinge at the top, where they meet the head: perked swings them up and out, sad lets them hang. */
-.nk-ear-l { transform-origin: 92% 8%; transition: transform 0.35s cubic-bezier(0.3, 1.6, 0.5, 1); }
-.nk-ear-r { transform-origin: 8% 8%; transition: transform 0.35s cubic-bezier(0.3, 1.6, 0.5, 1); }
-.nk-ears-perk .nk-ear-l { transform: rotate(24deg); }
-.nk-ears-perk .nk-ear-r { transform: rotate(-24deg); }
-.nk-ears-down .nk-ear-l { transform: rotate(-10deg) translateY(2px); }
-.nk-ears-down .nk-ear-r { transform: rotate(10deg) translateY(2px); }
+.nk-ear-l { transform-origin: 88% 92%; transition: transform 0.35s cubic-bezier(0.3, 1.6, 0.5, 1); }
+.nk-ear-r { transform-origin: 12% 92%; transition: transform 0.35s cubic-bezier(0.3, 1.6, 0.5, 1); }
+.nk-ears-perk .nk-ear-l { transform: rotate(14deg); }
+.nk-ears-perk .nk-ear-r { transform: rotate(-14deg); }
+.nk-ears-down .nk-ear-l { transform: rotate(-24deg) translateY(3px); }
+.nk-ears-down .nk-ear-r { transform: rotate(24deg) translateY(3px); }
 .nk-twitch-l .nk-ear-l { animation: nk-twitch-l 0.45s ease-out; }
 .nk-twitch-r .nk-ear-r { animation: nk-twitch-r 0.45s ease-out; }
 @keyframes nk-twitch-l { 30% { transform: rotate(30deg); } 65% { transform: rotate(-6deg); } }

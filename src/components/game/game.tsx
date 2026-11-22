@@ -74,7 +74,7 @@ function Notes() {
       type="button"
       onClick={next}
       role="status"
-      className="xp-pop fixed left-1/2 top-[calc(env(safe-area-inset-top)+10px)] z-[65] flex max-w-[min(92vw,420px)] items-center gap-3 rounded-2xl border border-line-soft bg-sheet py-2.5 pl-3 pr-4 text-left shadow-float"
+      className="xp-pop fixed left-1/2 top-[calc(env(safe-area-inset-top)+10px)] z-[65] flex max-w-[min(92vw,420px)] items-center gap-3 edge rounded-control bg-sheet py-2.5 pl-3 pr-4 text-left shadow-card"
     >
       {note.kind === "xp" ? (
         <>

@@ -12,13 +12,13 @@ export function LevelBlock({ level, size = 48, fresh = false, className }: { lev
     <span
       role="img"
       aria-label={`Level ${level}`}
-      className={cx("inline-flex shrink-0 flex-col items-center justify-center gap-1 bg-accent text-on-accent", className)}
-      style={{ width: size, height: size, borderRadius: Math.round(size / 5), boxShadow: `inset 0 -${Math.max(3, Math.round(size / 14))}px 0 var(--accent-strong)` }}
+      className={cx("lv-block inline-flex shrink-0 flex-col items-center justify-center gap-1", className)}
+      style={{ width: size, height: size, borderRadius: Math.max(6, Math.round(size / 7)) }}
     >
-      <span aria-hidden className="pixel opacity-80" style={{ fontSize: big ? 10 : 8 }}>
+      <span aria-hidden className="pixel lv-label" style={{ fontSize: big ? 10 : 8 }}>
         LV
       </span>
-      <span aria-hidden className={cx("pixel", fresh && "lv-new")} style={{ fontSize: level >= 100 ? (big ? 16 : 10) : big ? 24 : 16 }}>
+      <span aria-hidden className={cx("pixel lv-num", fresh && "lv-new")} style={{ fontSize: level >= 100 ? (big ? 16 : 10) : big ? 24 : 16 }}>
         {level}
       </span>
     </span>
@@ -32,7 +32,7 @@ export function XpBar({ into, needed, blocks = 10, label = "XP toward the next l
   return (
     <div role="meter" aria-label={label} aria-valuemin={0} aria-valuemax={needed} aria-valuenow={Math.min(into, needed)} aria-valuetext={`${into} of ${needed} XP`} className={cx("flex gap-[3px]", className)}>
       {Array.from({ length: blocks }, (_, i) => (
-        <span key={i} className={cx("h-2.5 flex-1 rounded-[2px]", i < filled ? "bg-[var(--series-4)]" : "bg-sunk ring-1 ring-inset ring-line")} />
+        <span key={i} className={cx("h-2.5 flex-1 rounded-[2px]", i < filled ? "block-on" : "border border-line bg-sunk")} style={i < filled ? { background: "var(--xp)", color: "var(--xp)" } : undefined} />
       ))}
     </div>
   );
@@ -41,8 +41,8 @@ export function XpBar({ into, needed, blocks = 10, label = "XP toward the next l
 /** The level as a small pixel block: the You tab's icon, so your level is in view on every screen. */
 export function LevelChip({ level, size = 24 }: { level: number | null; size?: number }) {
   return (
-    <span aria-hidden className="inline-flex shrink-0 items-center justify-center bg-accent text-on-accent" style={{ width: size, height: size, borderRadius: Math.round(size / 4), boxShadow: `inset 0 -${Math.max(2, Math.round(size / 10))}px 0 var(--accent-strong)` }}>
-      <span className="pixel" style={{ fontSize: level !== null && level >= 10 ? Math.round(size / 3) : Math.round(size / 2.4) }}>
+    <span aria-hidden className="lv-block lv-chip inline-flex shrink-0 items-center justify-center" style={{ width: size, height: size, borderRadius: Math.max(4, Math.round(size / 5)) }}>
+      <span className="pixel lv-num" style={{ fontSize: level !== null && level >= 10 ? Math.round(size / 3) : Math.round(size / 2.4) }}>
         {level ?? ""}
       </span>
     </span>

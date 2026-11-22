@@ -8,7 +8,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useState } from "react";
 import { GoalTrack } from "@/components/charts";
 import { GoalDialog, goalSentence, goalStatus, type GoalSheet } from "@/components/goals";
-import { Button, EmptyState, ErrorNote, Fold, PageHeader, Sheet, SheetHeader, Skeleton, Tag, cx } from "@/components/ui";
+import { Blocks, Button, EmptyState, ErrorNote, Fold, PageHeader, Sheet, SheetHeader, Skeleton, Tag, cx } from "@/components/ui";
 import { useApi } from "@/components/use-api";
 import { addMonths, formatMedium, formatRelativeDay, formatShort, monthName, type ISODate } from "@/lib/dates";
 import { dollars, signedAmount } from "@/lib/money";
@@ -81,8 +81,8 @@ export function GoalScreen() {
             </p>
             <Tag tone={status.tone}>{status.label}</Tag>
           </div>
-          <div role="meter" aria-label={`${goal.name} progress`} aria-valuemin={0} aria-valuemax={goal.target} aria-valuenow={Math.min(goal.saved, goal.target)} className="mt-4 h-3 overflow-hidden rounded-full bg-sky">
-            <div className="h-full rounded-full bg-accent transition-[width] duration-500" style={{ width: `${Math.max(ratio > 0 ? 2 : 0, ratio * 100)}%` }} />
+          <div className="mt-4">
+            <Blocks share={ratio} color="var(--accent)" label={`${goal.name} progress`} blocks={14} height={12} valueNow={Math.min(goal.saved, goal.target)} valueMax={goal.target} />
           </div>
           <p className="mt-3 text-ink-2">{goalSentence(goal)}</p>
           {goal.targetDate && goal.daysLeft !== null && goal.daysLeft >= 0 && !done && (

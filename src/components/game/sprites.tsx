@@ -8,7 +8,7 @@ import type { BadgeId } from "@/lib/game/progress";
 
 type Art = { rows: string[]; colors: Record<string, string> };
 
-const WHITE = "var(--on-accent)";
+const WHITE = "var(--bright)";
 
 const FLAME = [
   ".....e......",

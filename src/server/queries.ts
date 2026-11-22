@@ -295,10 +295,17 @@ export async function getRecurring(ctx: Ctx): Promise<RecurringPayload> {
 
 /* ---------- budget ---------- */
 
-/** The ids of every bill and subscription payment: they're planned on their own, not counted against a category's budget. */
+/**
+ * The ids of every bill payment. Bills are necessities (rent, power, insurance, loans, and anything the
+ * person moves to Bills): planned on their own, never counted against a budget. Subscriptions are
+ * "Extras" (Netflix): they come out of their category's budget like any other spending.
+ */
 function billIdsOf(bundle: RecurringBundle): Set<string> {
-  return new Set(bundle.series.filter((s) => s.kind !== "income").flatMap((s) => s.history.map((h) => h.id)));
+  return new Set(bundle.series.filter((s) => s.kind === "bill").flatMap((s) => s.history.map((h) => h.id)));
 }
+
+/** What the month plan reserves ahead of time: bills and income, not Extras. */
+const plannedSeries = (bundle: RecurringBundle) => bundle.series.filter((s) => s.kind !== "subscription");
 
 /** The person's limits (removed ones are kept a while for Undo, but don't count). */
 export async function loadLimits(ctx: Ctx): Promise<(Limit & { createdAt: Date })[]> {
@@ -319,7 +326,7 @@ const savingPlanned = (goalList: GoalView[]) => goalList.filter((g) => g.saved <
 /** Everything the budget screen and Home need for one month, from one load. */
 function budgetFor(ctx: Ctx, bundle: RecurringBundle, limits: Limit[], goalList: GoalView[], month: string) {
   const rows = categoryBudgets({ month, today: ctx.today, history: bundle.history, billIds: billIdsOf(bundle), limits });
-  const monthPlan = buildMonthPlan({ month, today: ctx.today, transactions: bundle.history.filter((t) => monthOf(t.date) === month), recurring: bundle.series, savingsPlanned: savingPlanned(goalList) });
+  const monthPlan = buildMonthPlan({ month, today: ctx.today, transactions: bundle.history.filter((t) => monthOf(t.date) === month), recurring: plannedSeries(bundle), savingsPlanned: savingPlanned(goalList) });
   const plan = { ...budgetPlan({ income: monthPlan.incomeExpected, bills: monthPlan.billsExpected, saving: monthPlan.savingsPlanned, rows }), everydaySpent: monthPlan.everydaySpent, leftToSpend: monthPlan.leftToSpend };
   return { rows, monthPlan, plan };
 }
@@ -776,7 +783,8 @@ export async function getRecap(ctx: Ctx, weeksBack = 0): Promise<RecapPayload> {
   const spending = (list: typeof real) => spendingByCategory(list).reduce((s, c) => s + c.spent, 0);
   const out = week.filter((t) => t.amount < 0 && t.category !== "income");
   const biggest = [...out].sort((a, b) => a.amount - b.amount)[0];
-  const billIds = new Set(bundle.series.filter((s) => s.kind !== "income").flatMap((s) => s.history.map((h) => h.id)));
+  // Bills are necessities; Extras (Netflix) are everyday spending, so they count against a no-spend day.
+  const billIds = billIdsOf(bundle);
   const bills = out.filter((t) => billIds.has(t.id));
   const spendDays = new Set(out.filter((t) => !billIds.has(t.id)).map((t) => t.date));
   const savingsIds = new Set(savings.filter((a) => a.type === "depository" && a.subtype !== "checking").map((a) => a.id));

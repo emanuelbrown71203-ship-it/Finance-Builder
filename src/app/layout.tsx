@@ -8,7 +8,8 @@ export const metadata: Metadata = {
   manifest: "/manifest.webmanifest",
   // Lets the app open full screen from an iPhone home screen, like the owner's other apps.
   appleWebApp: { capable: true, title: APP_NAME, statusBarStyle: "default" },
-  icons: { icon: [{ url: "/icon.svg", type: "image/svg+xml" }, { url: "/icon-192.png", sizes: "192x192", type: "image/png" }], apple: "/apple-touch-icon.png" },
+  // Nickel on a night-arcade tile. New file names, so phones fetch the new picture instead of a cached one.
+  icons: { icon: [{ url: "/icon-nickel.svg", type: "image/svg+xml" }, { url: "/nickel-192.png", sizes: "192x192", type: "image/png" }], apple: [{ url: "/nickel-touch.png", sizes: "180x180" }] },
   other: { "mobile-web-app-capable": "yes" },
 };
 
@@ -18,8 +19,8 @@ export const viewport: Viewport = {
   // Draw under the notch and home bar; the app pads for them itself.
   viewportFit: "cover",
   themeColor: [
-    { media: "(prefers-color-scheme: light)", color: "#eef1f8" },
-    { media: "(prefers-color-scheme: dark)", color: "#0d1220" },
+    { media: "(prefers-color-scheme: light)", color: "#f1eeff" },
+    { media: "(prefers-color-scheme: dark)", color: "#0b0d26" },
   ],
 };
 

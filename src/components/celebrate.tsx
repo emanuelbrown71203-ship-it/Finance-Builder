@@ -13,7 +13,7 @@ import { useEffect, useSyncExternalStore } from "react";
 
 const KEY = "passbook-celebrations";
 const EVENT = "passbook-celebrations-change";
-const COLORS = ["#08835a", "#2459d6", "#ffd84d", "#cf2f5b", "#8a3fc7", "#0b7c8a", "#eb6834"];
+const COLORS = ["var(--series-1)", "var(--series-2)", "var(--series-3)", "var(--series-4)", "var(--series-5)", "var(--series-6)", "var(--hero-figure)"];
 
 type Party = { title: string; body: string; level?: number } | null;
 let current: Party = null;
@@ -68,7 +68,6 @@ const PIECES = Array.from({ length: 60 }, (_, i) => ({
   size: 7 + ((i * 17) % 7),
   color: COLORS[i % COLORS.length],
   spin: (i % 2 ? 1 : -1) * (360 + ((i * 71) % 360)),
-  round: i % 3 === 0,
 }));
 
 export function Celebrations() {
@@ -90,10 +89,10 @@ export function Celebrations() {
     <div role="status" onClick={close} className="fixed inset-0 z-[70] grid cursor-pointer place-items-center overflow-hidden bg-[rgb(13_18_32/0.35)] px-6">
       <div aria-hidden className="confetti pointer-events-none absolute inset-0">
         {PIECES.map((p, i) => (
-          <span key={i} style={{ left: `${p.left}%`, width: p.size, height: p.round ? p.size : p.size * 0.45, background: p.color, borderRadius: p.round ? "50%" : 2, animationDelay: `${p.delay}s`, animationDuration: `${p.duration}s`, ["--spin" as string]: `${p.spin}deg` }} />
+          <span key={i} style={{ left: `${p.left}%`, width: p.size, height: p.size, background: p.color, animationDelay: `${p.delay}s`, animationDuration: `${p.duration}s`, ["--spin" as string]: `${p.spin}deg` }} />
         ))}
       </div>
-      <div className="party-card relative max-w-sm rounded-[26px] bg-sheet px-7 py-8 text-center shadow-float">
+      <div className="party-card edge relative max-w-sm rounded-sheet bg-sheet px-7 py-8 text-center shadow-card">
         {party.level ? (
           <span className="flex flex-col items-center gap-3">
             <span className="pixel text-micro text-accent-text">LEVEL UP</span>

@@ -3,9 +3,10 @@ import { addMonthsToMonth, dayOfMonth, monthEnd, monthOf, type ISODate } from ".
 /*
  * The budget, worked out from the transactions each time.
  *
- * A category's budget is for everyday spending. Bills and subscriptions are
- * planned on their own (they come out of the month first), so a Netflix charge
- * never eats into the entertainment budget; it's shown beside it instead.
+ * A category's budget is for everyday spending, Extras (subscriptions) included. Bills (necessities) are
+ * planned on their own (they come out of the month first), so rent never eats
+ * into a budget; it's shown beside its category instead. Netflix, an Extra,
+ * counts in Entertainment like any other spending.
  *
  * For each category: what's been spent, what's left (with anything carried
  * over from earlier months when rollover is on), what that leaves per day,
@@ -31,7 +32,7 @@ export type CategoryBudget = {
   category: string;
   /** Everyday spending this month, in cents (refunds take it down). */
   spent: number;
-  /** Bills and subscriptions paid from this category this month: planned separately, not counted against the budget. */
+  /** Bills (necessities) paid from this category this month: planned separately, not counted against the budget. */
   bills: number;
   limit: number | null;
   rollover: boolean;
@@ -47,7 +48,7 @@ export type CategoryBudget = {
   paceNow: number | null;
   status: BudgetStatus;
   lastMonth: number;
-  /** Bills and subscriptions paid from this category last month. */
+  /** Bills paid from this category last month. */
   lastMonthBills: number;
   /** Everyday spending a month, averaged over the three months before this one. */
   average: number;

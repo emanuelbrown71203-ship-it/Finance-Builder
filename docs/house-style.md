@@ -98,9 +98,8 @@ If a rule here and an app's own existing look disagree, the app's existing look 
 - Errors say what happened and what to do. They don't apologise and they aren't vague.
 - **Small wins feel like a game.** Everyday tasks earn points (XP) toward levels, with a daily streak
   and badges. Say so the moment it happens: a small "+15 XP" note at the top with what it was for, a
-  coin sound, and a party with a fanfare for a level up. Keep the app's own look; the game gets only
-  retro accents (a pixel font for levels and XP, a block-by-block XP bar, little pixel badge
-  pictures). Points are decided on the server, each thing counts once, there's a daily limit per
+  coin sound, and a party with a fanfare for a level up. The game belongs to the look (a pixel font
+  for levels and XP, a block-by-block XP bar, little pixel badge pictures), not a box bolted on top. Points are decided on the server, each thing counts once, there's a daily limit per
   kind, and Undo takes them back. Sounds are quiet, follow the phone's silent switch, and can be
   switched off in Settings.
 - Up or down is always **an arrow and a number**, never colour alone.
@@ -122,21 +121,36 @@ Charts and breakdowns live on their own screens.
 
 ## 8. The look
 
-- **Type:** Archivo (the variable font, with its width axis). Titles are heavy (800) and a little wide;
-  big numbers are heavy and condensed, like a scoreboard. Body text is 16px.
-- **Shape:** cards are white with 20px corners, a hairline border and a soft shadow. Buttons and boxes
-  have 14px corners. Tags and pills are fully round.
-- **Colour:** a pale cool page background, white cards, one brand colour for main buttons, and **one
-  colour per section** for the menu and tab bar. Soft tints carry meaning and are used the same way
-  everywhere. Text never takes a chart colour.
-- **Icons:** simple line icons (lucide). Emoji only for the person's own content or a little
-  personality in a message, never as navigation icons.
-- **Game accents:** Press Start 2P only for short game numbers (level, +XP), at 8, 10, 12, 16 or 24px.
-  Badges are 12×12 pixel pictures drawn in the app's own colour tokens; ones not won yet are grey.
+The owner found the old clean-and-quiet look **bland** and picked an arcade one ("Neon Arcade", November
+2026, in Passbook). It's the starting point for a new app; an existing app keeps its own look unless the
+owner asks.
+
+- **Two moods, one app.** Light mode is a *daytime arcade*: pale lavender page with a faint grid, white
+  cards with thick ink outlines and a hard offset shadow (like a sticker), a violet hero band with a
+  yellow number. Dark mode is a *night arcade*: deep navy with the same grid, neon colours (mint,
+  pink, yellow, electric blue) and a soft glow on lit things.
+- **Type:** Bungee for titles and big numbers (chunky, arcade-sign letters), Rubik for everything you
+  read (16px body), Press Start 2P only for short game numbers (level, +XP) at 8, 10, 12, 16 or 24px.
+  Long titles wrap to two lines rather than cut off.
+- **Shape:** cards have 18px corners and the thick edge; buttons and boxes 10px with a hard shadow
+  that presses in when tapped. Tags are small rounded rectangles. Switches and tabs are chunky
+  rounded squares, the selected one filled with the brand colour.
+- **Bars are blocks.** Progress, budgets and XP fill block by block like a power bar, with a tick for
+  where you'd be at an even pace. Lit blocks glow at night.
+- **Charts** are hand-drawn SVG: step lines and square markers, columns built from blocks, dotted grid
+  lines. They follow the dataviz skill, have a scrub readout, and never rely on colour alone.
+- **Icons:** pixel icons on a 10×10 grid for the menu and every category (`pixel-icons.tsx`), in a
+  small outlined tile. Simple line icons (lucide) for actions inside a screen. Emoji only for the
+  person's own content or a little personality in a message.
+- **Colour:** one brand colour for main buttons (violet by day, mint at night) and one colour per
+  section. Soft tints carry meaning and are used the same way everywhere. Text never takes a chart
+  colour. Every colour is a token in `globals.css`; nothing is hard-coded on a screen.
+- **The companion and the app icon share one drawing.** Nickel is a neon robot pup (navy shell, a
+  dark visor where his eyes glow mint, pointed ears, a coin on his chest, an antenna light for his
+  mood), the same in light and dark. The home-screen icon is his face on a navy tile with a mint edge.
+- Badges are 12×12 pixel pictures drawn in the app's own colour tokens; ones not won yet are grey.
 - **Light, dark or automatic**, chosen in Settings with a three-way switch, remembered on that device
   only. Automatic is the default.
-- Charts are hand-drawn SVG, follow the dataviz skill, have a hover/scrub readout, and never rely on
-  colour alone.
 
 ## 9. Words
 
@@ -149,7 +163,8 @@ Charts and breakdowns live on their own screens.
 
 Every app ships with: a web app manifest (`display: standalone`), `apple-mobile-web-app-capable`, an
 apple-touch-icon (180px, square, no rounded corners: the phone rounds them), 192 and 512 icons plus a
-maskable 512, and a status-bar colour that matches the page in light and dark.
+maskable 512, and a status-bar colour that matches the page in light and dark. When the icon changes,
+give the files new names: phones keep the old picture for an address they've seen.
 
 ## 11. How to work on a change
 
@@ -179,6 +194,8 @@ Ask before anything that changes or deletes real data.
 | Pinned big title | `PageHeader` in `src/components/ui.tsx` | Roux |
 | Light / dark / automatic | `useTheme` in `src/components/use-api.ts`, Settings screen | all four |
 | Section colours | `--c-*` and `.sec-*` in `src/app/globals.css` | HOH Hub |
+| Neon Arcade tokens (edge, glow, hero, blocks) | `src/app/globals.css`, `Blocks` in `src/components/ui.tsx` | Passbook |
+| Pixel icons | `src/components/pixel-icons.tsx` | Passbook |
 | Sample-data mode | `src/server/demo.ts`, `src/db/seed.ts` | Roux, HOH Hub |
 | Slide a row left | `SwipeRow` in `src/components/transactions.tsx` | Roux |
 | Celebrations | `src/components/celebrate.tsx` | Tasks for Two |

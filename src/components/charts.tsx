@@ -7,10 +7,22 @@ import { dollars, dollarsCompact, dollarsExact } from "@/lib/money";
 import { cx } from "./ui";
 
 /*
-  Charts are hand-drawn SVG so they follow one set of rules:
-  thin marks, hairline grid, a crosshair that finds the date for you, values
-  in ink (never in the series color), and a legend whenever there are two series.
+  Charts are hand-drawn SVG so they follow one set of rules, in the app's
+  arcade style: step lines (each value holds until the next, like an old
+  game's graph), bars built from blocks, a dotted grid, square markers, a glow
+  at night; a crosshair that finds the date for you, values in ink (never in
+  the series color), and a legend whenever there are two series.
 */
+
+/** A step line through the points: across to the next one, then up or down to it. */
+function stepLine(points: [number, number][]): string {
+  return points.map(([px, py], i) => (i === 0 ? `M${px.toFixed(1)},${py.toFixed(1)}` : `H${px.toFixed(1)}V${py.toFixed(1)}`)).join("");
+}
+
+/** A square marker, centred on a point. */
+function Marker({ x, y, size = 10, fill = "var(--series-1)", stroke = "var(--sheet)" }: { x: number; y: number; size?: number; fill?: string; stroke?: string }) {
+  return <rect x={x - size / 2} y={y - size / 2} width={size} height={size} fill={fill} stroke={stroke} strokeWidth="2" />;
+}
 
 function useWidth<T extends HTMLElement>(): [React.RefObject<T | null>, number] {
   const ref = useRef<T>(null);
@@ -103,7 +115,7 @@ export function TrendChart({ points, label, height = 230, compare, formatDate = 
 
   const x = (i: number) => m.left + (i / (points.length - 1)) * plotW;
   const y = (v: number) => m.top + (1 - (v - scale.min) / (scale.max - scale.min)) * plotH;
-  const line = points.map((p, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(p.value).toFixed(1)}`).join("");
+  const line = stepLine(points.map((p, i) => [x(i), y(p.value)]));
   const area = `${line}L${x(points.length - 1).toFixed(1)},${m.top + plotH}L${m.left},${m.top + plotH}Z`;
   const xTicks = [0, 1, 2, 3].map((k) => Math.round((k / 3) * (points.length - 1)));
   // The comparison runs over the same dates; if it is longer, it just runs off the right edge.
@@ -141,13 +153,13 @@ export function TrendChart({ points, label, height = 230, compare, formatDate = 
         >
           <defs>
             <linearGradient id={gradient} x1="0" x2="0" y1="0" y2="1">
-              <stop offset="0" stopColor="var(--series-1)" stopOpacity="0.16" />
+              <stop offset="0" stopColor="var(--series-1)" stopOpacity="0.28" />
               <stop offset="1" stopColor="var(--series-1)" stopOpacity="0.02" />
             </linearGradient>
           </defs>
           {scale.ticks.map((t) => (
             <g key={t}>
-              <line x1={m.left} x2={width - m.right} y1={y(t)} y2={y(t)} stroke="var(--grid)" />
+              <line x1={m.left} x2={width - m.right} y1={y(t)} y2={y(t)} stroke="var(--grid)" strokeDasharray="2 4" />
               <text x={m.left - 8} y={y(t) + 4} textAnchor="end" className="tabular fill-ink-3 text-[11px]">
                 {dollarsCompact(t)}
               </text>
@@ -160,9 +172,9 @@ export function TrendChart({ points, label, height = 230, compare, formatDate = 
           ))}
           <path d={area} fill={`url(#${gradient})`} />
           {compareLine && <path d={compareLine} fill="none" stroke="var(--series-muted)" strokeWidth="1.75" strokeDasharray="4 4" strokeLinejoin="round" />}
-          <path d={line} fill="none" stroke="var(--series-1)" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
+          <path d={line} fill="none" stroke="var(--series-1)" strokeWidth="3" strokeLinejoin="miter" strokeLinecap="square" className="glow-line" />
           {active !== null && <line x1={x(shown)} x2={x(shown)} y1={m.top} y2={m.top + plotH} stroke="var(--axis)" />}
-          <circle cx={x(shown)} cy={y(points[shown].value)} r="4.5" fill="var(--series-1)" stroke="var(--sheet)" strokeWidth="2" />
+          <Marker x={x(shown)} y={y(points[shown].value)} />
         </svg>
       )}
       {active !== null && width > 0 && (
@@ -199,11 +211,11 @@ export function Sparkline({ values, width = 120, height = 36, label }: { values:
   const max = Math.max(...values);
   const x = (i: number) => 3 + (i / (values.length - 1)) * (width - 8);
   const y = (v: number) => 4 + (1 - (v - min) / (max - min || 1)) * (height - 8);
-  const d = values.map((v, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join("");
+  const d = stepLine(values.map((v, i) => [x(i), y(v)]));
   return (
     <svg width={width} height={height} role="img" aria-label={label} className="shrink-0">
-      <path d={d} fill="none" stroke="var(--series-muted)" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
-      <circle cx={x(values.length - 1)} cy={y(values[values.length - 1])} r="4" fill="var(--series-1)" stroke="var(--sheet)" strokeWidth="2" />
+      <path d={d} fill="none" stroke="var(--series-muted)" strokeWidth="2.5" strokeLinejoin="miter" strokeLinecap="square" />
+      <Marker x={x(values.length - 1)} y={y(values[values.length - 1])} size={8} />
     </svg>
   );
 }
@@ -239,7 +251,7 @@ export function Runway({ plan, height = 250 }: { plan: MonthPlan; height?: numbe
   const ticks = niceTicks(lo, hi);
   const x = (d: number) => m.left + (d / n) * plotW;
   const y = (v: number) => m.top + (1 - (v - (lo - (lo < 0 ? pad : 0))) / (hi + pad - (lo - (lo < 0 ? pad : 0)))) * plotH;
-  const line = left.map((v, d) => `${d ? "L" : "M"}${x(d).toFixed(1)},${y(v).toFixed(1)}`).join("");
+  const line = stepLine(left.map((v, d) => [x(d), y(v)]));
   const stripTop = height - stripH + 2;
   const day = activeDay ? plan.days[activeDay - 1] : null;
 
@@ -271,7 +283,7 @@ export function Runway({ plan, height = 250 }: { plan: MonthPlan; height?: numbe
           >
             {ticks.map((t) => (
               <g key={t}>
-                <line x1={m.left} x2={width - m.right} y1={y(t)} y2={y(t)} stroke={t === 0 ? "var(--axis)" : "var(--grid)"} />
+                <line x1={m.left} x2={width - m.right} y1={y(t)} y2={y(t)} stroke={t === 0 ? "var(--axis)" : "var(--grid)"} strokeDasharray={t === 0 ? undefined : "2 4"} />
                 <text x={m.left - 8} y={y(t) + 4} textAnchor="end" className="tabular fill-ink-3 text-[11px]">
                   {dollarsCompact(t)}
                 </text>
@@ -291,14 +303,14 @@ export function Runway({ plan, height = 250 }: { plan: MonthPlan; height?: numbe
               Today
             </text>
 
-            <path d={line} fill="none" stroke="var(--series-1)" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
-            {activeDay !== null && activeDay <= todayIndex && <circle cx={x(activeDay)} cy={y(left[activeDay])} r="3.5" fill="var(--sheet)" stroke="var(--series-1)" strokeWidth="2" />}
-            <circle cx={x(todayIndex)} cy={y(left[todayIndex])} r="4.5" fill="var(--series-1)" stroke="var(--sheet)" strokeWidth="2" />
+            <path d={line} fill="none" stroke="var(--series-1)" strokeWidth="3" strokeLinejoin="miter" strokeLinecap="square" className="glow-line" />
+            {activeDay !== null && activeDay <= todayIndex && <Marker x={x(activeDay)} y={y(left[activeDay])} size={8} fill="var(--sheet)" stroke="var(--series-1)" />}
+            <Marker x={x(todayIndex)} y={y(left[todayIndex])} />
 
             {/* What lands on each date. */}
             <text x={m.left - 8} y={stripTop + 12} textAnchor="end" className="fill-ink-3 text-[11px]">In</text>
             <text x={m.left - 8} y={stripTop + 32} textAnchor="end" className="fill-ink-3 text-[11px]">Bills</text>
-            <line x1={m.left} x2={width - m.right} y1={stripTop + 18} y2={stripTop + 18} stroke="var(--grid)" />
+            <line x1={m.left} x2={width - m.right} y1={stripTop + 18} y2={stripTop + 18} stroke="var(--grid)" strokeDasharray="2 4" />
             {plan.days.map((d, i) => {
               const cx_ = x(i + 0.5);
               const settledIncome = d.events.some((e) => e.type === "income" && e.settled);
@@ -356,6 +368,9 @@ export function Runway({ plan, height = 250 }: { plan: MonthPlan; height?: numbe
 export type ColumnGroup = { key: string; label: string; values: number[] };
 
 /** Side-by-side columns per period, for one or two series. */
+const BLOCK = 7;
+const BLOCK_GAP = 2;
+
 export function Columns({ groups, series, height = 210, label }: { groups: ColumnGroup[]; series: { name: string; color: string }[]; height?: number; label: string }) {
   const [ref, width] = useWidth<HTMLDivElement>();
   const [active, setActive] = useState<number | null>(null);
@@ -377,7 +392,7 @@ export function Columns({ groups, series, height = 210, label }: { groups: Colum
           <svg width={width} height={height} role="img" aria-label={label} className="block">
             {ticks.map((t) => (
               <g key={t}>
-                <line x1={m.left} x2={width - m.right} y1={y(t)} y2={y(t)} stroke={t === 0 ? "var(--axis)" : "var(--grid)"} />
+                <line x1={m.left} x2={width - m.right} y1={y(t)} y2={y(t)} stroke={t === 0 ? "var(--axis)" : "var(--grid)"} strokeDasharray={t === 0 ? undefined : "2 4"} />
                 <text x={m.left - 8} y={y(t) + 4} textAnchor="end" className="tabular fill-ink-3 text-[11px]">
                   {dollarsCompact(t)}
                 </text>
@@ -392,9 +407,16 @@ export function Columns({ groups, series, height = 210, label }: { groups: Colum
                   {g.values.map((v, k) => {
                     const h = Math.max(v > 0 ? 2 : 0, base - y(v));
                     const bx = center - total / 2 + k * (barW + 2);
-                    const r = Math.min(4, h, barW / 2);
-                    // Rounded at the data end, square on the baseline.
-                    return <path key={k} d={`M${bx},${base}V${base - h + r}q0,${-r} ${r},${-r}h${barW - 2 * r}q${r},0 ${r},${r}V${base}Z`} fill={series[k].color} />;
+                    // Built from blocks stacked up from the baseline, the top one cut to the value.
+                    const blocks: { y: number; h: number }[] = [];
+                    for (let at = 0; at < h; at += BLOCK + BLOCK_GAP) blocks.push({ y: base - Math.min(h, at + BLOCK), h: Math.min(BLOCK, h - at) });
+                    return (
+                      <g key={k} fill={series[k].color} className="glow-line">
+                        {blocks.map((b, j) => (
+                          <rect key={j} x={bx} y={b.y} width={barW} height={b.h} />
+                        ))}
+                      </g>
+                    );
                   })}
                   <text x={center} y={height - 6} textAnchor="middle" className="fill-ink-3 text-[11px]">
                     {g.label}
@@ -430,8 +452,8 @@ export function Columns({ groups, series, height = 210, label }: { groups: Colum
 /* ---------- one whole, split into parts ---------- */
 
 export const SERIES_COLORS = ["var(--series-1)", "var(--series-2)", "var(--series-3)", "var(--series-4)", "var(--series-5)", "var(--series-6)"];
-/** Label color inside each series fill: white, except near-black on yellow. */
-const INSIDE_LABEL = ["#fff", "#fff", "#fff", "#0b0b0b", "#fff", "#fff"];
+/** Label color inside each series fill, chosen per colour and mode so it stays readable (see --series-N-ink). */
+const INSIDE_LABEL = ["var(--series-1-ink)", "var(--series-2-ink)", "var(--series-3-ink)", "var(--series-4-ink)", "var(--series-5-ink)", "var(--series-6-ink)"];
 
 export function SegmentedBar({ parts, label }: { parts: { name: string; value: number }[]; label: string }) {
   const total = parts.reduce((s, p) => s + p.value, 0);
@@ -556,7 +578,7 @@ export function GoalTrack({ start, end, startSaved, target, history, today, plan
         >
           {ticks.map((t) => (
             <g key={t}>
-              <line x1={m.left} x2={width - m.right} y1={y(t)} y2={y(t)} stroke="var(--grid)" />
+              <line x1={m.left} x2={width - m.right} y1={y(t)} y2={y(t)} stroke="var(--grid)" strokeDasharray="2 4" />
               <text x={m.left - 8} y={y(t) + 4} textAnchor="end" className="tabular fill-ink-3 text-[11px]">
                 {dollarsCompact(t)}
               </text>
@@ -573,15 +595,15 @@ export function GoalTrack({ start, end, startSaved, target, history, today, plan
             Today
           </text>
           {plan && <path d={planLine} fill="none" stroke="var(--series-muted)" strokeWidth="1.75" strokeDasharray="5 4" strokeLinecap="round" />}
-          <path d={savedLine} fill="none" stroke="var(--series-1)" strokeWidth="2.25" strokeLinejoin="round" strokeLinecap="round" />
+          <path d={savedLine} fill="none" stroke="var(--series-1)" strokeWidth="3" strokeLinejoin="miter" strokeLinecap="square" className="glow-line" />
           {/* The goal itself, at the end of the plan */}
-          <circle cx={x(totalDays)} cy={y(target)} r="5" fill="var(--sheet)" stroke="var(--series-1)" strokeWidth="2" />
+          <Marker x={x(totalDays)} y={y(target)} fill="var(--sheet)" stroke="var(--series-1)" />
           <text x={x(totalDays) - 8} y={y(target) - 9} textAnchor="end" className="tabular fill-ink-2 text-[11px] font-bold">
             Goal {dollarsCompact(target)}
           </text>
           {active !== null && <line x1={x(shown)} x2={x(shown)} y1={m.top} y2={m.top + plotH} stroke="var(--axis)" />}
-          {shown <= todayIndex && <circle cx={x(shown)} cy={y(savedAt(days[shown]))} r="4.5" fill="var(--series-1)" stroke="var(--sheet)" strokeWidth="2" />}
-          {plan && active !== null && <circle cx={x(shown)} cy={y(planAt(shown))} r="3.5" fill="var(--series-muted)" stroke="var(--sheet)" strokeWidth="2" />}
+          {shown <= todayIndex && <Marker x={x(shown)} y={y(savedAt(days[shown]))} />}
+          {plan && active !== null && <Marker x={x(shown)} y={y(planAt(shown))} size={8} fill="var(--series-muted)" />}
         </svg>
       )}
       {active !== null && width > 0 && (

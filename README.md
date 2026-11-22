@@ -41,7 +41,7 @@ Passbook follows the same house style as the owner's other apps (written down in
 | Spending | Budget | The plan for the month's money (money in, bills, saving for goals, everyday budgets, and what has no job yet) and each everyday category: what's left, what that is a day, where it's heading at the usual pace, and On track / Heads up / Over. Tap a category for its charges, six months, its budget and rollover. "Suggest a budget" fills in amounts from the last three months, sized to fit. The month's spending pace chart and six months of money in and out. |
 | Spending | Transactions | Everything from every account, live. Search and filter. Tap one to rename it, change its category or add a note. |
 | Spending | Names | Bank code that could be clearer, with a suggested name to keep or change, and every name you've given. Reached from Transactions and You. |
-| Bills | Bills | Recurring bills, subscriptions and income, found from history, plus any you add by hand (repeating or a one-off coming up). Upcoming due dates, price-increase alerts, rename, "I cancelled this". |
+| Bills | Bills | Two lists, found from history plus any you add by hand (repeating or a one-off coming up): **Bills**, what you must pay (rent, utilities, insurance, loans, phone), set aside each month; and **Extras**, subscriptions you could live without, which count against your budget. One tap moves a charge between them. Upcoming due dates, price-increase alerts, rename, "I cancelled this". |
 | Wealth | Net worth | What you own minus what you owe over time, by account. Add things no bank reports (a car, a house) by hand. |
 | Wealth | Savings | Savings balance, monthly saving history, and goals. Each goal with a date gets a **track**: what to put away a month, a week and each payday to make it, whether you're ahead or behind, month-end checkpoints, 25/50/75/100% milestones, and ideas for where the money could come from. |
 | Wealth | Investing | Total, trend, split by type, and holdings with gain or loss. |
@@ -53,9 +53,9 @@ Passbook follows the same house style as the owner's other apps (written down in
 | You | Activity | What Nickel and Claude changed when asked, newest first, each with Undo for 30 days. |
 | You | Settings | Light or dark, celebrations, game sounds, Nickel, Face ID sign-in, Connect to Claude, Tasks for Two, remembered categories, your account, version. |
 
-**How the budget works.** A category's budget is for everyday spending; bills and subscriptions come out
-of the month first and are planned in Bills, so Netflix never eats the entertainment budget (it's shown
-beside it). The plan adds up to Home's number: what's left in your budgets, plus money not planned yet,
+**How the budget works.** A category's budget is for everyday spending, and that includes Extras: Netflix
+counts in Entertainment like any other spending. Bills (necessities) come out of the month first and are
+planned in Bills, so rent never eats a budget (it's shown beside its category). The plan adds up to Home's number: what's left in your budgets, plus money not planned yet,
 less spending with no budget, is "left to spend" (apart from anything rollover carried in from earlier
 months, which is shown on its own line). **Rollover** (per category) carries what's left, or what was
 overspent, into the next month; changing the limit keeps what was carried so far at the old limit.
@@ -85,8 +85,8 @@ Smaller things that make it easier to live with:
   25/50/75/100%, tuning the debt plan, opening the app each day and days with no everyday spending
   all earn XP. XP makes levels; daily check-ins make a streak; 14 badges have little pixel pictures.
   A "+XP" note pops up when something earns some, there's a level-up party, and 8-bit sounds (made by
-  the browser, quiet, silent when the phone is; off in Settings). Today's look stays: only the level
-  block, the XP bar and the badges are retro. The server decides what earns XP
+  the browser, quiet, silent when the phone is; off in Settings). The level block, the XP bar and the
+  badges are part of the arcade look. The server decides what earns XP
   (`src/server/game.ts`, rules in `src/lib/game/progress.ts`): each thing counts once, each kind has a
   daily limit, and Undo on the same day takes the XP back. Home shows the level and streak at the top.
 - **Nickel, the robo dog.** He sits in the corner of every screen, blinks, breathes, wags, looks
@@ -200,7 +200,12 @@ refresh. "Refresh" in the top bar forces a sync on demand.
 - **Plaid** for bank connections: Link, `/transactions/sync` with cursors, holdings,
   liabilities, and signed webhooks.
 - **Charts are hand-drawn SVG** (`src/components/charts.tsx`): no chart library.
-- **Type:** Archivo, the same family as the YouTube Dashboard and HOH Hub.
+- **The look: Neon Arcade.** A daytime arcade in light mode (lavender grid, white cards with thick ink
+  outlines, a violet hero with a yellow number) and a night arcade in dark mode (navy, neon, soft glows).
+  Bungee for titles and big numbers, Rubik to read, Press Start 2P for level and XP. Pixel icons
+  (`src/components/pixel-icons.tsx`), block meters (`Blocks` in `src/components/ui.tsx`), step-line
+  charts. Everything is a token in `src/app/globals.css`. Nickel is a neon robot pup, and the home-screen
+  icon is his face (`public/nickel-*.png`, `public/icon-nickel.svg`). See `docs/house-style.md`, section 8.
 
 ```
 src/

@@ -192,6 +192,16 @@ describe("sample household", () => {
     expect((await getRecap(ctx, 1)).to).toBe("2026-11-08");
   });
 
+  it("counts only necessities as bills paid in the recap; Extras are spending", async () => {
+    const r = await getRecap(ctx, 0);
+    const { series } = await getRecurring(ctx);
+    const paid = (kind: string) => series.filter((s) => s.kind === kind).flatMap((s) => s.history).filter((h) => h.date >= r.from && h.date <= r.to && h.amount < 0);
+    const bills = paid("bill");
+    expect(paid("subscription").length).toBeGreaterThan(0);
+    expect(r.billsPaid.count).toBe(bills.length);
+    expect(Math.abs(r.billsPaid.total)).toBe(Math.abs(bills.reduce((s, h) => s + h.amount, 0)));
+  });
+
   it("gives each goal a plan: open-ended, behind, on track", async () => {
     const { goals } = await getGoals(ctx);
     expect(goals.map((g) => [g.name, g.status])).toEqual([
@@ -303,9 +313,14 @@ describe("sample household", () => {
     expect(budget.isCurrent).toBe(true);
     expect(budget.daysLeft).toBe(12);
     expect(budget.monthPlan?.days).toHaveLength(30);
-    // Netflix is a bill: it shows beside entertainment's budget but isn't counted against it.
+    // Netflix is an Extra (a subscription you could live without): it counts in Entertainment's budget.
     const ent = budget.rows.find((r) => r.category === "entertainment")!;
-    expect(ent.bills).toBeGreaterThan(0);
+    expect(ent.bills).toBe(0);
+    const { transactions: netflix } = await getTransactions(ctx, { q: "Netflix", month: "2026-11", limit: 5, offset: 0 });
+    expect(netflix.length).toBeGreaterThan(0);
+    expect(ent.spent).toBeGreaterThanOrEqual(-netflix.reduce((s, t) => s + t.amount, 0));
+    // Rent is a bill: set aside each month, shown beside housing, never counted against a budget.
+    expect(budget.rows.find((r) => r.category === "housing")?.bills).toBeGreaterThan(0);
     // Groceries rolls over in the sample household, so last month's leftover (or overspend) is carried in.
     const groceries = budget.rows.find((r) => r.category === "groceries")!;
     expect(groceries.rollover).toBe(true);
@@ -363,6 +378,22 @@ describe("sample household", () => {
     // Rollover needs a limit, and a month in the future can't be set.
     await expect(setRollover(ctx, "travel", true)).rejects.toThrow(/limit/);
     await expect(setBudget(ctx, "dining", 28000, { rolloverSince: "2030-01" })).rejects.toThrow();
+  });
+
+  it("moving a subscription to Bills sets it aside each month; moving it back makes it an Extra again", async () => {
+    const before = await getBudget(ctx, "2026-11");
+    const netflix = (await getRecurring(ctx)).series.find((s) => s.name === "Netflix")!;
+    expect(netflix.kind).toBe("subscription");
+    await setRecurringOverride(ctx, netflix.key, { kind: "bill" });
+    const asBill = await getBudget(ctx, "2026-11");
+    const ent = (b: typeof before) => b.rows.find((r) => r.category === "entertainment")!;
+    expect(ent(asBill).bills).toBeGreaterThan(0);
+    expect(ent(asBill).spent).toBe(ent(before).spent - ent(asBill).bills);
+    expect(asBill.plan.bills).toBeGreaterThan(before.plan.bills);
+    // Home's number moves with it: the plan always adds up to "left to spend".
+    expect(asBill.plan.leftToSpend).toBe((await getOverview(ctx)).plan.leftToSpend);
+    await setRecurringOverride(ctx, netflix.key, { kind: "subscription" });
+    expect((await getBudget(ctx, "2026-11")).plan.bills).toBe(before.plan.bills);
   });
 
   it("keeps what rollover carried at the old limit when the limit changes", async () => {

@@ -26,8 +26,8 @@ function ago(iso: string | null, now: number): string {
 /** An on/off switch, sized like the one on an iPhone. */
 export function Switch({ checked, onChange, label }: { checked: boolean; onChange: (on: boolean) => void; label: string }) {
   return (
-    <button type="button" role="switch" aria-checked={checked} aria-label={label} onClick={() => onChange(!checked)} className={cx("relative h-[31px] w-[51px] shrink-0 rounded-full transition-colors after:absolute after:-inset-2", checked ? "bg-accent" : "bg-line")}>
-      <span className={cx("absolute left-0.5 top-0.5 size-[27px] rounded-full bg-white shadow transition-transform", checked && "translate-x-5")} />
+    <button type="button" role="switch" aria-checked={checked} aria-label={label} onClick={() => onChange(!checked)} className={cx("relative h-[31px] w-[51px] shrink-0 rounded-[9px] transition-colors after:absolute after:-inset-2", checked ? "bg-accent" : "bg-line")}>
+      <span className={cx("absolute left-0.5 top-0.5 size-[27px] rounded-[7px] bg-[var(--bright)] shadow transition-transform", checked && "translate-x-5")} />
     </button>
   );
 }

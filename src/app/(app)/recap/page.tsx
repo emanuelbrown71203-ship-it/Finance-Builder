@@ -4,7 +4,7 @@ import { ChevronLeft, ChevronRight } from "lucide-react";
 import { useEffect, useState } from "react";
 import { CategoryIcon } from "@/components/category-icon";
 import { SpendDelta, markRecapSeen } from "@/components/recap";
-import { ErrorNote, IconButton, PageHeader, Sheet, SheetHeader, Skeleton } from "@/components/ui";
+import { Blocks, ErrorNote, IconButton, PageHeader, Sheet, SheetHeader, Skeleton } from "@/components/ui";
 import { useApi } from "@/components/use-api";
 import { category } from "@/lib/categories";
 import { formatShort } from "@/lib/dates";
@@ -13,7 +13,7 @@ import type { Me, RecapPayload } from "@/lib/types";
 
 function Stat({ label, value, note }: { label: string; value: string; note?: string }) {
   return (
-    <div className="min-w-0 rounded-sheet border border-line-soft bg-sheet p-3.5 shadow-card">
+    <div className="edge min-w-0 rounded-sheet bg-sheet p-3.5 shadow-card">
       <p className="text-small font-bold text-ink-2">{label}</p>
       <p className="figure mt-2 truncate text-[1.6rem]">{value}</p>
       {note && <p className="mt-1 truncate text-small text-ink-3">{note}</p>}
@@ -43,7 +43,7 @@ export default function RecapPage() {
     return (
       <>
         <PageHeader title="Weekly recap" back={{ href: "/you", label: "You" }} />
-        <Skeleton className="h-64 rounded-[26px]" />
+        <Skeleton className="h-64 rounded-sheet" />
       </>
     );
   }
@@ -57,7 +57,7 @@ export default function RecapPage() {
         title="Weekly recap"
         back={{ href: "/you", label: "You" }}
         action={
-          <div className="flex items-center gap-1 rounded-full border border-line bg-sheet p-0.5">
+          <div className="flex items-center gap-1 rounded-control border-2 border-line bg-sheet p-0.5">
             <IconButton label="The week before" onClick={() => setBack(back + 1)} disabled={back >= 12} className="size-10">
               <ChevronLeft size={18} />
             </IconButton>
@@ -69,11 +69,11 @@ export default function RecapPage() {
       />
 
       <div className={`grid max-w-3xl grid-cols-1 gap-4 transition-opacity ${isValidating ? "opacity-70" : ""}`}>
-        <section className="rounded-[26px] p-5 text-white shadow-card sm:p-7" style={{ background: "linear-gradient(135deg, var(--hero-a), var(--hero-b))" }}>
+        <section className="hero-card rounded-sheet p-5 sm:p-7">
           <p className="text-small font-semibold opacity-90" aria-live="polite">
             {formatShort(data.from)} to {formatShort(data.to)}
           </p>
-          <p className="figure mt-3 text-[clamp(3.25rem,16vw,4.75rem)]">{dollars(data.spent)}</p>
+          <p className="figure hero-figure mt-3 text-[clamp(3.25rem,16vw,4.75rem)]">{dollars(data.spent)}</p>
           <h2 className="display mt-2 text-title">{back === 0 ? "spent last week" : "spent that week"}</h2>
           <p className="mt-2 opacity-95">{quiet ? "A quiet week: nothing came in or went out." : <SpendDelta now={data.spent} before={data.spentBefore} dollars={dollars} />}</p>
         </section>
@@ -101,9 +101,7 @@ export default function RecapPage() {
                       <span className="truncate font-bold">{category(c.category).label}</span>
                       <span className="tabular shrink-0">{dollars(c.spent)}</span>
                     </div>
-                    <div aria-hidden className="h-2.5 rounded-full bg-line-soft">
-                      <div className="h-full rounded-full bg-[var(--series-1)]" style={{ width: `${Math.max(2, (c.spent / largest) * 100)}%` }} />
-                    </div>
+                    <Blocks share={c.spent / largest} color="var(--series-1)" label={`${category(c.category).label}, compared with the biggest`} blocks={14} valueNow={c.spent} valueMax={largest} />
                   </div>
                 </li>
               ))}

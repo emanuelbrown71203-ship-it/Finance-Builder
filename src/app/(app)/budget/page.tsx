@@ -49,7 +49,7 @@ function CategoryRow({ row, data, onOpen }: { row: BudgetRow; data: BudgetPayloa
         <CategoryIcon category={row.category} />
         <span className="min-w-0 flex-1">
           <span className="flex items-baseline justify-between gap-3">
-            <span className="truncate font-bold">{name}</span>
+            <span className="min-w-0 break-words font-bold leading-snug">{name}</span>
             <span className="tabular shrink-0">
               <span className={cx("font-bold", row.left !== null && row.left < 0 && "text-bad")}>{row.left === null ? dollars(Math.max(0, row.spent)) : row.left < 0 ? `${dollars(-row.left)} over` : `${dollars(row.left)} left`}</span>
               <span className="text-small text-ink-3"> {row.limit === null ? "spent" : `of ${dollars(available(row))}`}</span>
@@ -83,7 +83,7 @@ function PlanCard({ data }: { data: BudgetPayload }) {
   const leftInBudgets = limited.reduce((s, r) => s + (r.left ?? 0), 0);
   const perDay = limited.reduce((s, r) => s + (r.perDay ?? 0), 0);
   const parts = [
-    { label: "Bills and subscriptions", amount: p.bills, color: "var(--c-bills)" },
+    { label: "Bills you must pay", amount: p.bills, color: "var(--c-bills)" },
     { label: "Saving for goals", amount: p.saving, color: "var(--c-savings)" },
     { label: "Everyday budgets", amount: p.budgeted, color: "var(--accent)" },
     { label: p.unplanned >= 0 ? "Not planned yet" : "More than comes in", amount: Math.abs(p.unplanned), color: p.unplanned >= 0 ? "var(--line)" : "var(--bad)" },
@@ -104,13 +104,13 @@ function PlanCard({ data }: { data: BudgetPayload }) {
         <>
           <p className="text-small font-bold text-ink-2">Everyday spending in {monthName(data.month)}</p>
           <p className="figure mt-2 text-[clamp(2.75rem,13vw,3.75rem)]">{dollars(data.totalSpent)}</p>
-          <p className="mt-1.5 text-ink-2">Bills and subscriptions are counted separately, in the plan below.</p>
+          <p className="mt-1.5 text-ink-2">Bills are counted separately, in the plan below. Extras like Netflix count here.</p>
         </>
       )}
 
       <div className="mt-5" aria-hidden>
-        <div className="flex h-4 w-full gap-0.5 overflow-hidden rounded-full">
-          {parts.map((x) => x.amount > 0 && <span key={x.label} className="h-full" style={{ width: `${(x.amount / whole) * 100}%`, background: x.color }} />)}
+        <div className="flex h-4 w-full gap-[3px] overflow-hidden rounded-[3px]">
+          {parts.map((x) => x.amount > 0 && <span key={x.label} className="block-on h-full rounded-[2px]" style={{ width: `${(x.amount / whole) * 100}%`, background: x.color }} />)}
         </div>
       </div>
       <dl className="mt-3 divide-y divide-line-soft">
@@ -121,7 +121,7 @@ function PlanCard({ data }: { data: BudgetPayload }) {
         {parts.map((x) => (
           <div key={x.label} className="flex items-baseline justify-between gap-4 py-2.5">
             <dt className="flex items-center gap-2">
-              <span aria-hidden className="size-2.5 shrink-0 rounded-full" style={{ background: x.color }} />
+              <span aria-hidden className="size-2.5 shrink-0 rounded-[2px]" style={{ background: x.color }} />
               {x.label}
             </dt>
             <dd className={cx("tabular", x.label === "More than comes in" && "font-bold text-bad")}>{dollars(x.amount)}</dd>
@@ -309,7 +309,7 @@ function CategoryDetail({ row, data, onClose }: { row: BudgetRow; data: BudgetPa
           </div>
         ))}
       </dl>
-      {row.bills > 0 && <p className="-mt-2 text-small text-ink-3">Plus {dollarsExact(row.bills)} in bills and subscriptions from {name} (they’re in the charges below too), planned separately and not counted against this budget.</p>}
+      {row.bills > 0 && <p className="-mt-2 text-small text-ink-3">Plus {dollarsExact(row.bills)} in bills from {name} (they’re in the charges below too), set aside separately and not counted against this budget.</p>}
 
       <div>
         <h3 className="mb-2 font-bold">Six months</h3>
@@ -544,7 +544,7 @@ function Budget() {
             </Sheet>
           )}
 
-          <Fold title="Money in and out, six months" className="rounded-sheet border border-line-soft bg-sheet px-4 shadow-card sm:px-6" summary={`${monthName(addMonthsToMonth(data.month, -5)).slice(0, 3)} to ${monthName(data.month).slice(0, 3)}`}>
+          <Fold title="Money in and out" className="edge rounded-sheet bg-sheet px-4 shadow-card sm:px-6" summary={`${monthName(addMonthsToMonth(data.month, -5)).slice(0, 3)} to ${monthName(data.month).slice(0, 3)}`}>
             <div className="pb-4">
               <Columns
                 label="Money in and money out for the last six months, bills included"
@@ -557,7 +557,7 @@ function Budget() {
             </div>
           </Fold>
           <p className="px-1 text-small text-ink-3">
-            Bills and subscriptions aren’t part of these budgets: they come out of the month first. See them in{" "}
+            Bills you must pay aren’t part of these budgets: they come out of the month first. Extras like Netflix are, in their category. See both in{" "}
             <Link href="/bills" className="font-bold text-accent-text">
               Bills
             </Link>

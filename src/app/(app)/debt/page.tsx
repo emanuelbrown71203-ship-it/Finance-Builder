@@ -88,7 +88,7 @@ export default function DebtPage() {
         <PageHeader title="Wealth" />
         <SectionTabs />
         <div className="grid grid-cols-1 gap-4">
-          <Skeleton className="h-64 rounded-[26px]" />
+          <Skeleton className="h-64 rounded-sheet" />
           <Skeleton className="h-64 rounded-sheet" />
         </div>
       </>
@@ -125,7 +125,7 @@ export default function DebtPage() {
 
       <div className={`grid grid-cols-1 items-start gap-4 lg:grid-cols-[1.25fr_1fr] lg:gap-5 ${isValidating ? "opacity-80" : ""}`}>
         <div className="grid grid-cols-1 gap-4 lg:gap-5">
-          <section className="rounded-[26px] p-5 text-white shadow-card sm:p-7" style={{ background: "linear-gradient(135deg, var(--hero-over-a), var(--hero-over-b))" }}>
+          <section className="hero-card hero-over rounded-sheet p-5 sm:p-7">
             {inPlan.length === 0 ? (
               <>
                 <h2 className="display text-title">{data.needsDetails > 0 ? "Add a couple of numbers to see your date" : "Nothing here is costing you interest"}</h2>
@@ -134,7 +134,7 @@ export default function DebtPage() {
             ) : data.plan.debtFreeMonth ? (
               <>
                 <p className="text-small font-semibold opacity-90">Debt-free by</p>
-                <p className="figure mt-3 text-[clamp(3rem,15vw,4.5rem)]">{monthLabel(data.plan.debtFreeMonth)}</p>
+                <p className="figure hero-figure mt-3 text-[clamp(3rem,15vw,4.5rem)]">{monthLabel(data.plan.debtFreeMonth)}</p>
                 <h2 className="display mt-2 text-title">{span(data.plan.months!)} from now</h2>
                 <p className="mt-2 opacity-90">
                   You owe <span className="tabular font-bold">{dollars(inPlan.reduce((s, d) => s + d.balance, 0))}</span> across {inPlan.length === 1 ? "one debt" : `${inPlan.length} debts`}, and will pay about <span className="tabular font-bold">{dollars(data.plan.totalInterest)}</span> in interest on the way.

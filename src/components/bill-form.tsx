@@ -84,7 +84,7 @@ export function BillForm({ today, draft, editing, via = "you", onDone, onCancel 
         </Field>
       </div>
       <Field label={frequency === "once" ? "Due on" : "Next due"}>{(id) => <Input id={id} type="date" value={date} onChange={(e) => setDate(e.target.value)} />}</Field>
-      {frequency !== "once" && <Segmented<"bill" | "subscription"> full label="Bill or subscription" value={kind} onChange={setKind} options={[{ value: "bill", label: "Bill" }, { value: "subscription", label: "Subscription" }]} />}
+      {frequency !== "once" && <Segmented<"bill" | "subscription"> full label="A bill you need, or an extra" value={kind} onChange={setKind} options={[{ value: "bill", label: "Bill (a need)" }, { value: "subscription", label: "Extra (a want)" }]} />}
       <p className="rounded-2xl bg-sky px-3.5 py-3 text-small text-sky-ink">
         {frequency === "once"
           ? `It shows in what’s coming up${cents ? ` and takes ${dollars(cents)} off what’s left to spend` : ""} until its date.`

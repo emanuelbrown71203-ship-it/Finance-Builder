@@ -1,33 +1,13 @@
-import { ArrowLeftRight, Banknote, Car, Coffee, Gift, HeartPulse, House, Landmark, Plane, Receipt, Scissors, Shapes, ShieldCheck, ShoppingBag, ShoppingBasket, Ticket, Zap, type LucideIcon } from "lucide-react";
 import { category } from "@/lib/categories";
+import { PixelIcon, isPixelName } from "./pixel-icons";
 import { cx } from "./ui";
 
-const ICONS: Record<string, LucideIcon> = {
-  income: Banknote,
-  housing: House,
-  utilities: Zap,
-  groceries: ShoppingBasket,
-  dining: Coffee,
-  transport: Car,
-  shopping: ShoppingBag,
-  entertainment: Ticket,
-  health: HeartPulse,
-  personal: Scissors,
-  travel: Plane,
-  insurance: ShieldCheck,
-  loans: Landmark,
-  giving: Gift,
-  fees: Receipt,
-  other: Shapes,
-  transfer: ArrowLeftRight,
-};
-
-/** Income sits on mint, everything else on plain paper: color marks direction, the glyph marks the category. */
+/** A category's pixel icon on a small tile. Income sits on mint (money coming in); the rest on plain. */
 export function CategoryIcon({ category: key, size = "md" }: { category: string; size?: "md" | "sm" }) {
-  const Icon = ICONS[category(key).key] ?? Shapes;
+  const k = category(key).key;
   return (
-    <span aria-hidden className={cx("inline-flex shrink-0 items-center justify-center rounded-full", size === "md" ? "size-9" : "size-7", key === "income" ? "bg-mint text-mint-ink" : "bg-sunk text-ink-2")}>
-      <Icon size={size === "md" ? 17 : 14} strokeWidth={1.9} />
+    <span aria-hidden className={cx("inline-flex shrink-0 items-center justify-center rounded-[8px] border-2", size === "md" ? "size-9" : "size-7", key === "income" ? "border-mint-ink/40 bg-mint text-mint-ink" : "border-line bg-sunk text-ink-2")}>
+      <PixelIcon name={isPixelName(k) ? k : "other"} size={size === "md" ? 18 : 14} />
     </span>
   );
 }

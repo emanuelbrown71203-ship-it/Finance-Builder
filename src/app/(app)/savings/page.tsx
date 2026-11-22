@@ -8,7 +8,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { Columns } from "@/components/charts";
 import { GoalDialog, goalSentence, goalStatus, type GoalSheet } from "@/components/goals";
-import { Button, EmptyState, ErrorNote, PageHeader, Sheet, Skeleton, Tag } from "@/components/ui";
+import { Blocks, Button, EmptyState, ErrorNote, PageHeader, Sheet, Skeleton, Tag } from "@/components/ui";
 import { useApi } from "@/components/use-api";
 import { monthName } from "@/lib/dates";
 import { dollars } from "@/lib/money";
@@ -29,8 +29,8 @@ function GoalCard({ goal, onAdd }: { goal: GoalView; onAdd: () => void }) {
           <span className="figure text-[2.25rem]">{dollars(goal.saved)}</span>
           <span className="tabular ml-2 text-ink-2">of {dollars(goal.target)}</span>
         </p>
-        <div role="meter" aria-label={`${goal.name} progress`} aria-valuemin={0} aria-valuemax={goal.target} aria-valuenow={Math.min(goal.saved, goal.target)} className="mt-4 h-3 overflow-hidden rounded-full bg-sky">
-          <div className="h-full rounded-full bg-accent transition-[width] duration-500" style={{ width: `${Math.max(ratio > 0 ? 2 : 0, ratio * 100)}%` }} />
+        <div className="mt-4">
+          <Blocks share={ratio} color="var(--accent)" label={`${goal.name} progress`} blocks={14} height={12} valueNow={Math.min(goal.saved, goal.target)} valueMax={goal.target} />
         </div>
         <p className="mt-3 text-small text-ink-2">{goalSentence(goal)}</p>
       </Link>

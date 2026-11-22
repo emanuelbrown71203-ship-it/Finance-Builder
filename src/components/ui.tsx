@@ -18,7 +18,7 @@ export function cx(...parts: (string | false | null | undefined)[]): string {
 
 export function Sheet({ children, className, as: Tag = "section", ...rest }: { children: ReactNode; className?: string; as?: "section" | "div" | "article" } & React.HTMLAttributes<HTMLElement>) {
   return (
-    <Tag className={cx("min-w-0 rounded-sheet border border-line-soft bg-sheet p-4 shadow-card sm:p-6", className)} {...rest}>
+    <Tag className={cx("edge min-w-0 rounded-sheet bg-sheet p-4 shadow-card sm:p-6", className)} {...rest}>
       {children}
     </Tag>
   );
@@ -28,7 +28,7 @@ export function SheetHeader({ title, action, hint }: { title: string; action?: R
   return (
     <header className="mb-3 flex items-start justify-between gap-3">
       <div>
-        <h2 className="display text-lead">{title}</h2>
+        <h2 className="display text-[1.0625rem]">{title}</h2>
         {hint && <p className="mt-1 text-small text-ink-3">{hint}</p>}
       </div>
       {action}
@@ -53,8 +53,8 @@ export function PageHeader({ title, lead, action, back }: { title: string; lead?
               </svg>
             </Link>
           )}
-          {/* Screens reached with Back often have a long name (a goal); they wrap to two lines instead of cutting off. */}
-          <h1 className={cx("display min-w-0 text-[1.625rem] lg:text-headline", back ? "line-clamp-2 break-words leading-tight" : "truncate")}>{title}</h1>
+          {/* A long title (a goal, the greeting with a name) wraps to two lines instead of cutting off. */}
+          <h1 className="display line-clamp-2 min-w-0 break-words text-[1.625rem] leading-tight lg:text-headline">{title}</h1>
         </div>
         {action && <div className="flex shrink-0 items-center gap-2">{action}</div>}
       </div>
@@ -74,12 +74,13 @@ export function Button({ variant = "quiet", size = "md", className, type = "butt
       className={cx(
         "inline-flex shrink-0 items-center justify-center gap-2 rounded-control font-bold transition-[background-color,transform] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50",
         size === "md" ? "min-h-12 px-5 text-body" : "min-h-10 px-3.5 text-small",
-        variant === "primary" && "bg-accent text-on-accent hover:bg-accent-strong",
-        variant === "quiet" && "border border-line bg-sheet text-ink hover:bg-sunk",
+        // Chunky arcade buttons: an outline and a hard shadow that presses in when tapped.
+        variant === "primary" && "edge bg-accent text-on-accent shadow-[3px_3px_0_var(--edge)] hover:bg-accent-strong active:translate-x-[2px] active:translate-y-[2px] active:shadow-none glow-accent",
+        variant === "quiet" && "edge bg-sheet text-ink shadow-[3px_3px_0_var(--edge)] hover:bg-sunk active:translate-x-[2px] active:translate-y-[2px] active:shadow-none",
         variant === "ghost" && "text-accent-text hover:bg-sunk",
-        variant === "danger" && "border border-line bg-sheet text-bad hover:bg-sunk",
+        variant === "danger" && "edge bg-sheet text-bad shadow-[3px_3px_0_var(--edge)] hover:bg-sunk active:translate-x-[2px] active:translate-y-[2px] active:shadow-none",
         // The final "yes, delete it" button in a confirmation.
-        variant === "destructive" && "bg-bad text-sheet",
+        variant === "destructive" && "edge bg-bad text-sheet shadow-[3px_3px_0_var(--edge)]",
         className,
       )}
       {...rest}
@@ -89,7 +90,7 @@ export function Button({ variant = "quiet", size = "md", className, type = "butt
 
 export function IconButton({ label, className, children, ...rest }: ButtonHTMLAttributes<HTMLButtonElement> & { label: string }) {
   return (
-    <button type="button" aria-label={label} title={label} className={cx("inline-flex size-11 shrink-0 items-center justify-center rounded-full bg-sunk text-ink-2 transition-colors hover:text-ink active:scale-95 disabled:opacity-40", className)} {...rest}>
+    <button type="button" aria-label={label} title={label} className={cx("inline-flex size-11 shrink-0 items-center justify-center rounded-[12px] bg-sunk text-ink-2 transition-colors hover:text-ink active:scale-95 disabled:opacity-40", className)} {...rest}>
       {children}
     </button>
   );
@@ -97,7 +98,7 @@ export function IconButton({ label, className, children, ...rest }: ButtonHTMLAt
 
 export function Segmented<T extends string>({ value, onChange, options, label, full }: { value: T; onChange: (v: T) => void; options: { value: T; label: string }[]; label: string; full?: boolean }) {
   return (
-    <div role="radiogroup" aria-label={label} className={cx("rounded-control bg-sunk p-1", full ? "flex w-full" : "inline-flex")}>
+    <div role="radiogroup" aria-label={label} className={cx("edge rounded-control bg-sunk p-1", full ? "flex w-full" : "inline-flex")}>
       {options.map((o) => (
         <button
           key={o.value}
@@ -105,7 +106,7 @@ export function Segmented<T extends string>({ value, onChange, options, label, f
           role="radio"
           aria-checked={value === o.value}
           onClick={() => onChange(o.value)}
-          className={cx("min-h-10 rounded-[10px] px-3.5 text-small font-bold transition-colors", full && "flex-1", value === o.value ? "bg-sheet text-ink shadow-card" : "text-ink-3 hover:text-ink")}
+          className={cx("min-h-10 rounded-[7px] px-3.5 text-small font-bold transition-colors", full && "flex-1", value === o.value ? "bg-accent text-on-accent glow-accent" : "text-ink-3 hover:text-ink")}
         >
           {o.label}
         </button>
@@ -114,7 +115,7 @@ export function Segmented<T extends string>({ value, onChange, options, label, f
   );
 }
 
-const fieldClass = "min-h-12 w-full rounded-control border border-line bg-sheet px-3.5 text-body text-ink placeholder:text-ink-3 focus:border-accent-text focus:outline-none focus:ring-4 focus:ring-accent-soft";
+const fieldClass = "min-h-12 w-full rounded-control border-2 border-line bg-sheet px-3.5 text-body text-ink placeholder:text-ink-3 focus:border-accent-text focus:outline-none focus:ring-4 focus:ring-accent-soft";
 
 export function Field({ label, hint, error, children }: { label: string; hint?: string; error?: string | null; children: (id: string) => ReactNode }) {
   const id = useId();
@@ -162,19 +163,29 @@ const TONES = {
 export type Tone = keyof typeof TONES;
 
 export function Tag({ tone = "plain", children, className }: { tone?: Tone; children: ReactNode; className?: string }) {
-  return <span className={cx("inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2.5 py-0.5 text-micro font-bold", TONES[tone], className)}>{children}</span>;
+  return <span className={cx("inline-flex items-center gap-1 whitespace-nowrap rounded-[6px] px-2 py-0.5 text-micro font-bold", TONES[tone], className)}>{children}</span>;
 }
 
 /**
- * A ratio against a limit. The fill says how you're doing: green while there's
- * room, amber when nearly used up, red once over. Always paired with figures.
+ * A ratio against a limit, as a row of blocks that fill one at a time (like an
+ * arcade power bar). Room left, nearly used up, over: accent, amber, red, and
+ * always paired with figures.
  */
-export function Meter({ value, max, label }: { value: number; max: number; label: string }) {
+export function Meter({ value, max, label, blocks = 12 }: { value: number; max: number; label: string; blocks?: number }) {
   const ratio = max > 0 ? value / max : 0;
-  const color = ratio > 1 ? "var(--bad)" : ratio >= 0.9 ? "var(--warn)" : "var(--accent)";
+  const color = ratio > 1 ? "var(--bad)" : ratio >= 0.9 ? "var(--meter-warn)" : "var(--accent)";
+  return <Blocks share={ratio} color={color} label={label} blocks={blocks} valueNow={Math.min(value, max)} valueMax={max} />;
+}
+
+/** The block bar itself: `share` of `blocks` filled (any part of a block counts it), glowing at night. */
+export function Blocks({ share, color, label, blocks = 12, valueNow, valueMax, height = 10, marker }: { share: number; color: string; label: string; blocks?: number; valueNow?: number; valueMax?: number; height?: number; marker?: number | null }) {
+  const filled = share <= 0 ? 0 : Math.min(blocks, Math.max(1, Math.ceil(share * blocks - 0.001)));
   return (
-    <div role="meter" aria-label={label} aria-valuemin={0} aria-valuemax={max} aria-valuenow={Math.min(value, max)} className="h-2.5 w-full overflow-hidden rounded-full" style={{ background: `color-mix(in srgb, ${color} 16%, var(--sheet))` }}>
-      <div className="h-full rounded-full transition-[width] duration-500" style={{ width: `${Math.min(100, Math.max(ratio > 0 ? 2 : 0, ratio * 100))}%`, background: color }} />
+    <div role="meter" aria-label={label} aria-valuemin={0} aria-valuemax={valueMax ?? 100} aria-valuenow={valueNow ?? Math.round(Math.min(1, share) * 100)} className="relative flex w-full gap-[3px]">
+      {Array.from({ length: blocks }, (_, i) => (
+        <span key={i} className={cx("flex-1 rounded-[2px]", i < filled ? "block-on" : "border border-line bg-sunk")} style={{ height, ...(i < filled ? { background: color, color } : {}) }} />
+      ))}
+      {marker != null && marker > 0 && marker < 1 && <span aria-hidden className="absolute -top-1 w-0.5 rounded-full bg-ink" style={{ left: `${marker * 100}%`, height: height + 8 }} />}
     </div>
   );
 }

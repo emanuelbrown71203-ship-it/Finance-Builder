@@ -1,6 +1,6 @@
 "use client";
 
-import { RefreshCw, type LucideIcon } from "lucide-react";
+import { RefreshCw } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState, type ReactNode } from "react";
@@ -12,22 +12,17 @@ import { GAME_URL, GameWatcher } from "./game/game";
 import { LevelChip } from "./game/level";
 import type { GamePayload } from "@/lib/game/progress";
 import { SECTIONS, sectionFor } from "./nav";
+import { NickelMark } from "./nickel/mark";
 import { Nickel } from "./nickel/nickel";
+import { PixelIcon, type PixelName } from "./pixel-icons";
 import { ReauthHost } from "./reauth";
 import { PullToRefresh } from "./pull-to-refresh";
 import { ConfirmHost, IconButton, Tag, Toaster, cx } from "./ui";
 import { send, useApi, useNow } from "./use-api";
 
-/** The mark: a passbook page with its perforated stub. */
+/** The mark: Nickel on his arcade tile. */
 export function Logo({ size = 28 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 28 28" aria-hidden>
-      <rect x="2" y="3" width="24" height="22" rx="7" fill="var(--accent)" />
-      <path d="M11 3v22" stroke="var(--sheet)" strokeWidth="1.6" strokeDasharray="1.6 2.6" strokeLinecap="round" opacity="0.7" />
-      <path d="M15.5 10.5h6M15.5 14h6M15.5 17.5h3.5" stroke="var(--on-accent)" strokeWidth="1.8" strokeLinecap="round" />
-      <circle cx="6.6" cy="14" r="1.7" fill="#ffd84d" />
-    </svg>
-  );
+  return <NickelMark size={size} />;
 }
 
 function ago(iso: string | null, now: number): string {
@@ -66,7 +61,7 @@ export function LiveStatus({ compact }: { compact?: boolean }) {
   }
   return (
     <div className="flex items-center gap-2">
-      <span className="flex items-center gap-2 rounded-full bg-sheet px-3 py-1.5 text-small shadow-card">
+      <span className="edge flex items-center gap-2 rounded-[8px] bg-sheet px-3 py-1.5 text-small">
         <span aria-hidden className="live-dot size-2 rounded-full bg-good" />
         <span className="font-bold">Live</span>
         {!compact && (
@@ -76,7 +71,7 @@ export function LiveStatus({ compact }: { compact?: boolean }) {
         )}
       </span>
       {!compact && (
-        <IconButton label="Refresh from your banks" onClick={refresh} disabled={refreshing} className="size-10 bg-sheet shadow-card">
+        <IconButton label="Refresh from your banks" onClick={refresh} disabled={refreshing} className="edge size-10 rounded-[8px] bg-sheet">
           <RefreshCw size={16} className={refreshing ? "animate-spin" : undefined} />
         </IconButton>
       )}
@@ -84,10 +79,10 @@ export function LiveStatus({ compact }: { compact?: boolean }) {
   );
 }
 
-function IconTile({ icon: Icon, active }: { icon: LucideIcon; active?: boolean }) {
+function IconTile({ icon, active }: { icon: PixelName; active?: boolean }) {
   return (
-    <span aria-hidden className="inline-flex size-9 shrink-0 items-center justify-center rounded-xl transition-colors" style={active ? { background: "var(--sec)", color: "var(--sheet)" } : { background: "color-mix(in srgb, var(--sec) 14%, transparent)", color: "var(--sec)" }}>
-      <Icon size={18} strokeWidth={2.1} />
+    <span aria-hidden className={cx("inline-flex size-9 shrink-0 items-center justify-center rounded-[8px] border-2 transition-colors", active ? "tab-on" : "border-transparent")} style={active ? undefined : { background: "color-mix(in srgb, var(--sec) 14%, transparent)", color: "var(--sec)" }}>
+      <PixelIcon name={icon} size={18} />
     </span>
   );
 }
@@ -112,17 +107,17 @@ export function Shell({ children }: { children: ReactNode }) {
       <aside className="sticky top-0 hidden h-dvh w-[252px] shrink-0 flex-col gap-5 px-4 py-6 lg:flex">
         <Link href="/" className="flex items-center gap-2.5 px-2">
           <Logo size={34} />
-          <span className="display text-title">{APP_NAME}</span>
+          <span className="display text-title glow-figure-soft">{APP_NAME}</span>
         </Link>
         <nav aria-label="Main" className="no-scrollbar flex flex-1 flex-col gap-1 overflow-y-auto">
           {SECTIONS.map((section) => {
             const active = current.key === section.key;
             return (
               <div key={section.key} className={cx(section.key === "you" && "mt-auto")}>
-                <Link href={section.href} aria-current={active ? "page" : undefined} className={cx(section.color, "flex min-h-12 items-center gap-3 rounded-2xl px-2.5 font-bold transition-colors", active ? "bg-sheet text-ink shadow-card" : "text-ink-2 hover:bg-sheet/60 hover:text-ink")}>
+                <Link href={section.href} aria-current={active ? "page" : undefined} className={cx(section.color, "flex min-h-12 items-center gap-3 rounded-[12px] border-2 px-2.5 font-bold transition-colors", active ? "edge bg-sheet text-ink shadow-card" : "border-transparent text-ink-2 hover:bg-sheet/60 hover:text-ink")}>
                   {section.icon ? <IconTile icon={section.icon} active={active} /> : <LevelChip level={level} size={36} />}
                   {section.label}
-                  {section.key === "bills" && dueSoon > 0 && <span className="tabular ml-auto rounded-full bg-[var(--c-bills)] px-2 text-micro font-extrabold leading-5 text-sheet">{dueSoon}</span>}
+                  {section.key === "bills" && dueSoon > 0 && <span className="tabular ml-auto rounded-[5px] bg-[var(--c-bills)] px-2 text-micro font-extrabold leading-5 text-paper">{dueSoon}</span>}
                 </Link>
               </div>
             );
@@ -143,7 +138,7 @@ export function Shell({ children }: { children: ReactNode }) {
       </div>
 
       {/* Phones and upright tablets: all five places along the bottom. Nothing hides under "More". */}
-      <nav aria-label="Main" className="fixed inset-x-0 bottom-0 z-40 grid grid-cols-5 gap-1 border-t border-line-soft bg-sheet/90 px-2 pb-[max(6px,env(safe-area-inset-bottom))] pt-1.5 backdrop-blur-xl lg:hidden">
+      <nav aria-label="Main" className="tab-bar fixed inset-x-0 bottom-0 z-40 grid grid-cols-5 gap-1 bg-sheet/95 px-2 pb-[max(6px,env(safe-area-inset-bottom))] pt-1.5 backdrop-blur-xl lg:hidden">
         {SECTIONS.map((section) => {
           const active = current.key === section.key;
           const Icon = section.icon;
@@ -153,13 +148,12 @@ export function Shell({ children }: { children: ReactNode }) {
               href={section.href}
               aria-current={active ? "page" : undefined}
               aria-label={section.key === "you" && level ? `You, level ${level}` : undefined}
-              className={cx(section.color, "relative flex min-h-14 flex-col items-center justify-center gap-0.5 rounded-2xl text-[11px] font-bold transition-transform active:scale-95", !active && "text-ink-3")}
-              style={active ? { color: "var(--sec)", background: "color-mix(in srgb, var(--sec) 13%, transparent)" } : undefined}
+              className={cx(section.color, "relative flex min-h-14 flex-col items-center justify-center gap-1 rounded-[10px] border-2 text-[11px] font-bold transition-transform active:scale-95", active ? "tab-on" : "border-transparent text-ink-3")}
             >
-              {Icon ? <Icon size={23} strokeWidth={active ? 2.4 : 1.9} /> : <LevelChip level={level} size={24} />}
+              {Icon ? <PixelIcon name={Icon} size={22} /> : <LevelChip level={level} size={24} />}
               {section.label}
               {section.key === "bills" && dueSoon > 0 && (
-                <span className="tabular absolute right-[18%] top-1 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-[var(--c-bills)] px-1 text-[11px] font-extrabold text-sheet" aria-label={`${dueSoon} due soon`}>
+                <span className="tabular absolute right-[14%] top-0.5 flex h-[18px] min-w-[18px] items-center justify-center rounded-[5px] bg-[var(--c-bills)] px-1 text-[11px] font-extrabold text-paper" aria-label={`${dueSoon} due soon`}>
                   {dueSoon}
                 </span>
               )}

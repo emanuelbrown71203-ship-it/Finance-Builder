@@ -1,8 +1,8 @@
 "use client";
 
-import { CalendarClock, House, PieChart, Scale, type LucideIcon } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import type { PixelName } from "./pixel-icons";
 import { cx } from "./ui";
 
 /*
@@ -20,7 +20,8 @@ export type Section = {
   /** Where tapping it goes. */
   href: string;
   hint: string;
-  icon: LucideIcon | null;
+  /** Its pixel icon (none for You, whose tab shows your level). */
+  icon: PixelName | null;
   /** The colour class for this place (see globals.css). */
   color: string;
   /** Its screens, when there's more than one. */
@@ -30,13 +31,13 @@ export type Section = {
 };
 
 export const SECTIONS: Section[] = [
-  { key: "home", label: "Home", href: "/", hint: "What’s left, what needs a look, what’s next", icon: House, color: "sec-home", pages: [], also: [] },
+  { key: "home", label: "Home", href: "/", hint: "What’s left, what needs a look, what’s next", icon: "home", color: "sec-home", pages: [], also: [] },
   {
     key: "spending",
     label: "Spending",
     href: "/budget",
     hint: "Your budget, and every charge as it happens",
-    icon: PieChart,
+    icon: "spending",
     color: "sec-budget",
     pages: [
       { href: "/budget", label: "Budget" },
@@ -44,13 +45,13 @@ export const SECTIONS: Section[] = [
     ],
     also: [],
   },
-  { key: "bills", label: "Bills", href: "/bills", hint: "Bills and subscriptions, and when they’re due", icon: CalendarClock, color: "sec-bills", pages: [], also: [] },
+  { key: "bills", label: "Bills", href: "/bills", hint: "Bills you must pay, extras you could cut, and when they’re due", icon: "bills", color: "sec-bills", pages: [], also: [] },
   {
     key: "wealth",
     label: "Wealth",
     href: "/net-worth",
     hint: "Net worth, savings goals, investing and debt",
-    icon: Scale,
+    icon: "wealth",
     color: "sec-worth",
     pages: [
       { href: "/net-worth", label: "Net worth" },
@@ -79,7 +80,7 @@ export function SectionTabs({ className }: { className?: string }) {
   // The deepest matching screen is the one you're on (Names lives under Transactions).
   const current = [...section.pages].sort((a, b) => b.href.length - a.href.length).find((p) => under(path, p.href));
   return (
-    <nav aria-label={section.label} className={cx("mb-4 flex w-full rounded-control bg-sunk p-1 sm:inline-flex sm:w-auto", className)}>
+    <nav aria-label={section.label} className={cx("edge mb-4 flex w-full rounded-control bg-sunk p-1 sm:inline-flex sm:w-auto", className)}>
       {section.pages.map((p) => {
         const on = current?.href === p.href;
         return (
@@ -87,7 +88,7 @@ export function SectionTabs({ className }: { className?: string }) {
             key={p.href}
             href={p.href}
             aria-current={on ? "page" : undefined}
-            className={cx("flex min-h-10 flex-1 items-center justify-center whitespace-nowrap rounded-[10px] px-3 text-small font-bold transition-colors sm:flex-none sm:px-4", on ? "bg-sheet text-ink shadow-card" : "text-ink-3 hover:text-ink")}
+            className={cx("flex min-h-10 flex-1 items-center justify-center whitespace-nowrap rounded-[7px] px-3 text-small font-bold transition-colors sm:flex-none sm:px-4", on ? "bg-accent text-on-accent glow-accent" : "text-ink-3 hover:text-ink")}
           >
             {p.label}
           </Link>

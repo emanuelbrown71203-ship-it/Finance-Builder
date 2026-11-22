@@ -12,7 +12,7 @@ import { LinkBankButton } from "@/components/link-bank";
 import { LiveStatus } from "@/components/shell";
 import { markRecapSeen, weekId } from "@/components/recap";
 import { TxList } from "@/components/transactions";
-import { Button, EmptyState, ErrorNote, Fold, PageHeader, Sheet, SheetHeader, Skeleton, Tag, cx } from "@/components/ui";
+import { Blocks, Button, EmptyState, ErrorNote, Fold, PageHeader, Sheet, SheetHeader, Skeleton, Tag, cx } from "@/components/ui";
 import { LIVE_INTERVAL, useApi, useNow } from "@/components/use-api";
 import { category } from "@/lib/categories";
 import { dayOfMonth, formatShort, monthEnd, monthName } from "@/lib/dates";
@@ -63,7 +63,7 @@ function Hero({ data }: { data: Overview }) {
   const ahead = plan.everydaySpent <= evenPace;
 
   return (
-    <section className="order-1 rounded-[26px] p-5 text-white shadow-card sm:p-7" style={{ background: over ? "linear-gradient(135deg, var(--hero-over-a), var(--hero-over-b))" : "linear-gradient(135deg, var(--hero-a), var(--hero-b))" }}>
+    <section className={cx("hero-card order-1 rounded-sheet p-5 sm:p-7", over && "hero-over")}>
       <div className="flex min-h-9 items-center justify-between gap-3">
         <p className="text-small font-semibold opacity-90">
           {monthName(plan.month)}, day {dayOfMonth(plan.today)} of {plan.days.length}
@@ -73,7 +73,7 @@ function Hero({ data }: { data: Overview }) {
           <LiveStatus compact />
         </span>
       </div>
-      <p className="figure mt-2 text-[clamp(3.5rem,17vw,5.25rem)]">{dollars(Math.abs(plan.leftToSpend))}</p>
+      <p className="figure hero-figure mt-3 text-[clamp(3rem,15vw,4.75rem)]">{dollars(Math.abs(plan.leftToSpend))}</p>
       <h2 className="display mt-2 text-title">{over ? "over what this month can cover" : "left to spend this month"}</h2>
       <p className="mt-1.5 max-w-[46ch] opacity-90">
         {over
@@ -85,21 +85,18 @@ function Hero({ data }: { data: Overview }) {
 
       {toSpend > 0 && (
         <div className="mt-5">
-          <div className="relative h-3 rounded-full bg-white/25" role="meter" aria-label="Spent so far this month" aria-valuemin={0} aria-valuemax={toSpend} aria-valuenow={Math.min(plan.everydaySpent, toSpend)}>
-            <div className="h-full rounded-full bg-white" style={{ width: `${Math.max(2, spentShare * 100)}%` }} />
-            {/* Where spending would be today at an even pace. */}
-            <span aria-hidden className="absolute -top-1 h-5 w-0.5 rounded-full bg-[#ffd84d]" style={{ left: `${dayShare * 100}%` }} />
-          </div>
+          {/* The tick is where spending would be today at an even pace. */}
+          <Blocks share={spentShare} color="var(--hero-figure)" label="Spent so far this month" blocks={14} height={12} valueNow={Math.min(plan.everydaySpent, toSpend)} valueMax={toSpend} marker={dayShare} />
           <p className="mt-2 text-small opacity-90">
             <span className="tabular font-bold">{dollars(plan.everydaySpent)}</span> spent of <span className="tabular font-bold">{dollars(toSpend)}</span>. {ahead ? "That’s under" : "That’s over"} the even pace of <span className="tabular">{dollars(evenPace)}</span> by today.
           </p>
         </div>
       )}
 
-      <Fold title="How this is worked out" className="mt-4 border-t border-white/25" summary={`${dollars(plan.incomeExpected)} in`}>
-        <dl className="divide-y divide-white/20 pb-1">
+      <Fold title="How this is worked out" className="hero-rule mt-4 border-t" summary={`${dollars(plan.incomeExpected)} in`}>
+        <dl className="hero-rules pb-1">
           <PlanLine label="Money in this month" amount={plan.incomeExpected} sign="+" note={plan.incomeExpected > plan.incomeReceived ? `${dollars(plan.incomeReceived)} in, ${dollars(plan.incomeExpected - plan.incomeReceived)} still expected` : undefined} />
-          <PlanLine label="Bills and subscriptions" amount={plan.billsExpected} sign="−" note={plan.billsExpected > plan.billsPaid ? `${dollars(plan.billsPaid)} paid, ${dollars(plan.billsExpected - plan.billsPaid)} still due` : undefined} />
+          <PlanLine label="Bills you must pay" amount={plan.billsExpected} sign="−" note={plan.billsExpected > plan.billsPaid ? `${dollars(plan.billsPaid)} paid, ${dollars(plan.billsExpected - plan.billsPaid)} still due` : undefined} />
           <PlanLine label="Set aside for goals" amount={plan.savingsPlanned} sign="−" />
           <PlanLine label="Spent so far" amount={plan.everydaySpent} sign="−" />
         </dl>
@@ -201,7 +198,7 @@ function Budgets({ data }: { data: Overview }) {
                 <CategoryIcon category={r.category} />
                 <span className="min-w-0 flex-1">
                   <span className="mb-1.5 flex items-baseline justify-between gap-3">
-                    <span className="truncate font-bold">{category(r.category).label}</span>
+                    <span className="min-w-0 break-words font-bold leading-snug">{category(r.category).label}</span>
                     <span className={cx("tabular shrink-0 text-small", (r.left ?? 0) < 0 ? "font-bold text-bad" : "text-ink-2")}>
                       {(r.left ?? 0) < 0 ? `${dollars(-(r.left ?? 0))} over` : `${dollars(r.left ?? 0)} left of ${dollars(available(r))}`}
                     </span>
@@ -266,7 +263,7 @@ export default function HomePage() {
       <>
         <PageHeader title="Home" />
         <div className="grid grid-cols-1 gap-4">
-          <Skeleton className="h-80 rounded-[26px]" />
+          <Skeleton className="h-80 rounded-sheet" />
           <Skeleton className="h-40 rounded-sheet" />
           <Skeleton className="h-60 rounded-sheet" />
         </div>
