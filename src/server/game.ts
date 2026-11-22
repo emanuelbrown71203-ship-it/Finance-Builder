@@ -1,7 +1,7 @@
-import { and, desc, eq, gt, inArray, like, sql } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, sql } from "drizzle-orm";
 import { playerWins, transactions } from "@/db/schema";
 import { category } from "@/lib/categories";
-import { addDays, addMonthsToMonth, formatShort, monthName, monthOf, type ISODate } from "@/lib/dates";
+import { addDays, addMonthsToMonth, dayOfMonth, formatShort, monthName, monthOf, type ISODate } from "@/lib/dates";
 import { badgesFor, bestStreak, levelFor, streak, WINS, isWinKind, type GamePayload, type WinKind } from "@/lib/game/progress";
 import type { Ctx } from "./auth";
 import { describeError } from "./errors";
@@ -100,18 +100,23 @@ export async function noSpendDays(ctx: Ctx): Promise<ISODate[]> {
  * keeping every one (two or more) is a bigger one. Judged until it has been.
  */
 export async function budgetWins(ctx: Ctx): Promise<void> {
+  // From the 3rd, once the month's last charges have had time to arrive.
+  if (dayOfMonth(ctx.today) < 3) return;
   const month = addMonthsToMonth(monthOf(ctx.today), -1);
-  const [done] = await ctx.db
-    .select({ id: playerWins.id })
-    .from(playerWins)
-    .where(and(eq(playerWins.userId, ctx.userId), inArray(playerWins.kind, ["under", "allunder"]), like(playerWins.ref, `${month}:%`)))
-    .limit(1);
+  const ref = `${month}:budgets`;
+  const [done] = await ctx.db.select({ id: playerWins.id }).from(playerWins).where(and(eq(playerWins.userId, ctx.userId), eq(playerWins.kind, JUDGED), eq(playerWins.ref, ref))).limit(1);
   if (done) return;
   const result = await lastMonthBudgets(ctx);
   if (!result) return;
+  // Written down first (worth nothing), so the month is judged once, however its limits change later.
+  const marked = await ctx.db.insert(playerWins).values({ id: crypto.randomUUID(), userId: ctx.userId, kind: JUDGED, xp: 0, label: null, ref, day: ctx.today }).onConflictDoNothing().returning({ id: playerWins.id });
+  if (marked.length === 0) return;
   for (const c of result.kept) await win(ctx, "under", `${month}:${c}`, `${category(c).label}, ${monthName(month)}`);
   if (result.judged >= 2 && result.kept.length === result.judged) await win(ctx, "allunder", `${month}:all`, monthName(month));
 }
+
+/** The note that a month's budgets have been judged. Not a win: it's never shown or counted. */
+const JUDGED = "budgets-judged";
 
 /** Opening the app once a day: a check-in (for the streak), plus yesterday if it was a no-spend day. */
 export async function checkIn(ctx: Ctx): Promise<void> {

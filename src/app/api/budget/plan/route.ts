@@ -9,6 +9,7 @@ const Body = z.object({
         category: z.string().max(40),
         monthlyLimit: z.number().int().min(0).max(100_000_000).nullable(),
         rolloverSince: z.string().max(7).nullable().optional(),
+        rolloverCarry: z.number().int().optional(),
       }),
     )
     .min(1)

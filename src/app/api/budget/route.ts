@@ -1,9 +1,7 @@
-import { and, eq } from "drizzle-orm";
 import { z } from "zod";
-import { budgets } from "@/db/schema";
 import { monthOf } from "@/lib/dates";
 import { HttpError, readBody, withUser } from "@/server/http";
-import { setBudget, setRollover } from "@/server/mutations";
+import { budgetState, setBudget, setRollover } from "@/server/mutations";
 import { getBudget } from "@/server/queries";
 
 export const GET = withUser(async (ctx, request) => {
@@ -18,15 +16,15 @@ const Body = z.object({
   rollover: z.boolean().optional(),
   /** Sent by Undo with a limit, to put rollover back exactly as it was. */
   rolloverSince: z.string().max(7).nullable().optional(),
+  rolloverCarry: z.number().int().optional(),
 });
 
-/** One category: its limit, or rollover. Answers with what it was before, for Undo. */
+/** One category: its limit, or rollover. Answers with how it was before, for Undo. */
 export const PUT = withUser(async (ctx, request) => {
   const body = await readBody(request, Body);
-  const [before] = await ctx.db.select().from(budgets).where(and(eq(budgets.userId, ctx.userId), eq(budgets.category, body.category))).limit(1);
-  const previous = { monthlyLimit: before?.monthlyLimit ?? null, rolloverSince: before?.rolloverSince ?? null };
+  const previous = await budgetState(ctx, body.category);
   if (body.rollover !== undefined) await setRollover(ctx, body.category, body.rollover);
-  else if (body.monthlyLimit !== undefined) await setBudget(ctx, body.category, body.monthlyLimit, body.rolloverSince !== undefined ? { rolloverSince: body.rolloverSince } : {});
+  else if (body.monthlyLimit !== undefined) await setBudget(ctx, body.category, body.monthlyLimit, body.rolloverSince !== undefined ? { rolloverSince: body.rolloverSince, rolloverCarry: body.rolloverCarry } : {});
   else throw new HttpError(400, "Nothing to change.");
   return { ok: true, previous };
 });

@@ -6,6 +6,7 @@ import { cleanName, validName } from "@/lib/finance/names";
 import { merchantKey } from "@/lib/finance/recurring";
 import type { Ctx } from "./auth";
 import { MILESTONES, goalMilestones, takeBack, undoGoalMilestones, win } from "./game";
+import { carriedNow } from "./queries";
 import { HttpError } from "./http";
 
 /** What a remembered change replaced, so Undo can put everything back exactly. */
@@ -132,51 +133,81 @@ const titleCase = (words: string) => words.replace(/\b[a-z]/g, (c) => c.toUpperC
 const isBudgetCategory = (category: string) => isCategoryKey(category) && category !== "transfer" && category !== "income";
 const MONTH = /^\d{4}-(0[1-9]|1[0-2])$/;
 
+export type BudgetRestore = { rolloverSince?: string | null; rolloverCarry?: number };
+
 /**
- * Sets or removes one category's monthly limit. `rolloverSince` is only sent
- * by Undo, to put rollover back exactly as it was.
+ * Sets or removes one category's monthly limit. Removing keeps the row (marked
+ * removed) so Undo puts it back exactly, start date and rollover included.
+ * `restore` is only sent by Undo, to put rollover back as it was.
+ *
+ * With rollover on, changing the limit first banks what's been carried so far
+ * at the old limit, so earlier months keep the limit they really had.
  */
-export async function setBudget(ctx: Ctx, category: string, monthlyLimit: number | null, opts: { rolloverSince?: string | null } = {}) {
+export async function setBudget(ctx: Ctx, category: string, monthlyLimit: number | null, restore: BudgetRestore = {}) {
   if (!isBudgetCategory(category)) throw new HttpError(400, "Unknown category.");
-  if (opts.rolloverSince != null && (!MONTH.test(opts.rolloverSince) || opts.rolloverSince > monthOf(ctx.today))) throw new HttpError(400, "That rollover month isn’t right.");
+  if (restore.rolloverSince != null && (!MONTH.test(restore.rolloverSince) || restore.rolloverSince > monthOf(ctx.today))) throw new HttpError(400, "That rollover month isn’t right.");
+  if (restore.rolloverCarry !== undefined && (!Number.isSafeInteger(restore.rolloverCarry) || Math.abs(restore.rolloverCarry) > 100_000_000_00)) throw new HttpError(400, "That carried amount isn’t right.");
+  const mine = and(eq(budgets.userId, ctx.userId), eq(budgets.category, category));
+  const [row] = await ctx.db.select().from(budgets).where(mine).limit(1);
+
   if (monthlyLimit === null) {
-    await ctx.db.delete(budgets).where(and(eq(budgets.userId, ctx.userId), eq(budgets.category, category)));
+    if (row && !row.removedAt) await ctx.db.update(budgets).set({ removedAt: new Date() }).where(mine);
     // Taking away a limit set today (its Undo) takes its XP back.
     await takeBack(ctx, "budget", `${category}:${monthOf(ctx.today)}`);
     return;
   }
-  const keep = opts.rolloverSince !== undefined ? { rolloverSince: opts.rolloverSince } : {};
-  await ctx.db
-    .insert(budgets)
-    .values({ id: crypto.randomUUID(), userId: ctx.userId, category, monthlyLimit, ...keep })
-    .onConflictDoUpdate({ target: [budgets.userId, budgets.category], set: { monthlyLimit, ...keep } });
+
+  const exact = restore.rolloverSince !== undefined ? { rolloverSince: restore.rolloverSince, rolloverCarry: restore.rolloverSince === null ? 0 : (restore.rolloverCarry ?? 0) } : null;
+  if (!row) {
+    await ctx.db.insert(budgets).values({ id: crypto.randomUUID(), userId: ctx.userId, category, monthlyLimit, ...(exact ?? {}) });
+  } else if (row.removedAt) {
+    // Put back today (Undo): exactly as it was. Later: a new limit, starting now.
+    const sameDay = Date.now() - row.removedAt.getTime() < 24 * 3600_000;
+    const fresh = sameDay ? {} : { createdAt: new Date(), rolloverSince: null, rolloverCarry: 0 };
+    await ctx.db.update(budgets).set({ monthlyLimit, removedAt: null, ...fresh, ...(exact ?? {}) }).where(mine);
+  } else {
+    let banked = {};
+    if (!exact && row.rolloverSince && row.monthlyLimit !== monthlyLimit && row.rolloverSince < monthOf(ctx.today)) {
+      banked = { rolloverCarry: await carriedNow(ctx, category), rolloverSince: monthOf(ctx.today) };
+    }
+    await ctx.db.update(budgets).set({ monthlyLimit, ...banked, ...(exact ?? {}) }).where(mine);
+  }
   // Once per category per month.
   await win(ctx, "budget", `${category}:${monthOf(ctx.today)}`, categoryOf(category).label);
 }
 
-/**
- * Rollover on or off for one category. On, what's left at the end of this
- * month (or overspent) carries into next month's budget, and so on.
- */
-export async function setRollover(ctx: Ctx, category: string, on: boolean): Promise<{ previous: string | null }> {
-  if (!isBudgetCategory(category)) throw new HttpError(400, "Unknown category.");
-  const [row] = await ctx.db.select({ rolloverSince: budgets.rolloverSince }).from(budgets).where(and(eq(budgets.userId, ctx.userId), eq(budgets.category, category))).limit(1);
-  if (!row) throw new HttpError(400, "Set a limit for this category first.");
-  // Switching it on again keeps the month it started; off forgets it.
-  const next = on ? (row.rolloverSince ?? monthOf(ctx.today)) : null;
-  await ctx.db.update(budgets).set({ rolloverSince: next }).where(and(eq(budgets.userId, ctx.userId), eq(budgets.category, category)));
-  return { previous: row.rolloverSince };
+export type BudgetState = { monthlyLimit: number | null; rolloverSince: string | null; rolloverCarry: number };
+
+/** A category's limit and rollover as they stand (a removed one counts as none), for Undo. */
+export async function budgetState(ctx: Ctx, category: string): Promise<BudgetState> {
+  const [row] = await ctx.db.select().from(budgets).where(and(eq(budgets.userId, ctx.userId), eq(budgets.category, category))).limit(1);
+  if (!row || row.removedAt) return { monthlyLimit: null, rolloverSince: null, rolloverCarry: 0 };
+  return { monthlyLimit: row.monthlyLimit, rolloverSince: row.rolloverSince, rolloverCarry: row.rolloverCarry };
 }
 
-export type BudgetChange = { category: string; monthlyLimit: number | null; rolloverSince?: string | null };
+/**
+ * Rollover on or off for one category. On, what's left at the end of this
+ * month (or overspent) carries into next month's budget, and so on. Off
+ * forgets what was carried; the answer says what it was, so it can be put back.
+ */
+export async function setRollover(ctx: Ctx, category: string, on: boolean): Promise<{ previous: BudgetState }> {
+  if (!isBudgetCategory(category)) throw new HttpError(400, "Unknown category.");
+  const previous = await budgetState(ctx, category);
+  if (previous.monthlyLimit === null) throw new HttpError(400, "Set a limit for this category first.");
+  const mine = and(eq(budgets.userId, ctx.userId), eq(budgets.category, category));
+  if (on && !previous.rolloverSince) await ctx.db.update(budgets).set({ rolloverSince: monthOf(ctx.today), rolloverCarry: 0 }).where(mine);
+  if (!on) await ctx.db.update(budgets).set({ rolloverSince: null, rolloverCarry: 0 }).where(mine);
+  return { previous };
+}
+
+export type BudgetChange = { category: string; monthlyLimit: number | null; rolloverSince?: string | null; rolloverCarry?: number };
 
 /** Several limits at once (a starting budget, or its Undo). Returns what each was before, for Undo. */
 export async function setBudgets(ctx: Ctx, changes: BudgetChange[]): Promise<{ previous: BudgetChange[] }> {
   if (changes.some((c) => !isBudgetCategory(c.category)) || new Set(changes.map((c) => c.category)).size !== changes.length) throw new HttpError(400, "Unknown category.");
-  const current = await ctx.db.select().from(budgets).where(eq(budgets.userId, ctx.userId));
-  const before = new Map(current.map((b) => [b.category, b]));
-  const previous = changes.map((c) => ({ category: c.category, monthlyLimit: before.get(c.category)?.monthlyLimit ?? null, rolloverSince: before.get(c.category)?.rolloverSince ?? null }));
-  for (const c of changes) await setBudget(ctx, c.category, c.monthlyLimit, c.rolloverSince !== undefined ? { rolloverSince: c.rolloverSince } : {});
+  const previous: BudgetChange[] = [];
+  for (const c of changes) previous.push({ category: c.category, ...(await budgetState(ctx, c.category)) });
+  for (const c of changes) await setBudget(ctx, c.category, c.monthlyLimit, c.rolloverSince !== undefined ? { rolloverSince: c.rolloverSince, rolloverCarry: c.rolloverCarry } : {});
   return { previous };
 }
 

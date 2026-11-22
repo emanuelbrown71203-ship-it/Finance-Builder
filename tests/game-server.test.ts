@@ -54,9 +54,17 @@ describe("the game on the server", () => {
     expect(wins.map((w) => w.ref).sort()).toEqual(result!.kept.map((c) => `${result!.month}:${c}`).sort());
     const all = await db.select().from(playerWins).where(and(eq(playerWins.userId, DEMO_USER_ID), eq(playerWins.kind, "allunder")));
     expect(all).toHaveLength(result!.kept.length === result!.judged ? 1 : 0);
-    // Checking in again (another day this month) doesn't judge it twice.
+    // Checking in again (another day this month) doesn't judge it twice, even with limits changed since.
+    await setBudget(ctx, "dining", 100_000_00);
     await budgetWins(ctx);
     expect(await db.select().from(playerWins).where(and(eq(playerWins.userId, DEMO_USER_ID), eq(playerWins.kind, "under")))).toHaveLength(wins.length);
+    await setBudget(ctx, "dining", 28000);
+  });
+
+  it("waits until the 3rd to judge last month, so its last charges can arrive", async () => {
+    const early: Ctx = { ...ctx, userId: "nobody-yet", today: "2026-12-02" };
+    await budgetWins(early);
+    expect(await db.select().from(playerWins).where(eq(playerWins.userId, "nobody-yet"))).toHaveLength(0);
   });
 
   it("only judges limits set by the 8th of last month", async () => {

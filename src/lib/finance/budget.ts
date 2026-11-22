@@ -21,6 +21,8 @@ export type Limit = {
   limit: number;
   /** With rollover on: the first month whose leftover (or overspend) carries forward. */
   rolloverSince: string | null;
+  /** Carried into `rolloverSince` from before it (kept when the limit changed, so earlier months keep their own limit). */
+  rolloverCarry?: number;
 };
 
 export type BudgetStatus = "none" | "good" | "watch" | "over";
@@ -45,6 +47,8 @@ export type CategoryBudget = {
   paceNow: number | null;
   status: BudgetStatus;
   lastMonth: number;
+  /** Bills and subscriptions paid from this category last month. */
+  lastMonthBills: number;
   /** Everyday spending a month, averaged over the three months before this one. */
   average: number;
   /** Everyday spending for the six months to this one, oldest first. */
@@ -87,15 +91,22 @@ export function categoryBudgets(args: { month: string; today: ISODate; history: 
   const { month, today, history, billIds, limits } = args;
   const byMonth = everydayByMonth(history, billIds);
   const spentIn = (m: string, c: string) => byMonth.get(m)?.get(c) ?? 0;
+  const last = addMonthsToMonth(month, -1);
   const bills = new Map<string, number>();
+  const lastBills = new Map<string, number>();
   for (const t of history) {
-    if (!billIds.has(t.id) || monthOf(t.date) !== month || NOT_SPENDING.has(t.category)) continue;
-    bills.set(t.category, (bills.get(t.category) ?? 0) - t.amount);
+    if (!billIds.has(t.id) || NOT_SPENDING.has(t.category)) continue;
+    const m = monthOf(t.date);
+    if (m === month) bills.set(t.category, (bills.get(t.category) ?? 0) - t.amount);
+    else if (m === last) lastBills.set(t.category, (lastBills.get(t.category) ?? 0) - t.amount);
   }
   const limitFor = new Map(limits.map((l) => [l.category, l]));
   const p = monthProgress(month, today);
 
-  const categories = new Set<string>([...limitFor.keys(), ...[...(byMonth.get(month)?.entries() ?? [])].filter(([, v]) => v > 0).map(([k]) => k)]);
+  // Every category with a limit, with spending this month or in the three before (so a new month can still be
+  // planned), or with bills this month or last (so what's spent on rent or power is never left out).
+  const spentIn3 = [0, 1, 2, 3].flatMap((n) => [...(byMonth.get(addMonthsToMonth(month, -n))?.entries() ?? [])].filter(([, v]) => v > 0).map(([k]) => k));
+  const categories = new Set<string>([...limitFor.keys(), ...spentIn3, ...bills.keys(), ...lastBills.keys()]);
   const rows: CategoryBudget[] = [];
   for (const category of categories) {
     if (NOT_SPENDING.has(category)) continue;
@@ -104,9 +115,11 @@ export function categoryBudgets(args: { month: string; today: ISODate; history: 
     const average = Math.round([1, 2, 3].reduce((s, n) => s + Math.max(0, spentIn(addMonthsToMonth(month, -n), category)), 0) / 3);
     const history6 = Array.from({ length: 6 }, (_, i) => addMonthsToMonth(month, i - 5)).map((m) => ({ month: m, spent: Math.max(0, spentIn(m, category)) }));
 
-    // Rollover: each month from when it was switched on adds what it left (or takes what it overspent).
+    // Rollover: what was carried into the month it (last) started, plus what each month since left
+    // (or less what it overspent). Months before then aren't known at today's limit, so carry nothing.
     let carried = 0;
-    if (own?.rolloverSince && own.rolloverSince < month) {
+    if (own?.rolloverSince && own.rolloverSince <= month) {
+      carried = own.rolloverCarry ?? 0;
       const earliest = addMonthsToMonth(month, -ROLLOVER_MONTHS);
       for (let m = own.rolloverSince < earliest ? earliest : own.rolloverSince; m < month; m = addMonthsToMonth(m, 1)) carried += own.limit - spentIn(m, category);
     }
@@ -137,7 +150,8 @@ export function categoryBudgets(args: { month: string; today: ISODate; history: 
       forecast,
       paceNow: available === null ? null : Math.round((Math.max(0, available) * p.elapsed) / p.days),
       status,
-      lastMonth: Math.max(0, spentIn(addMonthsToMonth(month, -1), category)),
+      lastMonth: Math.max(0, spentIn(last, category)),
+      lastMonthBills: lastBills.get(category) ?? 0,
       average,
       history: history6,
     });
@@ -166,7 +180,8 @@ export function suggestLimits(rows: CategoryBudget[], room: number | null): { li
 
 /** Where the month's money goes: what comes in, bills, saving, everyday budgets, and what isn't planned yet. */
 export function budgetPlan(args: { income: number; bills: number; saving: number; rows: CategoryBudget[] }) {
-  const budgeted = args.rows.reduce((s, r) => s + (r.limit === null ? 0 : Math.max(0, r.limit + r.carried)), 0);
+  // This month's money only: what's carried over came from earlier months.
+  const budgeted = args.rows.reduce((s, r) => s + (r.limit === null ? 0 : Math.max(0, r.limit)), 0);
   return {
     income: args.income,
     bills: args.bills,
@@ -174,6 +189,8 @@ export function budgetPlan(args: { income: number; bills: number; saving: number
     budgeted,
     /** Positive: money with no job yet. Negative: the plan asks for more than comes in. */
     unplanned: args.income - args.bills - args.saving - budgeted,
+    /** Carried over into this month's budgets from earlier ones (positive unspent, negative overspent). */
+    carried: args.rows.reduce((s, r) => s + (r.limit === null ? 0 : r.carried), 0),
     /** Everyday spending in categories with a limit, and in ones without. */
     budgetedSpent: args.rows.reduce((s, r) => s + (r.limit === null ? 0 : r.spent), 0),
     unbudgetedSpent: args.rows.reduce((s, r) => s + (r.limit === null ? Math.max(0, r.spent) : 0), 0),

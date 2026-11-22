@@ -86,5 +86,7 @@ export const MIGRATION_STATEMENTS: string[] = [
   "CREATE INDEX \"player_wins_user_kind_day_idx\" ON \"player_wins\" USING btree (\"user_id\",\"kind\",\"day\");",
   "CREATE UNIQUE INDEX \"player_wins_user_kind_ref_idx\" ON \"player_wins\" USING btree (\"user_id\",\"kind\",\"ref\");",
   "ALTER TABLE \"budgets\" ADD COLUMN \"rollover_since\" text;",
-  "ALTER TABLE \"budgets\" ADD COLUMN \"created_at\" timestamp with time zone DEFAULT now() NOT NULL;"
+  "ALTER TABLE \"budgets\" ADD COLUMN \"created_at\" timestamp with time zone DEFAULT now() NOT NULL;",
+  "ALTER TABLE \"budgets\" ADD COLUMN \"rollover_carry\" bigint DEFAULT 0 NOT NULL;",
+  "ALTER TABLE \"budgets\" ADD COLUMN \"removed_at\" timestamp with time zone;"
 ];

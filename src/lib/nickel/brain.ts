@@ -91,7 +91,7 @@ export function thinkAbout(input: NickelInput): { mood: Mood; tips: Tip[] } {
   }
 
   for (const b of input.budget) {
-    if (!b.limit) continue;
+    if (b.limit === null || (b.limit === 0 && b.spent <= 0)) continue;
     const k = `budget-${b.category}`;
     if (b.spent > b.limit) say({ key: k, priority: 2, mood: "worried", text: `${b.label} is ${money(b.spent - b.limit)} over its ${money(b.limit)} limit this month.`, href: "/budget", link: "See budget" });
     else if (b.onPaceOver && input.daysLeft > 3) say({ key: k, priority: 3, mood: "curious", text: `${b.label} is heading over its ${money(b.limit)} budget at this pace: ${money(b.limit - b.spent)} left for ${input.daysLeft} days.`, href: "/budget", link: "See budget" });

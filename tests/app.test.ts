@@ -3,11 +3,11 @@ import { getDb, type DB } from "@/db";
 import { seedDemo } from "@/db/seed";
 import { DEMO_USER_ID } from "@/lib/config";
 import type { Ctx } from "@/server/auth";
-import { deleteDeposit, setBudget, setBudgets, setDebtPlan, setDebtSettings, setRecurringOverride, setRollover, updateGoal, updateTransaction } from "@/server/mutations";
+import { budgetState, deleteDeposit, setBudget, setBudgets, setDebtPlan, setDebtSettings, setRecurringOverride, setRollover, updateGoal, updateTransaction } from "@/server/mutations";
 import { loadRules } from "@/server/rules";
 import { countUnclear, createNameRule, deleteNameRule, getNames, previewNameRule, renameRule, restoreNameRule } from "@/server/names";
-import { transactions as transactionsTable } from "@/db/schema";
-import { eq as eqOp } from "drizzle-orm";
+import { budgets as budgetsTable, transactions as transactionsTable } from "@/db/schema";
+import { and, eq as eqOp } from "drizzle-orm";
 import { addBill, addGoal, addToGoal, changeGoal, changeLoan, findCharge, findDebt, findGoal, listActivity, renameCharges, undoActivity } from "@/server/actions";
 import { bankMatch, createManualBill, deleteManualBill, manualSeries, nextDue, restoreManualBill, updateManualBill } from "@/server/manual-bills";
 import { upcomingBetween } from "@/lib/finance/recurring";
@@ -278,7 +278,7 @@ describe("sample household", () => {
     await setBudget(ctx, "travel", 30000);
     expect((await getBudget(ctx, "2026-11")).rows.find((r) => r.category === "travel")?.limit).toBe(30000);
     await setBudget(ctx, "travel", null);
-    expect((await getBudget(ctx, "2026-11")).rows.find((r) => r.category === "travel")).toBeUndefined();
+    expect((await getBudget(ctx, "2026-11")).rows.find((r) => r.category === "travel")?.limit ?? null).toBeNull();
 
     const goals = await getGoals(ctx);
     await updateGoal(ctx, goals.goals[0].id, { add: 5000 });
@@ -324,7 +324,7 @@ describe("sample household", () => {
   it("suggests a starting budget for spending with no limit, and applies several at once with Undo", async () => {
     // The sample household budgets everything it spends on; take one away to see it suggested.
     const shopping = (await getBudget(ctx, "2026-11")).rows.find((r) => r.category === "shopping")!;
-    expect((await getBudget(ctx, "2026-11")).suggestion).toBeNull();
+    expect((await getBudget(ctx, "2026-11")).suggestion?.limits.some((l) => l.category === "shopping") ?? false).toBe(true);
     await setBudget(ctx, "shopping", null);
     const budget = await getBudget(ctx, "2026-11");
     expect(budget.suggestion).not.toBeNull();
@@ -335,7 +335,7 @@ describe("sample household", () => {
     expect(budget.suggestion!.room).toBe(budget.plan.income - budget.plan.bills - budget.plan.saving);
     const { previous } = await setBudgets(ctx, [{ category: "shopping", monthlyLimit: pick.limit }]);
     expect((await getBudget(ctx, "2026-11")).rows.find((r) => r.category === "shopping")?.limit).toBe(pick.limit);
-    expect(previous).toEqual([{ category: "shopping", monthlyLimit: null, rolloverSince: null }]);
+    expect(previous).toEqual([{ category: "shopping", monthlyLimit: null, rolloverSince: null, rolloverCarry: 0 }]);
     await setBudgets(ctx, previous);
     expect((await getBudget(ctx, "2026-11")).rows.find((r) => r.category === "shopping")?.limit).toBeNull();
     await setBudget(ctx, "shopping", shopping.limit);
@@ -345,21 +345,61 @@ describe("sample household", () => {
   });
 
   it("switches rollover on and off, and Undo puts it back exactly", async () => {
+    const row = async (c: string) => (await getBudget(ctx, "2026-11")).rows.find((r) => r.category === c)!;
     const { previous } = await setRollover(ctx, "dining", true);
-    expect(previous).toBeNull();
-    expect((await getBudget(ctx, "2026-11")).rows.find((r) => r.category === "dining")?.rollover).toBe(true);
+    expect(previous.rolloverSince).toBeNull();
+    expect((await row("dining")).rollover).toBe(true);
     // Switching on starts from this month: nothing is carried until it ends.
-    expect((await getBudget(ctx, "2026-11")).rows.find((r) => r.category === "dining")?.carried).toBe(0);
+    expect((await row("dining")).carried).toBe(0);
     await setRollover(ctx, "dining", false);
-    expect((await getBudget(ctx, "2026-11")).rows.find((r) => r.category === "dining")?.rollover).toBe(false);
-    // Undo of turning groceries off puts back the month it started.
+    expect((await row("dining")).rollover).toBe(false);
+    // Turning groceries off forgets what it carried; putting the answer back restores it exactly.
+    const before = await row("groceries");
     const g = await setRollover(ctx, "groceries", false);
-    expect(g.previous).toMatch(/^\d{4}-\d{2}$/);
-    await setBudget(ctx, "groceries", 65000, { rolloverSince: g.previous });
-    expect((await getBudget(ctx, "2026-11")).rows.find((r) => r.category === "groceries")?.carried).not.toBe(0);
+    expect(g.previous.rolloverSince).toMatch(/^\d{4}-\d{2}$/);
+    expect((await row("groceries")).carried).toBe(0);
+    await setBudget(ctx, "groceries", g.previous.monthlyLimit, { rolloverSince: g.previous.rolloverSince, rolloverCarry: g.previous.rolloverCarry });
+    expect((await row("groceries")).carried).toBe(before.carried);
     // Rollover needs a limit, and a month in the future can't be set.
     await expect(setRollover(ctx, "travel", true)).rejects.toThrow(/limit/);
     await expect(setBudget(ctx, "dining", 28000, { rolloverSince: "2030-01" })).rejects.toThrow();
+  });
+
+  it("keeps what rollover carried at the old limit when the limit changes", async () => {
+    const row = async () => (await getBudget(ctx, "2026-11")).rows.find((r) => r.category === "groceries")!;
+    const before = await row();
+    const state = await budgetState(ctx, "groceries");
+    // Doubling the limit doesn't rewrite the months before: what they carried stays as it was.
+    await setBudget(ctx, "groceries", 130000);
+    const after = await row();
+    expect(after.carried).toBe(before.carried);
+    expect(after.left).toBe(130000 + before.carried - before.spent);
+    // Undo puts the limit and the rollover back exactly.
+    await setBudget(ctx, "groceries", state.monthlyLimit, { rolloverSince: state.rolloverSince, rolloverCarry: state.rolloverCarry });
+    expect(await budgetState(ctx, "groceries")).toEqual(state);
+    expect((await row()).carried).toBe(before.carried);
+  });
+
+  it("removing a budget can be undone exactly, start date and rollover included", async () => {
+    const [kept] = await db.select().from(budgetsTable).where(and(eqOp(budgetsTable.userId, DEMO_USER_ID), eqOp(budgetsTable.category, "groceries")));
+    const state = await budgetState(ctx, "groceries");
+    await setBudget(ctx, "groceries", null);
+    expect(await budgetState(ctx, "groceries")).toEqual({ monthlyLimit: null, rolloverSince: null, rolloverCarry: 0 });
+    expect((await getBudget(ctx, "2026-11")).rows.find((r) => r.category === "groceries")?.limit).toBeNull();
+    await setBudget(ctx, "groceries", state.monthlyLimit, { rolloverSince: state.rolloverSince, rolloverCarry: state.rolloverCarry });
+    const [back] = await db.select().from(budgetsTable).where(and(eqOp(budgetsTable.userId, DEMO_USER_ID), eqOp(budgetsTable.category, "groceries")));
+    expect(back.createdAt.getTime()).toBe(kept.createdAt.getTime());
+    expect(await budgetState(ctx, "groceries")).toEqual(state);
+  });
+
+  it("never leaves out what's spent on bills: categories paid only by bills still have a row", async () => {
+    const budget = await getBudget(ctx, "2026-11");
+    const housing = budget.rows.find((r) => r.category === "housing");
+    expect(housing?.bills).toBeGreaterThan(0);
+    expect(housing?.limit).toBeNull();
+    // This month's plan counts only this month's limits; what rollover carried is shown on its own.
+    expect(budget.plan.budgeted).toBe(budget.rows.reduce((s, r) => s + (r.limit ?? 0), 0));
+    expect(budget.plan.carried).toBe(budget.rows.reduce((s, r) => s + (r.limit === null ? 0 : r.carried), 0));
   });
 });
 

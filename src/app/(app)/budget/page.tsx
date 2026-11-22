@@ -3,7 +3,7 @@
 import { ChevronLeft, ChevronRight, RotateCw, Sparkles } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useState } from "react";
+import { Suspense, useState, useSyncExternalStore } from "react";
 import { BudgetBar, STATUS, available } from "@/components/budget";
 import { CategoryIcon } from "@/components/category-icon";
 import { Columns, Runway } from "@/components/charts";
@@ -27,10 +27,10 @@ import type { BudgetPayload, BudgetRow, Me, TransactionsPayload } from "@/lib/ty
  * suggests a whole budget from the last three months.
  */
 
-type Previous = { monthlyLimit: number | null; rolloverSince: string | null };
+type Previous = { monthlyLimit: number | null; rolloverSince: string | null; rolloverCarry: number };
 
 /** Puts a category back the way it was (the Undo for any change to it). */
-const restore = (cat: string, before: Previous) => send("PUT", "/api/budget", { category: cat, monthlyLimit: before.monthlyLimit, rolloverSince: before.rolloverSince });
+const restore = (cat: string, before: Previous) => send("PUT", "/api/budget", { category: cat, monthlyLimit: before.monthlyLimit, rolloverSince: before.rolloverSince, rolloverCarry: before.rolloverCarry });
 
 function statusLine(row: BudgetRow, data: BudgetPayload): string {
   if (row.left === null) return row.average > 0 ? `Usually ${dollars(row.average)} a month` : "New this month";
@@ -97,7 +97,7 @@ function PlanCard({ data }: { data: BudgetPayload }) {
           <p className={cx("figure mt-2 text-[clamp(2.75rem,13vw,3.75rem)]", leftInBudgets < 0 && "text-bad")}>{leftInBudgets < 0 ? `−${dollars(-leftInBudgets)}` : dollars(leftInBudgets)}</p>
           <p className="mt-1.5 text-ink-2">
             {data.isCurrent && data.daysLeft > 1 && leftInBudgets > 0 ? `About ${dollars(perDay)} a day across your budgets for the ${data.daysLeft} days left. ` : ""}
-            {dollars(p.budgetedSpent)} spent of {dollars(p.budgeted)} budgeted{p.unbudgetedSpent > 0 ? `, and ${dollars(p.unbudgetedSpent)} where there’s no limit` : ""}.
+            {dollars(p.budgetedSpent)} spent of {dollars(p.budgeted + p.carried)} in your budgets{p.unbudgetedSpent > 0 ? `, and ${dollars(p.unbudgetedSpent)} where there’s no limit` : ""}.
           </p>
         </>
       ) : (
@@ -127,6 +127,15 @@ function PlanCard({ data }: { data: BudgetPayload }) {
             <dd className={cx("tabular", x.label === "More than comes in" && "font-bold text-bad")}>{dollars(x.amount)}</dd>
           </div>
         ))}
+        {p.carried !== 0 && (
+          <div className="flex items-baseline justify-between gap-4 py-2.5 text-ink-2">
+            <dt className="flex items-center gap-2">
+              <RotateCw size={12} aria-hidden className="mx-px" />
+              {p.carried > 0 ? "Carried over into budgets" : "Overspent last time, taken off"}
+            </dt>
+            <dd className="tabular">{dollars(Math.abs(p.carried))}</dd>
+          </div>
+        )}
       </dl>
       {data.isCurrent && p.unplanned > 2000 && limited.length > 0 && <p className="mt-2 rounded-control bg-sunk px-3.5 py-3 text-small text-ink-2">{dollars(p.unplanned)} has no job yet. Raise a limit, or put it toward a goal in Wealth.</p>}
       {data.isCurrent && p.unplanned < 0 && <p className="mt-2 rounded-control bg-pink px-3.5 py-3 text-small text-pink-ink">Your plan asks for {dollars(-p.unplanned)} more than comes in this month. Lowering a limit or two would close the gap.</p>}
@@ -150,6 +159,7 @@ function SetupForm({ data, onClose }: { data: BudgetPayload; onClose: () => void
   const [values, setValues] = useState<Record<string, string>>(() => Object.fromEntries(rows.map((r) => [r.category, String(r.limit / 100)])));
   const [on, setOn] = useState<Record<string, boolean>>(() => Object.fromEntries(rows.map((r) => [r.category, true])));
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const chosen = rows.filter((r) => on[r.category]).map((r) => ({ category: r.category, monthlyLimit: parseDollarsToCents(values[r.category] ?? "") }));
   const valid = chosen.every((c) => c.monthlyLimit !== null && c.monthlyLimit > 0);
   const total = chosen.reduce((s, c) => s + (c.monthlyLimit ?? 0), 0) + data.rows.reduce((s, r) => s + (r.limit ?? 0), 0);
@@ -164,7 +174,8 @@ function SetupForm({ data, onClose }: { data: BudgetPayload; onClose: () => void
       toast(`Budget set for ${chosen.length} ${chosen.length === 1 ? "category" : "categories"}`, { action: { label: "Undo", run: () => send("POST", "/api/budget/plan", { limits: previous }) } });
       onClose();
     } catch (e) {
-      toast(e instanceof Error ? e.message : "Couldn’t save. Try again.", { tone: "error" });
+      // Said here: a message at the bottom would sit behind this sheet.
+      setError(e instanceof Error ? e.message : "Couldn’t save. Try again.");
       setBusy(false);
     }
   };
@@ -200,8 +211,9 @@ function SetupForm({ data, onClose }: { data: BudgetPayload; onClose: () => void
         ) : (
           "."
         )}{" "}
-        Each new limit earns {WINS.budget.xp} XP.
+        Each new limit earns {WINS.budget.xp} XP (up to {WINS.budget.perDay} a day).
       </p>
+      {error && <p className="rounded-control bg-pink px-3.5 py-3 text-small text-pink-ink">{error}</p>}
       <div className="flex justify-end gap-2">
         <Button onClick={onClose}>Not now</Button>
         <Button variant="primary" disabled={busy || !valid || chosen.length === 0} onClick={save}>
@@ -249,11 +261,19 @@ function CategoryDetail({ row, data, onClose }: { row: BudgetRow; data: BudgetPa
   };
   // The switch shows the change and flips straight back, so it needs no message (one would sit behind this sheet anyway).
   const [rollover, setRollover] = useState(row.rollover);
+  // Switching it off forgets what was carried. Switching it back on (a stray tap) puts that back exactly.
+  const [forgot, setForgot] = useState<Previous | null>(null);
   const toggleRollover = async (on: boolean) => {
     setRollover(on);
     setError(null);
     try {
-      await send("PUT", "/api/budget", { category: row.category, rollover: on });
+      if (on && forgot?.rolloverSince) {
+        await restore(row.category, forgot);
+        setForgot(null);
+      } else {
+        const { previous } = await send<{ previous: Previous }>("PUT", "/api/budget", { category: row.category, rollover: on });
+        if (!on) setForgot(previous);
+      }
     } catch (e) {
       setRollover(!on);
       setError(e instanceof Error ? e.message : "Couldn’t save. Try again.");
@@ -289,7 +309,7 @@ function CategoryDetail({ row, data, onClose }: { row: BudgetRow; data: BudgetPa
           </div>
         ))}
       </dl>
-      {row.bills > 0 && <p className="-mt-2 text-small text-ink-3">Plus {dollarsExact(row.bills)} in bills and subscriptions from {name}, planned separately and not counted here.</p>}
+      {row.bills > 0 && <p className="-mt-2 text-small text-ink-3">Plus {dollarsExact(row.bills)} in bills and subscriptions from {name} (they’re in the charges below too), planned separately and not counted against this budget.</p>}
 
       <div>
         <h3 className="mb-2 font-bold">Six months</h3>
@@ -383,6 +403,7 @@ function Budget() {
   const shown = month ?? current;
   const { data, error, mutate, isValidating } = useApi<BudgetPayload>(shown ? `/api/budget?month=${shown}` : null, { refreshInterval: 30_000 });
   const [setup, setSetup] = useState(false);
+  const [hidden, hide] = useSuggestionHidden(shown);
   const opened = params.get("category");
   const [adding, setAdding] = useState<string | null>(null);
   const open = (cat: string | null) => {
@@ -435,8 +456,10 @@ function Budget() {
   }
 
   const limited = data.rows.filter((r) => r.limit !== null);
-  const loose = data.rows.filter((r) => r.limit === null && r.spent > 0);
-  const nothingYet = SPENDING_CATEGORIES.filter((c) => !data.rows.some((r) => r.category === c.key));
+  // No budget yet: everyday spending this month or usually. Categories that only ever pay bills sit with the rest.
+  const everyday = (r: BudgetRow) => r.spent > 0 || r.average > 0;
+  const loose = data.rows.filter((r) => r.limit === null && everyday(r));
+  const nothingYet = SPENDING_CATEGORIES.filter((c) => !data.rows.some((r) => r.category === c.key && (r.limit !== null || everyday(r))));
   const openRow = opened ? (data.rows.find((r) => r.category === opened) ?? (adding === opened || SPENDING_CATEGORIES.some((c) => c.key === opened) ? blankRow(opened, data) : null)) : null;
 
   return (
@@ -444,7 +467,7 @@ function Budget() {
       {header}
       <div className={cx("grid grid-cols-1 gap-4 transition-opacity xl:grid-cols-[1fr_1.1fr] xl:items-start", isValidating && data.month !== shown && "opacity-60")}>
         <div className="flex flex-col gap-4">
-          {data.suggestion && (
+          {data.suggestion && (limited.length === 0 || !hidden) && (
             <Sheet className="border-accent-soft bg-accent-soft/40">
               <div className="flex items-start gap-3">
                 <span aria-hidden className="inline-flex size-10 shrink-0 items-center justify-center rounded-xl bg-accent text-on-accent">
@@ -457,9 +480,12 @@ function Budget() {
                       ? "Passbook suggests a monthly amount for each kind of everyday spending from your last three months, sized to fit what’s left after bills and saving."
                       : `Suggested amounts for ${data.suggestion.limits.filter((l) => !limited.some((r) => r.category === l.category)).length} more, from what you usually spend.`}
                   </p>
-                  <Button variant="primary" className="mt-3" onClick={() => setSetup(true)}>
-                    {limited.length === 0 ? "Suggest a budget" : "See suggestions"}
-                  </Button>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <Button variant="primary" onClick={() => setSetup(true)}>
+                      {limited.length === 0 ? "Suggest a budget" : "See suggestions"}
+                    </Button>
+                    {limited.length > 0 && <Button onClick={() => hide(data.month)}>Not now</Button>}
+                  </div>
                 </div>
               </div>
             </Sheet>
@@ -546,7 +572,33 @@ function Budget() {
   );
 }
 
+/** "Not now" on the suggestion card: hidden for the rest of the month, on this device. */
+function useSuggestionHidden(month: string | null): [boolean, (month: string) => void] {
+  const key = "passbook-budget-suggest-hidden";
+  const hidden = useSyncExternalStore(
+    (l) => {
+      window.addEventListener(key, l);
+      return () => window.removeEventListener(key, l);
+    },
+    () => {
+      try {
+        return localStorage.getItem(key) === month;
+      } catch {
+        return false;
+      }
+    },
+    () => true,
+  );
+  const hide = (m: string) => {
+    try {
+      localStorage.setItem(key, m);
+    } catch {}
+    window.dispatchEvent(new Event(key));
+  };
+  return [hidden, hide];
+}
+
 /** A category with nothing spent and no budget yet, to give it one. */
 function blankRow(cat: string, data: BudgetPayload): BudgetRow {
-  return { category: cat, spent: 0, bills: 0, limit: null, rollover: false, carried: 0, left: null, perDay: null, forecast: 0, paceNow: null, status: "none", lastMonth: 0, average: 0, history: Array.from({ length: 6 }, (_, i) => ({ month: addMonthsToMonth(data.month, i - 5), spent: 0 })) };
+  return { category: cat, spent: 0, bills: 0, limit: null, rollover: false, carried: 0, left: null, perDay: null, forecast: 0, paceNow: null, status: "none", lastMonth: 0, lastMonthBills: 0, average: 0, history: Array.from({ length: 6 }, (_, i) => ({ month: addMonthsToMonth(data.month, i - 5), spent: 0 })) };
 }

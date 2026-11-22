@@ -192,7 +192,7 @@ function Budgets({ data }: { data: Overview }) {
   const rows = data.budget.rows.slice(0, 4);
   return (
     <Sheet className="order-4 sec-budget">
-      <SheetHeader title="Budgets" hint={rows.length > 0 ? `${dollars(Math.max(0, data.budget.totalLimit - data.budget.totalSpent))} left across ${data.budget.rows.length} ${data.budget.rows.length === 1 ? "budget" : "budgets"}.` : undefined} action={rows.length > 0 ? <More href="/budget">All</More> : undefined} />
+      <SheetHeader title="Budgets" hint={rows.length > 0 ? (data.budget.left >= 0 ? `${dollars(data.budget.left)} left across ${data.budget.rows.length} ${data.budget.rows.length === 1 ? "budget" : "budgets"}.` : `${dollars(-data.budget.left)} over across your budgets.`) : undefined} action={rows.length > 0 ? <More href="/budget">All</More> : undefined} />
       {rows.length > 0 ? (
         <ul className="flex flex-col gap-1">
           {rows.map((r) => (

@@ -286,14 +286,14 @@ async function callTool(name: string, args: Record<string, unknown>, ctx: Ctx): 
       };
     }
     case "get_spending": {
-      const month = typeof args.month === "string" && /^\d{4}-\d{2}$/.test(args.month) ? args.month : monthOf(ctx.today);
+      const month = typeof args.month === "string" && /^\d{4}-(0[1-9]|1[0-2])$/.test(args.month) ? args.month : monthOf(ctx.today);
       const b = await getBudget(ctx, month);
       return {
         month: b.month,
         note: "Budgets are for everyday spending; bills and subscriptions are planned separately (bills_paid).",
         everyday_spent: usd(b.totalSpent),
         money_in: usd(b.income),
-        plan: { money_in: usd(b.plan.income), bills: usd(b.plan.bills), saving_for_goals: usd(b.plan.saving), everyday_budgets: usd(b.plan.budgeted), not_planned_yet: usd(b.plan.unplanned), left_to_spend: usd(b.plan.leftToSpend) },
+        plan: { money_in: usd(b.plan.income), bills: usd(b.plan.bills), saving_for_goals: usd(b.plan.saving), everyday_budgets: usd(b.plan.budgeted), carried_over: b.plan.carried ? usd(b.plan.carried) : undefined, not_planned_yet: usd(b.plan.unplanned), left_to_spend: usd(b.plan.leftToSpend) },
         categories: b.rows.map((r) => ({
           category: category(r.category).label,
           everyday_spent: usd(r.spent),

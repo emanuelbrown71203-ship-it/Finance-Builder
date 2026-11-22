@@ -127,7 +127,11 @@ export const budgets = pgTable(
     monthlyLimit: cents("monthly_limit").notNull(),
     /** With rollover on, the first month (YYYY-MM) whose leftover or overspend carries into the next. Null: off. */
     rolloverSince: text("rollover_since"),
+    /** Carried into `rollover_since` from before it: kept when the limit changes, so past months keep the limit they had. */
+    rolloverCarry: cents("rollover_carry").notNull().default(0),
     createdAt: createdAt(),
+    /** Removed (kept for a while so Undo can put it back exactly as it was). */
+    removedAt: timestamp("removed_at", { withTimezone: true }),
   },
   (t) => [uniqueIndex("budgets_user_category_idx").on(t.userId, t.category)],
 );

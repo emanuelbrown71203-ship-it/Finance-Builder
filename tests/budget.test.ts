@@ -89,6 +89,21 @@ describe("category budgets", () => {
     expect(categoryBudgets({ month: "2026-11", today, history, billIds, limits: [{ category: "dining", limit: dollars(350), rolloverSince: "2026-11" }] })[0].carried).toBe(0);
   });
 
+  it("adds what was carried before the limit last changed, and knows nothing of months before that", () => {
+    // Rollover since September at $350, then the limit changed in November with $100 banked.
+    const limits = [{ category: "dining", limit: dollars(500), rolloverSince: "2026-11", rolloverCarry: dollars(100) }];
+    const nov = categoryBudgets({ month: "2026-11", today, history, billIds, limits })[0];
+    expect(nov.carried).toBe(dollars(100));
+    expect(nov.left).toBe(dollars(500 + 100 - 140));
+    // October is before the change: nothing is guessed for it at today's limit.
+    expect(categoryBudgets({ month: "2026-10", today, history, billIds, limits })[0].carried).toBe(0);
+  });
+
+  it("keeps a row for a category paid only by bills, so what's spent there is never left out", () => {
+    const rows = categoryBudgets({ month: "2026-11", today, history: [...history, tx("2026-11-01", dollars(-1800), "housing", "rent-nov")], billIds: new Set([...billIds, "rent-nov"]), limits: [] });
+    expect(rows.find((r) => r.category === "housing")).toMatchObject({ spent: 0, bills: dollars(1800), status: "none" });
+  });
+
   it("treats a finished month as finished", () => {
     const oct = categoryBudgets({ month: "2026-10", today, history, billIds, limits: [{ category: "dining", limit: dollars(350), rolloverSince: null }] })[0];
     expect(oct.forecast).toBe(oct.spent);
@@ -123,14 +138,16 @@ describe("a starting budget", () => {
 });
 
 describe("the month's plan", () => {
-  it("adds up: money in less bills, saving and budgets leaves what has no job yet", () => {
+  it("adds up: money in less bills, saving and this month's budgets leaves what has no job yet", () => {
     const rows = [
       { category: "dining", limit: dollars(300), carried: dollars(50), spent: dollars(120) },
       { category: "shopping", limit: null, carried: 0, spent: dollars(80) },
     ] as Parameters<typeof budgetPlan>[0]["rows"];
     const plan = budgetPlan({ income: dollars(4000), bills: dollars(2000), saving: dollars(500), rows });
-    expect(plan.budgeted).toBe(dollars(350));
-    expect(plan.unplanned).toBe(dollars(4000 - 2000 - 500 - 350));
+    // This month's limits only: what rollover carried came from earlier months' money.
+    expect(plan.budgeted).toBe(dollars(300));
+    expect(plan.carried).toBe(dollars(50));
+    expect(plan.unplanned).toBe(dollars(4000 - 2000 - 500 - 300));
     expect(plan.budgetedSpent).toBe(dollars(120));
     expect(plan.unbudgetedSpent).toBe(dollars(80));
   });

@@ -56,8 +56,10 @@ Passbook follows the same house style as the owner's other apps (written down in
 **How the budget works.** A category's budget is for everyday spending; bills and subscriptions come out
 of the month first and are planned in Bills, so Netflix never eats the entertainment budget (it's shown
 beside it). The plan adds up to Home's number: what's left in your budgets, plus money not planned yet,
-less spending with no budget, is "left to spend". **Rollover** (per category) carries what's left, or
-what was overspent, into the next month. Each category's forecast blends its usual pace (the last three
+less spending with no budget, is "left to spend" (apart from anything rollover carried in from earlier
+months, which is shown on its own line). **Rollover** (per category) carries what's left, or what was
+overspent, into the next month; changing the limit keeps what was carried so far at the old limit.
+Removing a budget can be undone exactly (it's kept, marked removed). Each category's forecast blends its usual pace (the last three
 months) with this month's. Worked out on read by `src/lib/finance/budget.ts`; only the limits and
 rollover choice are stored. At the start of each month, every budget kept last month earns XP, and
 keeping all of them earns more ("On Budget" and "Clean Sweep" badges).

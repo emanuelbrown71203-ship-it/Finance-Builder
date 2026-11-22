@@ -151,8 +151,8 @@ export type Overview = {
   upcoming: UpcomingBill[];
   /** Everything due in the next 30 days, not just the few listed. */
   upcomingTotal: number;
-  /** Categories with a limit (ones needing a look first); everyday spent in them; what's budgeted; money with no job yet. */
-  budget: { rows: BudgetRow[]; totalSpent: number; totalLimit: number; unplanned: number };
+  /** Categories with a limit (ones needing a look first); everyday spent in them; what's available in them; what's left; money with no job yet. */
+  budget: { rows: BudgetRow[]; totalSpent: number; totalLimit: number; left: number; unplanned: number };
   goals: GoalView[];
   investments: { total: number; change: number; costBasis: number; series: { date: ISODate; value: number }[] };
   sync: SyncStatus;
@@ -166,8 +166,10 @@ export type BudgetPlanView = {
   income: number;
   bills: number;
   saving: number;
-  /** Everyday budgets for the month, with anything carried over. */
+  /** This month's everyday budgets. */
   budgeted: number;
+  /** Carried into them from earlier months with rollover (negative when overspent). */
+  carried: number;
   /** Positive: money with no job yet. Negative: the plan asks for more than comes in. */
   unplanned: number;
   budgetedSpent: number;

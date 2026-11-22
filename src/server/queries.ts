@@ -300,9 +300,17 @@ function billIdsOf(bundle: RecurringBundle): Set<string> {
   return new Set(bundle.series.filter((s) => s.kind !== "income").flatMap((s) => s.history.map((h) => h.id)));
 }
 
+/** The person's limits (removed ones are kept a while for Undo, but don't count). */
 export async function loadLimits(ctx: Ctx): Promise<(Limit & { createdAt: Date })[]> {
-  const rows = await ctx.db.select().from(budgets).where(eq(budgets.userId, ctx.userId));
-  return rows.map((b) => ({ category: b.category, limit: b.monthlyLimit, rolloverSince: b.rolloverSince, createdAt: b.createdAt }));
+  const rows = await ctx.db.select().from(budgets).where(and(eq(budgets.userId, ctx.userId), isNull(budgets.removedAt)));
+  return rows.map((b) => ({ category: b.category, limit: b.monthlyLimit, rolloverSince: b.rolloverSince, rolloverCarry: b.rolloverCarry, createdAt: b.createdAt }));
+}
+
+/** What a category with rollover on has carried into this month, at the limits as they stand. */
+export async function carriedNow(ctx: Ctx, categoryKey: string): Promise<number> {
+  const [bundle, limits] = await Promise.all([loadRecurring(ctx), loadLimits(ctx)]);
+  const rows = categoryBudgets({ month: monthOf(ctx.today), today: ctx.today, history: bundle.history, billIds: billIdsOf(bundle), limits: limits.filter((l) => l.category === categoryKey) });
+  return rows.find((r) => r.category === categoryKey)?.carried ?? 0;
 }
 
 /** What goals are set to put aside this month. */
@@ -356,12 +364,12 @@ export async function getBudget(ctx: Ctx, month: string): Promise<BudgetPayload>
  */
 export async function lastMonthBudgets(ctx: Ctx): Promise<{ month: string; kept: string[]; judged: number } | null> {
   const month = addMonthsToMonth(monthOf(ctx.today), -1);
-  const [bundle, limits] = await Promise.all([loadRecurring(ctx), loadLimits(ctx)]);
+  const cutoff = new Date(`${month}-08T00:00:00Z`);
+  const eligible = (await loadLimits(ctx)).filter((l) => l.createdAt < cutoff);
+  if (eligible.length === 0) return null;
+  const bundle = await loadRecurring(ctx);
   const days = new Set(bundle.history.filter((t) => monthOf(t.date) === month).map((t) => t.date));
   if (days.size < 10) return null;
-  const cutoff = new Date(`${month}-08T00:00:00Z`);
-  const eligible = limits.filter((l) => l.createdAt < cutoff);
-  if (eligible.length === 0) return null;
   const rows = categoryBudgets({ month, today: ctx.today, history: bundle.history, billIds: billIdsOf(bundle), limits: eligible });
   const judged = rows.filter((r) => r.limit !== null);
   return { month, kept: judged.filter((r) => (r.left ?? -1) >= 0).map((r) => r.category), judged: judged.length };
@@ -654,7 +662,9 @@ export async function getOverview(ctx: Ctx): Promise<Overview> {
     budget: {
       rows: rows.filter((r) => r.limit !== null),
       totalSpent: budget.budgetedSpent,
-      totalLimit: budget.budgeted,
+      totalLimit: budget.budgeted + budget.carried,
+      // The same "left in your budgets" as the budget screen.
+      left: rows.reduce((s, r) => s + (r.left ?? 0), 0),
       unplanned: budget.unplanned,
     },
     goals: goalList,
