@@ -47,14 +47,14 @@ export function BillForm({ today, draft, editing, via = "you", onDone, onCancel 
       if (editing) {
         // The date shown is the next one due; sending it only when it was changed keeps the day the bill was
         // first set for (a bill on the 31st stays on the 31st).
-        const { before } = await send<{ before: SavedBill }>("PATCH", `/api/bills/${editing.id}`, { name, amount: cents, frequency, kind, ...(date !== editing.startDate || frequency !== editing.frequency ? { startDate: date } : {}) });
+        const { before } = await send<{ before: SavedBill }>("PATCH", `/api/bills/${editing.id}`, { name, amount: cents, frequency, kind: frequency === "once" ? "bill" : kind, ...(date !== editing.startDate || frequency !== editing.frequency ? { startDate: date } : {}) });
         toast("Bill saved", { action: { label: "Undo", run: () => send("PATCH", `/api/bills/${editing.id}`, { name: before.name, amount: Math.abs(before.amount), frequency: before.frequency, startDate: before.startDate, kind: before.kind }) } });
       } else if (via === "nickel") {
         const done = await send<{ activityId: string; summary: string }>("POST", "/api/nickel/do", frequency === "once" ? { kind: "upcoming", name, amount: cents, date } : { kind: "bill", name, amount: cents, frequency, date, billKind: kind });
         toast(done.summary, { action: { label: "Undo", run: () => send("POST", `/api/activity/${done.activityId}/undo`) } });
         nickelReact({ type: "task", task: "bill", name: name.trim() });
       } else {
-        const { id } = await send<{ id: string }>("POST", "/api/bills", { name, amount: cents, frequency, startDate: date, kind });
+        const { id } = await send<{ id: string }>("POST", "/api/bills", { name, amount: cents, frequency, startDate: date, kind: frequency === "once" ? "bill" : kind });
         toast(`${name.trim()} added to your bills`, { action: { label: "Undo", run: () => send("DELETE", `/api/bills/${id}`) } });
         nickelReact({ type: "task", task: "bill", name: name.trim() });
       }
@@ -88,7 +88,9 @@ export function BillForm({ today, draft, editing, via = "you", onDone, onCancel 
       <p className="rounded-2xl bg-sky px-3.5 py-3 text-small text-sky-ink">
         {frequency === "once"
           ? `It shows in what’s coming up${cents ? ` and takes ${dollars(cents)} off what’s left to spend` : ""} until its date.`
-          : `It shows with your bills and counts in what’s left to spend each time it’s due. If the bank also shows it later, you can remove this one.`}
+          : kind === "bill"
+            ? `It shows with your bills and is set aside from what’s left to spend each time it’s due. If the bank also shows it later, you can remove this one.`
+            : `It shows with your Extras as a reminder. Like any spending, it counts against your budget when the charge comes through.`}
       </p>
       {error && <ErrorNote message={error} />}
       <div className="flex justify-end gap-2">

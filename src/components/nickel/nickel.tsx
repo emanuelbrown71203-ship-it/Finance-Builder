@@ -16,6 +16,7 @@ import { Dialog, Input, cx, toast } from "../ui";
 import { getJson, send, useApi, useNow } from "../use-api";
 import { canListen, hush, listen, prime, speak, yesOrNo } from "./voice";
 import { RoboDog, type Eyes, type Mouth } from "./robo-dog";
+import { pawPrint, planLegs, type Dir, type Leg } from "@/lib/nickel/walk";
 import { countTask, markSeen, nickelSettings, seenToday, useNickelSettings, type NickelEvent } from "./store";
 
 /*
@@ -55,6 +56,8 @@ const UNPROMPTED_GAP = 8 * 60_000;
 /** How wide he is on screen, and how far he keeps from the edges. */
 const DOG_W = 72;
 const DOG_H = 75;
+/** How long a paw print takes to fade (matches .nk-print in globals.css). */
+const PRINT_MS = 1700;
 /** Bits of colour for a party: where each one flies. */
 const CONFETTI = [
   { dx: -46, dy: -40, c: "var(--warn)" },
@@ -101,7 +104,10 @@ export function Nickel() {
   const [screenW, setScreenW] = useState(390);
   /** Where he's wandered to: px from the left and top of the screen. Null when he's sitting at his home spot. */
   const [spot, setSpot] = useState<{ x: number; y: number } | null>(null);
-  const [walk, setWalk] = useState<{ dir: "l" | "r"; ms: number } | null>(null);
+  /** The leg of a walk he's on: across (side-on) or up or down (climbing), and how long it takes. */
+  const [walk, setWalk] = useState<{ dir: Dir; ms: number } | null>(null);
+  /** Paw prints behind him, each fading a moment after it's made (screen px, toes turned by `rot`). */
+  const [prints, setPrints] = useState<{ id: number; x: number; y: number; rot: number; at: number }[]>([]);
   /** Room an on-screen message takes at the bottom; he hops up over it. */
   const [toastSpace, setToastSpace] = useState(0);
   const [toastTop, setToastTop] = useState<number | null>(null);
@@ -271,6 +277,9 @@ export function Nickel() {
     spotRef.current = spot;
   }, [spot]);
   const walkTimer = useRef(0);
+  /** The leg he's walking now and when he set off on it, to know where his paws are. */
+  const legNow = useRef<(Leg & { start: number }) | null>(null);
+  const printId = useRef(0);
   /** Where his home spot is on screen, measured the last time he set off from it (for this screen size). */
   const homeAt = useRef<{ x: number; y: number; w: number; h: number } | null>(null);
   const goingHome = useRef(false);
@@ -307,38 +316,44 @@ export function Nickel() {
         if (target === null) setSpot(null);
         return;
       }
-      const dir = to.x >= from.x ? "r" : "l";
-      const ms = Math.round((distance / rand(90, 130)) * 1000);
+      // Across side-on and up or down climbing, never a diagonal (see lib/nickel/walk.ts). Climbing is slower.
+      const legs = planLegs(from, to, { across: rand(90, 130), climb: rand(55, 80) });
+      if (legs.length === 0) {
+        if (target === null) setSpot(null);
+        return;
+      }
       goingHome.current = target === null;
-      setGaze({ x: Math.max(-2.8, Math.min(2.8, ((to.x - from.x) / distance) * 2.8)), y: Math.max(-2.2, Math.min(2.2, ((to.y - from.y) / distance) * 2.2)) });
+      setGaze({ x: 0, y: 0 });
       // Start from where he is (switching from sitting at home to a spot), then set off on the next frame.
       setSpot(from);
       window.clearTimeout(walkTimer.current);
-      requestAnimationFrame(() =>
-        requestAnimationFrame(() => {
-          setWalk({ dir, ms });
-          setSpot(to);
-          walkTimer.current = window.setTimeout(() => {
-            setWalk(null);
-            setGaze({ x: 0, y: 0 });
-            goingHome.current = false;
-            if (target === null) {
-              setSpot(null);
-              return;
-            }
-            // What a dog does on arriving somewhere.
-            const roll = Math.random();
-            if (roll < 0.35) act("sniff");
-            else if (roll < 0.55) act("look");
-            else if (roll < 0.65) act("stretch");
-            else if (roll < 0.72) act("wiggle");
-            else if (roll < 0.77) {
-              act("spin"); // chasing his tail
-              pop("hearts");
-            }
-          }, ms);
-        }),
-      );
+      const arrive = () => {
+        setWalk(null);
+        legNow.current = null;
+        goingHome.current = false;
+        if (target === null) {
+          setSpot(null);
+          return;
+        }
+        // What a dog does on arriving somewhere.
+        const roll = Math.random();
+        if (roll < 0.35) act("sniff");
+        else if (roll < 0.55) act("look");
+        else if (roll < 0.65) act("stretch");
+        else if (roll < 0.72) act("wiggle");
+        else if (roll < 0.77) {
+          act("spin"); // chasing his tail
+          pop("hearts");
+        }
+      };
+      const step = (i: number) => {
+        const leg = legs[i];
+        legNow.current = { ...leg, start: performance.now() };
+        setWalk({ dir: leg.dir, ms: leg.ms });
+        setSpot(leg.to);
+        walkTimer.current = window.setTimeout(() => (i + 1 < legs.length ? step(i + 1) : arrive()), leg.ms);
+      };
+      requestAnimationFrame(() => requestAnimationFrame(() => step(0)));
     },
     [bounds, act, pop],
   );
@@ -404,6 +419,7 @@ export function Nickel() {
     if (settings.roams) return;
     const t = window.setTimeout(() => {
       window.clearTimeout(walkTimer.current);
+      legNow.current = null;
       setWalk(null);
       setSpot(null);
     }, 0);
@@ -416,10 +432,33 @@ export function Nickel() {
     if (!walk) return;
     const r = root.current?.getBoundingClientRect();
     window.clearTimeout(walkTimer.current);
+    legNow.current = null;
     setWalk(null);
     goingHome.current = false;
     if (r) setSpot({ x: r.left, y: r.top });
   };
+
+  // A paw print every few steps where his paws are, each fading a moment later; the last ones fade after he stops.
+  useEffect(() => {
+    if (!walk) return;
+    let n = 0;
+    const timer = window.setInterval(
+      () => {
+        const leg = legNow.current;
+        if (!leg) return;
+        const now = performance.now();
+        const at = pawPrint(leg, (now - leg.start) / leg.ms, n++, { w: DOG_W, h: DOG_H });
+        setPrints((list) => [...list.filter((p) => now - p.at < PRINT_MS), { id: ++printId.current, ...at, at: now }]);
+      },
+      walk.dir === "l" || walk.dir === "r" ? 230 : 300,
+    );
+    return () => window.clearInterval(timer);
+  }, [walk]);
+  useEffect(() => {
+    if (walk || prints.length === 0) return;
+    const t = window.setTimeout(() => setPrints([]), PRINT_MS);
+    return () => window.clearTimeout(t);
+  }, [walk, prints.length]);
 
   useEffect(() => {
     const onSpace = (e: Event) => {
@@ -639,181 +678,198 @@ export function Nickel() {
   const eyes: Eyes = blink && look.eyes !== "sleepy" && look.eyes !== "happy" ? "sleepy" : look.eyes;
 
   return (
-    <div ref={root} data-no-pull className={cx("nk-root fixed z-30 select-none", drag && "nk-dragging")} style={sideStyle}>
-      {/* What he says */}
-      {(bubble || menu) && !drag && (
-        <div className={cx("nk-bubble absolute w-[min(19rem,calc(100vw-1.5rem))]", bubbleBelow ? "top-[86px]" : "bottom-[86px]", !bubblePlace && (settings.side === "right" ? "right-0" : "left-0"))} style={bubblePlace?.box}>
-          <div role="status" aria-live="polite" className="max-h-[min(30rem,calc(100dvh-13rem))] overflow-y-auto overscroll-contain rounded-[18px] border border-line bg-sheet p-3.5 text-small text-ink shadow-float">
-            <div className="flex items-start justify-between gap-2">
-              <p className="text-micro font-extrabold uppercase tracking-wide text-accent-text">{settings.name}</p>
-              <button type="button" onClick={() => (bubble?.kind === "intro" ? (nickelSettings.finishIntro(), setBubble(null)) : (setBubble(null), setMenu(false), setAsking(false), setDoing(false)))} aria-label="Close" className="-mr-2 -mt-2 inline-flex size-9 items-center justify-center rounded-full text-ink-3 active:bg-sunk">
-                <X size={16} />
-              </button>
+    <>
+      {prints.length > 0 && (
+        <div aria-hidden className="pointer-events-none fixed inset-0 z-[29]">
+          {prints.map((p) => (
+            <svg key={p.id} viewBox="0 0 10 10" fill="currentColor" className="nk-print" style={{ left: p.x, top: p.y, ["--rot" as string]: `${p.rot}deg` }}>
+              <ellipse cx="5" cy="6.6" rx="2.6" ry="2.1" />
+              <circle cx="2.1" cy="3.9" r="1.05" />
+              <circle cx="3.9" cy="2.3" r="1.05" />
+              <circle cx="6.1" cy="2.3" r="1.05" />
+              <circle cx="7.9" cy="3.9" r="1.05" />
+            </svg>
+          ))}
+        </div>
+      )}
+      <div ref={root} data-no-pull className={cx("nk-root fixed z-30 select-none", drag && "nk-dragging")} style={sideStyle}>
+        {/* What he says */}
+        {(bubble || menu) && !drag && (
+          <div className={cx("nk-bubble absolute w-[min(19rem,calc(100vw-1.5rem))]", bubbleBelow ? "top-[86px]" : "bottom-[86px]", !bubblePlace && (settings.side === "right" ? "right-0" : "left-0"))} style={bubblePlace?.box}>
+            <div role="status" aria-live="polite" className="max-h-[min(30rem,calc(100dvh-13rem))] overflow-y-auto overscroll-contain rounded-[18px] border border-line bg-sheet p-3.5 text-small text-ink shadow-float">
+              <div className="flex items-start justify-between gap-2">
+                <p className="text-micro font-extrabold uppercase tracking-wide text-accent-text">{settings.name}</p>
+                <button type="button" onClick={() => (bubble?.kind === "intro" ? (nickelSettings.finishIntro(), setBubble(null)) : (setBubble(null), setMenu(false), setAsking(false), setDoing(false)))} aria-label="Close" className="-mr-2 -mt-2 inline-flex size-9 items-center justify-center rounded-full text-ink-3 active:bg-sunk">
+                  <X size={16} />
+                </button>
+              </div>
+              {menu && asking ? (
+                <AskClaude onDone={() => (setMenu(false), setAsking(false))} />
+              ) : menu && doing && data ? (
+                <NickelDo
+                  today={data.today}
+                  goals={data.goals ?? []}
+                  loans={data.loans ?? []}
+                  talksBack={settings.talksBack}
+                  onDone={(done) => {
+                    setMenu(false);
+                    setDoing(false);
+                    const n = countTask(localToday());
+                    const party = cheerFor("done", {}, n, String(n)).party;
+                    act(party ? "spin" : "hop");
+                    pop(party ? "party" : "sparkle");
+                    feel("excited", 6000);
+                    say({ kind: "done", text: `Done! ${done.summary}`, href: done.href, link: "See it", undo: done.activityId, sticky: true });
+                  }}
+                  onBill={(draft) => (setMenu(false), setDoing(false), setBillDraft(draft))}
+                  onGoal={() => (setMenu(false), setDoing(false), setNewGoal(true))}
+                  onLeave={() => (setMenu(false), setDoing(false))}
+                />
+              ) : menu ? (
+                <ul className="-mx-1 mt-1 flex flex-col">
+                  <MenuItem onClick={() => setDoing(true)}>Talk to me</MenuItem>
+                  <MenuItem onClick={() => (setMenu(false), act("bark"), say(nextLine()))}>Tell me something</MenuItem>
+                  <MenuItem onClick={() => setAsking(true)}>Chat with Claude about my money</MenuItem>
+                  <MenuItem onClick={() => (setMenu(false), nickelSettings.napFor(60 * 60_000))}>Nap for an hour</MenuItem>
+                  <li>
+                    <Link href="/settings#nickel" onClick={() => setMenu(false)} className="flex min-h-11 items-center justify-between rounded-xl px-2 font-bold active:bg-sunk">
+                      {settings.name} settings <ChevronRight size={16} className="text-ink-3" />
+                    </Link>
+                  </li>
+                </ul>
+              ) : (
+                bubble && (
+                  <>
+                    <p className="mt-0.5 leading-relaxed">{bubble.text}</p>
+                    <div className="mt-2.5 flex flex-wrap items-center gap-2">
+                      {bubble.kind === "intro" ? (
+                        <button type="button" onClick={() => (nickelSettings.finishIntro(), setBubble(null), act("hop"))} className="min-h-10 rounded-control bg-accent px-4 text-small font-bold text-on-accent active:scale-[0.97]">
+                          Nice to meet you
+                        </button>
+                      ) : (
+                        <>
+                          {bubble.href && (
+                            <Link href={bubble.href} onClick={() => setBubble(null)} className="inline-flex min-h-10 items-center rounded-control bg-accent-soft px-3.5 text-small font-bold text-accent-text active:scale-[0.97]">
+                              {bubble.link ?? "Show me"}
+                            </Link>
+                          )}
+                          {bubble.undo && (
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                const id = bubble.undo!;
+                                try {
+                                  await send("POST", `/api/activity/${id}/undo`);
+                                  act("shake");
+                                  say({ kind: "talk", text: "Undone. It’s back the way it was.", sticky: false }, 5000);
+                                } catch (e) {
+                                  say({ kind: "talk", text: e instanceof Error ? e.message : "I couldn’t undo that. It’s under Settings, Activity.", sticky: true });
+                                }
+                              }}
+                              className="inline-flex min-h-10 items-center rounded-control px-3 text-small font-bold text-ink-2 underline underline-offset-2 active:bg-sunk"
+                            >
+                              Undo
+                            </button>
+                          )}
+                          {bubble.kind === "tip" && (
+                            <button type="button" onClick={() => (act("bark"), say(nextLine()))} className="inline-flex min-h-10 items-center rounded-control px-3 text-small font-bold text-ink-2 active:bg-sunk">
+                              Anything else?
+                            </button>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  </>
+                )
+              )}
             </div>
-            {menu && asking ? (
-              <AskClaude onDone={() => (setMenu(false), setAsking(false))} />
-            ) : menu && doing && data ? (
-              <NickelDo
-                today={data.today}
-                goals={data.goals ?? []}
-                loans={data.loans ?? []}
-                talksBack={settings.talksBack}
-                onDone={(done) => {
-                  setMenu(false);
-                  setDoing(false);
-                  const n = countTask(localToday());
-                  const party = cheerFor("done", {}, n, String(n)).party;
-                  act(party ? "spin" : "hop");
-                  pop(party ? "party" : "sparkle");
-                  feel("excited", 6000);
-                  say({ kind: "done", text: `Done! ${done.summary}`, href: done.href, link: "See it", undo: done.activityId, sticky: true });
-                }}
-                onBill={(draft) => (setMenu(false), setDoing(false), setBillDraft(draft))}
-                onGoal={() => (setMenu(false), setDoing(false), setNewGoal(true))}
-                onLeave={() => (setMenu(false), setDoing(false))}
-              />
-            ) : menu ? (
-              <ul className="-mx-1 mt-1 flex flex-col">
-                <MenuItem onClick={() => setDoing(true)}>Talk to me</MenuItem>
-                <MenuItem onClick={() => (setMenu(false), act("bark"), say(nextLine()))}>Tell me something</MenuItem>
-                <MenuItem onClick={() => setAsking(true)}>Chat with Claude about my money</MenuItem>
-                <MenuItem onClick={() => (setMenu(false), nickelSettings.napFor(60 * 60_000))}>Nap for an hour</MenuItem>
-                <li>
-                  <Link href="/settings#nickel" onClick={() => setMenu(false)} className="flex min-h-11 items-center justify-between rounded-xl px-2 font-bold active:bg-sunk">
-                    {settings.name} settings <ChevronRight size={16} className="text-ink-3" />
-                  </Link>
-                </li>
-              </ul>
-            ) : (
-              bubble && (
-                <>
-                  <p className="mt-0.5 leading-relaxed">{bubble.text}</p>
-                  <div className="mt-2.5 flex flex-wrap items-center gap-2">
-                    {bubble.kind === "intro" ? (
-                      <button type="button" onClick={() => (nickelSettings.finishIntro(), setBubble(null), act("hop"))} className="min-h-10 rounded-control bg-accent px-4 text-small font-bold text-on-accent active:scale-[0.97]">
-                        Nice to meet you
-                      </button>
-                    ) : (
-                      <>
-                        {bubble.href && (
-                          <Link href={bubble.href} onClick={() => setBubble(null)} className="inline-flex min-h-10 items-center rounded-control bg-accent-soft px-3.5 text-small font-bold text-accent-text active:scale-[0.97]">
-                            {bubble.link ?? "Show me"}
-                          </Link>
-                        )}
-                        {bubble.undo && (
-                          <button
-                            type="button"
-                            onClick={async () => {
-                              const id = bubble.undo!;
-                              try {
-                                await send("POST", `/api/activity/${id}/undo`);
-                                act("shake");
-                                say({ kind: "talk", text: "Undone. It’s back the way it was.", sticky: false }, 5000);
-                              } catch (e) {
-                                say({ kind: "talk", text: e instanceof Error ? e.message : "I couldn’t undo that. It’s under Settings, Activity.", sticky: true });
-                              }
-                            }}
-                            className="inline-flex min-h-10 items-center rounded-control px-3 text-small font-bold text-ink-2 underline underline-offset-2 active:bg-sunk"
-                          >
-                            Undo
-                          </button>
-                        )}
-                        {bubble.kind === "tip" && (
-                          <button type="button" onClick={() => (act("bark"), say(nextLine()))} className="inline-flex min-h-10 items-center rounded-control px-3 text-small font-bold text-ink-2 active:bg-sunk">
-                            Anything else?
-                          </button>
-                        )}
-                      </>
-                    )}
-                  </div>
-                </>
-              )
-            )}
+            <span aria-hidden className={cx("absolute size-4 rotate-45 border-line bg-sheet", bubbleBelow ? "-top-[7px] border-l border-t" : "-bottom-[7px] border-b border-r", !bubblePlace && (settings.side === "right" ? "right-8" : "left-8"))} style={bubblePlace?.point} />
           </div>
-          <span aria-hidden className={cx("absolute size-4 rotate-45 border-line bg-sheet", bubbleBelow ? "-top-[7px] border-l border-t" : "-bottom-[7px] border-b border-r", !bubblePlace && (settings.side === "right" ? "right-8" : "left-8"))} style={bubblePlace?.point} />
-        </div>
-      )}
+        )}
 
-      {data && (
-        <Dialog open={billDraft !== null} onClose={() => setBillDraft(null)} title={billDraft?.frequency === "once" ? "Add an upcoming bill" : "Add a bill"}>
-          {billDraft && (
-            <BillForm
-              today={data.today}
-              draft={billDraft}
-              via="nickel"
-              onDone={() => setBillDraft(null)}
-              onCancel={() => setBillDraft(null)}
+        {data && (
+          <Dialog open={billDraft !== null} onClose={() => setBillDraft(null)} title={billDraft?.frequency === "once" ? "Add an upcoming bill" : "Add a bill"}>
+            {billDraft && (
+              <BillForm
+                today={data.today}
+                draft={billDraft}
+                via="nickel"
+                onDone={() => setBillDraft(null)}
+                onCancel={() => setBillDraft(null)}
+              />
+            )}
+          </Dialog>
+        )}
+        {data && newGoal && <GoalDialog sheet={{ kind: "new" }} today={data.today} onClose={() => setNewGoal(false)} />}
+
+        <button
+          type="button"
+          aria-label={`${settings.name}, your robo dog. Tap for what he’s noticed, hold for options, drag to move him.`}
+          onPointerDown={onDown}
+          onPointerMove={onMove}
+          onPointerUp={onUp}
+          onPointerCancel={() => {
+            if (press.current) window.clearTimeout(press.current.timer);
+            press.current = null;
+            setDrag(null);
+          }}
+          onContextMenu={(e) => e.preventDefault()}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              wake();
+              act("bark");
+              say(nextLine());
+            }
+          }}
+          className={cx("nk-btn relative block touch-none rounded-full outline-offset-4", walk && `nk-walking nk-walk-${walk.dir}`)}
+          style={{ ["--nk-wag" as string]: look.wag }}
+        >
+          <div key={action?.key} className={cx("nk-wrap", action && `nk-act-${action.name}`)} onAnimationEnd={() => setAction(null)}>
+            <RoboDog
+              key={walk?.dir ?? "sit"}
+              walk={walk?.dir ?? null}
+              eyes={eyes}
+              mouth={action?.name === "bark" ? "open" : asleep && blink ? "yawn" : look.mouth}
+              antenna={look.antenna}
+              cheeks={look.cheeks}
+              tongue={mood === "happy" || mood === "proud" || mood === "excited"}
+              gaze={asleep ? { x: 0, y: 0 } : gaze}
+              className={cx(asleep && "nk-sleep", look.ears === "down" && "nk-ears-down", look.ears === "perk" && "nk-ears-perk", tilt === -1 && "nk-tilt-l", tilt === 1 && "nk-tilt-r", twitch && `nk-twitch-${twitch}`, look.wag === "0s" && "nk-still", walk && "nk-turn")}
             />
+          </div>
+          {asleep && (
+            <span aria-hidden className="pointer-events-none absolute -top-1 right-0 font-extrabold text-ink-3">
+              <span className="nk-z" style={{ animationDelay: "0s" }}>z</span>
+              <span className="nk-z text-small" style={{ animationDelay: "1s" }}>z</span>
+              <span className="nk-z text-lead" style={{ animationDelay: "2s" }}>Z</span>
+            </span>
           )}
-        </Dialog>
-      )}
-      {data && newGoal && <GoalDialog sheet={{ kind: "new" }} today={data.today} onClose={() => setNewGoal(false)} />}
-
-      <button
-        type="button"
-        aria-label={`${settings.name}, your robo dog. Tap for what he’s noticed, hold for options, drag to move him.`}
-        onPointerDown={onDown}
-        onPointerMove={onMove}
-        onPointerUp={onUp}
-        onPointerCancel={() => {
-          if (press.current) window.clearTimeout(press.current.timer);
-          press.current = null;
-          setDrag(null);
-        }}
-        onContextMenu={(e) => e.preventDefault()}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === " ") {
-            e.preventDefault();
-            wake();
-            act("bark");
-            say(nextLine());
-          }
-        }}
-        className={cx("nk-btn relative block touch-none rounded-full outline-offset-4", walk && `nk-walking nk-walk-${walk.dir}`)}
-        style={{ ["--nk-wag" as string]: look.wag }}
-      >
-        <div key={action?.key} className={cx("nk-wrap", action && `nk-act-${action.name}`)} onAnimationEnd={() => setAction(null)}>
-          <RoboDog
-            eyes={eyes}
-            mouth={action?.name === "bark" ? "open" : asleep && blink ? "yawn" : look.mouth}
-            antenna={look.antenna}
-            cheeks={look.cheeks}
-            tongue={mood === "happy" || mood === "proud" || mood === "excited"}
-            gaze={asleep ? { x: 0, y: 0 } : gaze}
-            className={cx(asleep && "nk-sleep", look.ears === "down" && "nk-ears-down", look.ears === "perk" && "nk-ears-perk", tilt === -1 && "nk-tilt-l", tilt === 1 && "nk-tilt-r", twitch && `nk-twitch-${twitch}`, look.wag === "0s" && "nk-still")}
-          />
-        </div>
-        {asleep && (
-          <span aria-hidden className="pointer-events-none absolute -top-1 right-0 font-extrabold text-ink-3">
-            <span className="nk-z" style={{ animationDelay: "0s" }}>z</span>
-            <span className="nk-z text-small" style={{ animationDelay: "1s" }}>z</span>
-            <span className="nk-z text-lead" style={{ animationDelay: "2s" }}>Z</span>
-          </span>
-        )}
-        {effect && (
-          <span key={effect.key} aria-hidden className="pointer-events-none absolute inset-x-0 -top-3 flex justify-center" onAnimationEnd={() => setEffect(null)}>
-            {effect.name === "bang" && <span className="nk-pop text-lead font-black text-[var(--warn)]">!</span>}
-            {effect.name === "question" && <span className="nk-pop text-lead font-black text-[var(--sky-ink)]">?</span>}
-            {effect.name === "hearts" && (
-              <>
-                <span className="nk-heart text-[var(--pink-ink)]" style={{ animationDelay: "0s", marginLeft: -18 }}>♥</span>
-                <span className="nk-heart text-[var(--pink-ink)]" style={{ animationDelay: "0.15s" }}>♥</span>
-                <span className="nk-heart text-[var(--pink-ink)]" style={{ animationDelay: "0.3s", marginLeft: 18 }}>♥</span>
-              </>
-            )}
-            {effect.name === "party" &&
-              CONFETTI.map((p, i) => <span key={i} className="nk-confetti" style={{ background: p.c, animationDelay: `${(i % 3) * 0.06}s`, ["--dx" as string]: `${p.dx}px`, ["--dy" as string]: `${p.dy}px` }} />)}
-            {effect.name === "sparkle" && (
-              <>
-                <span className="nk-heart text-[var(--warn)]" style={{ animationDelay: "0s", marginLeft: -20 }}>✦</span>
-                <span className="nk-heart text-[var(--sky-ink)]" style={{ animationDelay: "0.12s" }}>✦</span>
-                <span className="nk-heart text-[var(--good)]" style={{ animationDelay: "0.24s", marginLeft: 20 }}>✦</span>
-              </>
-            )}
-          </span>
-        )}
-      </button>
-    </div>
+          {effect && (
+            <span key={effect.key} aria-hidden className="pointer-events-none absolute inset-x-0 -top-3 flex justify-center" onAnimationEnd={() => setEffect(null)}>
+              {effect.name === "bang" && <span className="nk-pop text-lead font-black text-[var(--warn)]">!</span>}
+              {effect.name === "question" && <span className="nk-pop text-lead font-black text-[var(--sky-ink)]">?</span>}
+              {effect.name === "hearts" && (
+                <>
+                  <span className="nk-heart text-[var(--pink-ink)]" style={{ animationDelay: "0s", marginLeft: -18 }}>♥</span>
+                  <span className="nk-heart text-[var(--pink-ink)]" style={{ animationDelay: "0.15s" }}>♥</span>
+                  <span className="nk-heart text-[var(--pink-ink)]" style={{ animationDelay: "0.3s", marginLeft: 18 }}>♥</span>
+                </>
+              )}
+              {effect.name === "party" &&
+                CONFETTI.map((p, i) => <span key={i} className="nk-confetti" style={{ background: p.c, animationDelay: `${(i % 3) * 0.06}s`, ["--dx" as string]: `${p.dx}px`, ["--dy" as string]: `${p.dy}px` }} />)}
+              {effect.name === "sparkle" && (
+                <>
+                  <span className="nk-heart text-[var(--warn)]" style={{ animationDelay: "0s", marginLeft: -20 }}>✦</span>
+                  <span className="nk-heart text-[var(--sky-ink)]" style={{ animationDelay: "0.12s" }}>✦</span>
+                  <span className="nk-heart text-[var(--good)]" style={{ animationDelay: "0.24s", marginLeft: 20 }}>✦</span>
+                </>
+              )}
+            </span>
+          )}
+        </button>
+      </div>
+    </>
   );
 }
 

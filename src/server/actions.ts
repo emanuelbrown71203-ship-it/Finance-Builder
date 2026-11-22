@@ -131,7 +131,7 @@ export async function addBill(
   const bill = await createManualBill(ctx, { name: input.name, amount: input.amount, frequency: input.frequency, startDate: input.date, kind: input.kind }, actor);
   const next = nextDue({ frequency: input.frequency, startDate: input.date }, ctx.today);
   const when = input.frequency === "once" ? `due ${formatShort(input.date)}` : `${FREQUENCY_LABEL[input.frequency as Frequency].toLowerCase()}, next on ${formatShort(next)}`;
-  const summary = `Added ${input.frequency === "once" ? "an upcoming bill" : input.kind === "subscription" ? "a subscription" : "a bill"}: ${bill.name}, ${money(bill.amount)} ${when}.`;
+  const summary = `Added ${input.frequency === "once" ? "an upcoming bill" : input.kind === "subscription" ? "an Extra" : "a bill"}: ${bill.name}, ${money(bill.amount)} ${when}.`;
   const activityId = await record(ctx, actor, summary, { type: "bill.remove", billId: bill.id });
   return { activityId, summary, href: "/bills" };
 }

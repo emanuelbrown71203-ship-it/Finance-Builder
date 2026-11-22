@@ -1,6 +1,7 @@
 "use client";
 
 import { useId } from "react";
+import type { Dir } from "@/lib/nickel/walk";
 import { cx } from "../ui";
 
 /*
@@ -10,6 +11,10 @@ import { cx } from "../ui";
  * Every part that moves is its own group, so the animations in globals.css
  * (breathing, tail, ears, head, antenna, walking legs) move it on its own.
  * He keeps the same neon colours in light and dark mode, like the app icon.
+ *
+ * Three poses: sitting (most of the time), side-on while he walks across the
+ * screen (facing the way he's going), and climbing, when he walks up or down
+ * it with his belly and paws flat on the glass, as if the screen were a window.
  */
 
 export type Eyes = "open" | "happy" | "worried" | "sleepy" | "star" | "heart" | "curious" | "wink";
@@ -50,7 +55,7 @@ function Eye({ kind, at, side }: { kind: Eyes; at: { x: number; y: number }; sid
   return <rect className="nk-eye" x={x - 3.4} y={y - h / 2} width="6.8" height={h} rx="2" fill={ink} />;
 }
 
-export function RoboDog({ eyes, mouth, antenna, cheeks, gaze, tongue = false, size = 72, className }: { eyes: Eyes; mouth: Mouth; antenna: string; cheeks: boolean; gaze: { x: number; y: number }; tongue?: boolean; size?: number; className?: string }) {
+export function RoboDog({ eyes, mouth, antenna, cheeks, gaze, tongue = false, walk = null, size = 72, className }: { eyes: Eyes; mouth: Mouth; antenna: string; cheeks: boolean; gaze: { x: number; y: number }; tongue?: boolean; walk?: Dir | null; size?: number; className?: string }) {
   const glow = `nk-glow-${useId().replace(/[^a-zA-Z0-9_-]/g, "")}`;
   const bulb = BULB[antenna] ?? antenna;
   const f = `url(#${glow})`;
@@ -65,6 +70,23 @@ export function RoboDog({ eyes, mouth, antenna, cheeks, gaze, tongue = false, si
           </feMerge>
         </filter>
       </defs>
+      {walk === "l" || walk === "r" ? (
+        <SideOn f={f} bulb={bulb} eyes={eyes} cheeks={cheeks} facing={walk} />
+      ) : walk === "u" || walk === "d" ? (
+        <Climbing f={f} bulb={bulb} eyes={eyes} heading={walk} />
+      ) : (
+        <Sitting f={f} bulb={bulb} eyes={eyes} mouth={mouth} cheeks={cheeks} gaze={gaze} tongue={tongue} />
+      )}
+    </svg>
+  );
+}
+
+type Parts = { f: string; bulb: string; eyes: Eyes };
+
+/** Sitting up, facing you: how he spends most of his time. */
+function Sitting({ f, bulb, eyes, mouth, cheeks, gaze, tongue }: Parts & { mouth: Mouth; cheeks: boolean; gaze: { x: number; y: number }; tongue: boolean }) {
+  return (
+    <>
       {/* A glow on the floor that stays put while he moves */}
       <ellipse className="nk-shadow" cx="60" cy="118" rx="27" ry="4.5" fill="var(--nk-floor)" />
       <g className="nk-float">
@@ -148,6 +170,129 @@ export function RoboDog({ eyes, mouth, antenna, cheeks, gaze, tongue = false, si
           </g>
         </g>
       </g>
-    </svg>
+    </>
+  );
+}
+
+/** One eye seen from the side or from below: open, a happy arc, or shut. */
+function SmallEye({ kind, x, y, h = 10 }: { kind: Eyes; x: number; y: number; h?: number }) {
+  if (kind === "happy" || kind === "wink") return <path d={`M${x - 4},${y + 2} Q${x},${y - 4} ${x + 4},${y + 2}`} fill="none" stroke={NEON.glow} strokeWidth="2.8" strokeLinecap="round" />;
+  if (kind === "sleepy") return <path d={`M${x - 4},${y + 0.5} Q${x},${y + 3} ${x + 4},${y + 0.5}`} fill="none" stroke={NEON.glow} strokeWidth="2.6" strokeLinecap="round" />;
+  return <rect x={x - 3} y={y - h / 2} width="6" height={h} rx="2" fill={kind === "heart" ? NEON.pink : kind === "star" ? NEON.coin : NEON.glow} />;
+}
+
+/**
+ * Walking across: side-on, facing the way he's going. His legs swing in a trot
+ * (each near leg with the far one diagonally opposite), the far ones darker.
+ */
+function SideOn({ f, bulb, eyes, cheeks, facing }: Parts & { cheeks: boolean; facing: "l" | "r" }) {
+  const leg = (x: number, near: boolean, pair: "a" | "b") => (
+    <g className={`nk-sl-${pair}`}>
+      <rect x={x - 4.5} y="84" width="9" height="24" rx="4" fill={near ? NEON.body : "#12153a"} stroke={NEON.rim} strokeOpacity={near ? 1 : 0.5} strokeWidth="2.2" />
+      <ellipse cx={x + 1.5} cy="109.5" rx="7" ry="3.8" fill={near ? NEON.paw : "#0e1030"} stroke={NEON.rim} strokeOpacity={near ? 1 : 0.5} strokeWidth="1.8" />
+    </g>
+  );
+  return (
+    // Drawn facing right; facing left is the same drawing turned around.
+    <g transform={facing === "l" ? "translate(120 0) scale(-1 1)" : undefined}>
+      <ellipse className="nk-shadow" cx="62" cy="116" rx="36" ry="4.5" fill="var(--nk-floor)" />
+      <g className="nk-float">
+        <g className="nk-tail-s">
+          <path d="M28,70 C18,68 12,58 14,47" fill="none" stroke={NEON.ear} strokeWidth="4" strokeLinecap="round" />
+          <circle cx="14" cy="45.5" r="4.4" fill={NEON.pink} filter={f} />
+        </g>
+        {leg(44, false, "a")}
+        {leg(80, false, "b")}
+        <rect x="26" y="58" width="60" height="32" rx="15" fill={NEON.body} stroke={NEON.rim} strokeWidth="2.4" />
+        <rect x="34" y="66" width="30" height="16" rx="6" fill={NEON.visor} stroke={NEON.glow} strokeWidth="1.1" />
+        <circle cx="49" cy="74" r="5.2" fill={NEON.coin} filter={f} />
+        <rect x="68" y="57" width="6" height="30" rx="3" fill={NEON.glow} filter={f} />
+        {leg(36, true, "b")}
+        {leg(72, true, "a")}
+        <g className="nk-head">
+          <g className="nk-ear-l">
+            <path d="M68,26 L58,4 L84,17 Z" fill={NEON.ear} fillOpacity="0.22" stroke={NEON.ear} strokeWidth="2.6" strokeLinejoin="round" filter={f} />
+          </g>
+          <line x1="90" y1="18" x2="90" y2="9" stroke={NEON.rim} strokeWidth="2.4" strokeLinecap="round" />
+          <circle className="nk-bulb-glow" cx="90" cy="7.5" r="6" fill={bulb} opacity="0.35" />
+          <circle cx="90" cy="7.5" r="3.6" fill={bulb} filter={f} />
+          <rect x="62" y="17" width="46" height="45" rx="15" fill={NEON.body} stroke={NEON.rim} strokeWidth="2.6" />
+          <rect x="80" y="25" width="25" height="29" rx="9.5" fill={NEON.visor} stroke={NEON.glow} strokeWidth="1.5" />
+          <path d="M68,24 Q74,21.5 80,22" fill="none" stroke="#ffffff" strokeWidth="2" strokeLinecap="round" opacity="0.14" />
+          {cheeks && <ellipse cx="88.5" cy="49" rx="3" ry="1.8" fill={NEON.pink} opacity="0.55" />}
+          <g filter={f}>
+            <SmallEye kind={eyes} x={97} y={39.5} h={11} />
+            <path d="M92,49.5 Q96.5,53 101,49.5" fill="none" stroke={NEON.glow} strokeWidth="2" strokeLinecap="round" />
+          </g>
+        </g>
+      </g>
+    </g>
+  );
+}
+
+/**
+ * Climbing up or down the screen, seen through the glass: his belly and the
+ * pads of all four paws pressed flat on it, legs spread, tail hanging, ears and
+ * the top of his visor at the front. His paws move in diagonal pairs.
+ */
+function Climbing({ f, bulb, eyes, heading }: Parts & { heading: "u" | "d" }) {
+  const paw = (x: number, y: number) => (
+    <>
+      <ellipse cx={x} cy={y} rx="8" ry="7.5" fill={NEON.paw} stroke={NEON.rim} strokeWidth="1.8" />
+      <g filter={f} fill={NEON.glow}>
+        <ellipse cx={x} cy={y + 1.8} rx="3.4" ry="2.6" />
+        <circle cx={x - 3.6} cy={y - 2.6} r="1.5" />
+        <circle cx={x} cy={y - 4} r="1.5" />
+        <circle cx={x + 3.6} cy={y - 2.6} r="1.5" />
+      </g>
+    </>
+  );
+  const limb = (from: [number, number], to: [number, number], pair: "a" | "b") => (
+    <g className={`nk-cl-${pair}`}>
+      <line x1={from[0]} y1={from[1]} x2={to[0]} y2={to[1]} stroke={NEON.rim} strokeWidth="12" strokeLinecap="round" />
+      <line x1={from[0]} y1={from[1]} x2={to[0]} y2={to[1]} stroke={NEON.body} strokeWidth="8" strokeLinecap="round" />
+      {paw(to[0], to[1])}
+    </g>
+  );
+  return (
+    // Drawn heading up; heading down is the same drawing turned upside down (head first, like a dog would).
+    <g transform={heading === "d" ? "rotate(180 60 62)" : undefined}>
+      <g className="nk-float">
+        <g className="nk-tail-c">
+          <path d="M60,96 C57,104 63,110 60,115" fill="none" stroke={NEON.ear} strokeWidth="4" strokeLinecap="round" />
+          <circle cx="60" cy="117" r="4.2" fill={NEON.pink} filter={f} />
+        </g>
+        {limb([44, 54], [25, 36], "a")}
+        {limb([76, 88], [95, 103], "a")}
+        {limb([76, 54], [95, 36], "b")}
+        {limb([44, 88], [25, 103], "b")}
+        <rect x="38" y="40" width="44" height="60" rx="20" fill={NEON.body} stroke={NEON.rim} strokeWidth="2.4" />
+        <rect x="47" y="50" width="26" height="42" rx="12" fill="#262b66" />
+        <path d="M53,76 H67 M53,81 H67 M53,86 H67" stroke={NEON.rim} strokeWidth="1.6" strokeLinecap="round" opacity="0.45" />
+        <circle cx="60" cy="61" r="6.2" fill={NEON.coin} filter={f} />
+        <text x="60" y="63.8" textAnchor="middle" fontSize="7.5" fontWeight="800" fill={NEON.visor} transform={heading === "d" ? "rotate(180 60 61)" : undefined} style={{ fontFamily: "system-ui, sans-serif" }}>
+          5
+        </text>
+        <rect x="43" y="41" width="34" height="4.5" rx="2.2" fill={NEON.glow} filter={f} />
+        <g className="nk-head">
+          <g className="nk-ear-l">
+            <path d="M40,24 L25,4 L52,14 Z" fill={NEON.ear} fillOpacity="0.22" stroke={NEON.ear} strokeWidth="2.6" strokeLinejoin="round" filter={f} />
+          </g>
+          <g className="nk-ear-r">
+            <path d="M80,24 L95,4 L68,14 Z" fill={NEON.ear} fillOpacity="0.22" stroke={NEON.ear} strokeWidth="2.6" strokeLinejoin="round" filter={f} />
+          </g>
+          <line x1="60" y1="9" x2="60" y2="4" stroke={NEON.rim} strokeWidth="2.4" strokeLinecap="round" />
+          <circle className="nk-bulb-glow" cx="60" cy="2.5" r="5.5" fill={bulb} opacity="0.35" />
+          <circle cx="60" cy="2.5" r="3.4" fill={bulb} filter={f} />
+          <rect x="34" y="8" width="52" height="38" rx="16" fill={NEON.body} stroke={NEON.rim} strokeWidth="2.6" />
+          <rect x="41" y="12" width="38" height="15" rx="7.5" fill={NEON.visor} stroke={NEON.glow} strokeWidth="1.5" />
+          {/* His eyes peek out of the top of his visor, looking where he's climbing. */}
+          <g filter={f}>
+            <SmallEye kind={eyes} x={52.5} y={19} h={8} />
+            <SmallEye kind={eyes === "wink" ? "open" : eyes} x={67.5} y={19} h={8} />
+          </g>
+        </g>
+      </g>
+    </g>
   );
 }

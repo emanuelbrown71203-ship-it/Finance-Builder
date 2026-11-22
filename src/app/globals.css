@@ -112,6 +112,8 @@
   --bright: #ffffff;
   /* Amber for block meters: brighter than --warn (which is dark enough for text); lit blocks carry an ink outline by day. */
   --meter-warn: #ffb020;
+  --nk-print: rgb(91 61 245 / 0.72);
+  --nk-print-glow: none;
   --hero-glow: 0 0 0 transparent;
   --hero-over-edge: #1a1530;
 }
@@ -196,6 +198,8 @@
   --nk-floor: rgb(61 255 181 / 0.18);
   --bright: #f1f2ff;
   --meter-warn: #ffe45e;
+  --nk-print: rgb(61 255 181 / 0.6);
+  --nk-print-glow: drop-shadow(0 0 3px rgb(61 255 181 / 0.7));
   --hero-glow: 0 0 22px rgb(61 255 181 / 0.22);
   --hero-over-edge: #ff5fd2;
   }
@@ -279,6 +283,8 @@
   --nk-floor: rgb(61 255 181 / 0.18);
   --bright: #f1f2ff;
   --meter-warn: #ffe45e;
+  --nk-print: rgb(61 255 181 / 0.6);
+  --nk-print-glow: drop-shadow(0 0 3px rgb(61 255 181 / 0.7));
   --hero-glow: 0 0 22px rgb(61 255 181 / 0.22);
   --hero-over-edge: #ff5fd2;
 }
@@ -761,22 +767,39 @@ input[type="number"]::-webkit-inner-spin-button {
 @keyframes nk-sniff { 0%, 100% { transform: none; } 20%, 60% { transform: translateY(5px) rotate(-7deg); } 40%, 80% { transform: translateY(4px) rotate(7deg); } }
 @keyframes nk-look { 25% { transform: rotate(-12deg); } 65% { transform: rotate(10deg); } }
 
-/* Trotting to a new spot: legs step in turn, the body bobs, he leans the way he's going and wags fast. */
+/* Trotting to a new spot. Across the screen he turns side-on and his legs swing in a trot (each near leg
+   with the far one opposite); up or down it he climbs with his paws on the glass, moving them in diagonal
+   pairs. His body bobs and his tail goes fast. Turning into a new pose is a quick squash. */
 .nk-walking .nk-leg-l { animation: nk-step 0.34s ease-in-out infinite; }
 .nk-walking .nk-leg-r { animation: nk-step 0.34s ease-in-out infinite 0.17s; }
 .nk-walking .nk-float { animation: nk-trot 0.34s ease-in-out infinite; }
-.nk-walking .nk-tail { animation-duration: 0.22s; }
+.nk-walking .nk-tail, .nk-walking .nk-tail-s { animation-duration: 0.22s; }
 .nk-walking .nk-shadow { animation: nk-shadow 0.34s ease-in-out infinite; }
-.nk-walk-r .nk-wrap { transform: rotate(5deg); transition: transform 0.25s ease; }
-.nk-walk-l .nk-wrap { transform: rotate(-5deg); transition: transform 0.25s ease; }
+.nk-tail-s { transform-origin: 100% 100%; animation: nk-wag var(--nk-wag, 0.7s) ease-in-out infinite; }
+.nk-tail-c { transform-origin: 50% 0%; animation: nk-dangle 0.9s ease-in-out infinite; }
+.nk-sl-a, .nk-sl-b { transform-origin: 50% 0%; }
+.nk-walking .nk-sl-a { animation: nk-swing 0.34s ease-in-out infinite; }
+.nk-walking .nk-sl-b { animation: nk-swing 0.34s ease-in-out infinite -0.17s; }
+.nk-cl-a, .nk-cl-b { transform-origin: 50% 50%; }
+.nk-walking .nk-cl-a { animation: nk-crawl 0.5s ease-in-out infinite; }
+.nk-walking .nk-cl-b { animation: nk-crawl 0.5s ease-in-out infinite -0.25s; }
+.nk-turn { animation: nk-turn 0.2s ease-out; }
 @keyframes nk-step { 50% { transform: translateY(-4px); } }
 @keyframes nk-trot { 50% { transform: translateY(-3px); } }
 @keyframes nk-shadow { 50% { transform: scaleX(0.88); opacity: 0.08; } }
+@keyframes nk-swing { 0%, 100% { transform: rotate(-20deg); } 50% { transform: rotate(20deg); } }
+@keyframes nk-crawl { 0%, 100% { transform: translateY(3px); } 50% { transform: translateY(-5px) scale(0.94); } }
+@keyframes nk-dangle { 0%, 100% { transform: rotate(-14deg); } 50% { transform: rotate(14deg); } }
+@keyframes nk-turn { from { transform: scaleX(0.4); } }
+/* Paw prints he leaves behind him, fading as he goes. */
+.nk-print { position: absolute; width: 13px; height: 13px; margin: -6.5px 0 0 -6.5px; color: var(--nk-print); filter: var(--nk-print-glow); opacity: 0; animation: nk-print 1.6s ease-out forwards; }
+@keyframes nk-print { 0% { opacity: 0; transform: rotate(var(--rot)) scale(0.7); } 12% { opacity: 1; transform: rotate(var(--rot)) scale(1); } 100% { opacity: 0; transform: rotate(var(--rot)) scale(1); } }
 /* A party: bits of colour burst out around him. */
 .nk-confetti { position: absolute; left: 50%; top: 40%; width: 7px; height: 7px; border-radius: 2px; opacity: 0; animation: nk-confetti 1.2s ease-out forwards; }
 @keyframes nk-confetti { 0% { opacity: 1; transform: translate(0, 0) rotate(0); } 100% { opacity: 0; transform: translate(var(--dx), var(--dy)) rotate(260deg); } }
 @media (prefers-reduced-motion: reduce) {
-  .nk-walking .nk-leg-l, .nk-walking .nk-leg-r, .nk-walking .nk-float, .nk-walking .nk-shadow { animation: none; }
+  .nk-walking .nk-leg-l, .nk-walking .nk-leg-r, .nk-walking .nk-float, .nk-walking .nk-shadow, .nk-walking .nk-sl-a, .nk-walking .nk-sl-b, .nk-walking .nk-cl-a, .nk-walking .nk-cl-b, .nk-tail-s, .nk-tail-c, .nk-turn { animation: none; }
+  .nk-print { display: none; }
 }
 .nk-z { position: absolute; right: 0; top: 0; opacity: 0; animation: nk-z 3s ease-in infinite; }
 @keyframes nk-z { 0% { opacity: 0; transform: translate(0, 4px) scale(0.6); } 25% { opacity: 1; } 100% { opacity: 0; transform: translate(14px, -26px) scale(1.15); } }

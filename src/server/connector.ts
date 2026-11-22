@@ -77,7 +77,7 @@ const TOOLS = [
     },
   },
   { name: "get_spending", title: "Spending by category", description: "Spending by category for one month against the user's limits, with last month and the three-month average, plus money in and out for the last six months.", inputSchema: { type: "object", properties: { month: { type: "string", description: "YYYY-MM. Default: this month." } } } },
-  { name: "list_bills", title: "Bills and subscriptions", description: "Recurring bills (necessities), extras (kind \"subscription\": wants like streaming, which count against budgets, not bills) and regular income found in the transaction history, what each costs a month, what is due in the next six weeks, price increases and renewals.", inputSchema: { type: "object", properties: {} } },
+  { name: "list_bills", title: "Bills and subscriptions", description: "Recurring bills (needs, set aside each month), extras (subscriptions that are wants, like streaming: they count against the budget, not as bills) and regular income found in the transaction history, what each costs a month, what is due in the next six weeks, price increases and renewals.", inputSchema: { type: "object", properties: {} } },
   { name: "get_net_worth", title: "Net worth", description: "Every account with its balance, total owned, total owed, and how net worth has changed.", inputSchema: { type: "object", properties: { range: { type: "string", enum: ["1m", "3m", "6m", "1y"], description: "How far back to compare. Default 6m." } } } },
   { name: "list_goals", title: "Savings goals", description: "Savings goals with how much is saved, the target and its date, whether it's on track, ahead or behind its plan, what's needed per month, week and payday to hit the date, the actual pace, and when it will be reached.", inputSchema: { type: "object", properties: {} } },
   { name: "get_investments", title: "Investments", description: "Investment accounts, holdings with gain or loss, and the split by type.", inputSchema: { type: "object", properties: {} } },
@@ -93,7 +93,7 @@ const WRITE_TOOLS = [
   {
     name: "add_bill",
     title: "Add a bill",
-    description: "Add a bill or subscription the user asked you to add, such as one the bank doesn't show yet. Use how_often 'once' for a one-off bill coming up. It shows in their Bills and counts in what's left to spend this month.",
+    description: "Add a bill the user asked you to add, such as one the bank doesn't show yet. Use how_often 'once' for a one-off bill coming up. A bill (a need: rent, utilities, insurance, a loan) is set aside from what's left to spend. kind 'subscription' is an Extra (a want, like streaming): it's listed as a reminder and counts against the budget only when the charge comes through. A one-off is always a bill.",
     inputSchema: {
       type: "object",
       properties: {
@@ -101,7 +101,7 @@ const WRITE_TOOLS = [
         amount: { type: "number", description: "What it costs, in dollars, like 15.99." },
         how_often: { type: "string", enum: Object.keys(HOW_OFTEN) },
         next_due: { type: "string", description: `The next (or only) date it's due, ${DATE_HINT}.` },
-        kind: { type: "string", enum: ["bill", "subscription"], description: "Default bill." },
+        kind: { type: "string", enum: ["bill", "subscription"], description: "bill (a need) or subscription (an Extra, a want). Default bill." },
       },
       required: ["name", "amount", "how_often", "next_due"],
     },
@@ -253,11 +253,11 @@ async function callTool(name: string, args: Record<string, unknown>, ctx: Ctx): 
           days_left: p.daysLeft,
           money_in_expected: usd(p.incomeExpected),
           money_in_so_far: usd(p.incomeReceived),
-          bills_and_subscriptions_expected: usd(p.billsExpected),
+          bills_expected: usd(p.billsExpected),
           bills_paid_so_far: usd(p.billsPaid),
           set_aside_for_goals: usd(p.savingsPlanned),
           everyday_spending_so_far: usd(p.everydaySpent),
-          how_it_is_worked_out: "left_to_spend = money in expected − bills and subscriptions expected − set aside for goals − everyday spending so far",
+          how_it_is_worked_out: "left_to_spend = money in expected − bills expected (needs only) − set aside for goals − everyday spending so far (which includes Extras like streaming)",
         },
         net_worth: { total: usd(o.netWorth.net), owned: usd(o.netWorth.assets), owed: usd(o.netWorth.debts), change_30_days: usd(o.netWorth.change) },
         needs_attention: o.attention.map((a) => ({ what: a.title, detail: a.detail })),
@@ -290,7 +290,7 @@ async function callTool(name: string, args: Record<string, unknown>, ctx: Ctx): 
       const b = await getBudget(ctx, month);
       return {
         month: b.month,
-        note: "Budgets are for everyday spending; bills and subscriptions are planned separately (bills_paid).",
+        note: "Budgets are for everyday spending, Extras (subscriptions that are wants, like streaming) included. Bills (needs) are planned separately (bills_paid) and never count against a budget.",
         everyday_spent: usd(b.totalSpent),
         money_in: usd(b.income),
         plan: { money_in: usd(b.plan.income), bills: usd(b.plan.bills), saving_for_goals: usd(b.plan.saving), everyday_budgets: usd(b.plan.budgeted), carried_over: b.plan.carried ? usd(b.plan.carried) : undefined, not_planned_yet: usd(b.plan.unplanned), left_to_spend: usd(b.plan.leftToSpend) },
@@ -328,9 +328,9 @@ async function callTool(name: string, args: Record<string, unknown>, ctx: Ctx): 
       });
       return {
         bills_per_month: usd(r.monthlyBills),
-        subscriptions_per_month: usd(r.monthlySubscriptions),
+        extras_per_month: usd(r.monthlySubscriptions),
         bills: r.series.filter((s) => s.kind === "bill").map(row),
-        subscriptions: r.series.filter((s) => s.kind === "subscription").map(row),
+        extras: r.series.filter((s) => s.kind === "subscription").map(row),
         regular_income: r.series.filter((s) => s.kind === "income").map(row),
         due_next_six_weeks: r.upcoming.map((u) => ({ name: u.name, due: u.date, amount: usd(-u.amount), estimate: u.estimated || undefined })),
         possibly_new_subscriptions: r.possible.map((p) => ({ name: p.name, first_charged: p.date, amount: usd(-p.amount) })),

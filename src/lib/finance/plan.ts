@@ -37,7 +37,7 @@ export type MonthPlan = {
   billsPaid: number;
   /** What goals are set to put aside each month. */
   savingsPlanned: number;
-  /** Spending this month that isn’t a bill or subscription. */
+  /** Spending this month that isn’t a bill (Extras like Netflix count here). */
   everydaySpent: number;
   /** incomeExpected − billsExpected − savingsPlanned − everydaySpent */
   leftToSpend: number;

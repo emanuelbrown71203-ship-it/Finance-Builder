@@ -97,7 +97,7 @@ describe("a straight answer about a purchase, and he holds to it", () => {
   it("says plainly when a purchase would put the bills at risk", () => {
     const r = judgePurchase(410_000, "laptop", snap);
     expect(r.verdict).toBe("no");
-    expect(r.reason).toMatch(/checking \$44\.49 short of the \$144\.49 in bills due before payday on Nov 27\. That puts the household’s bills at risk\./);
+    expect(r.reason).toMatch(/checking \$44\.49 short of the \$144\.49 in bills and Extras due before payday on Nov 27\. That puts the household’s bills at risk\./);
   });
 
   it("doesn't cave to pleading, but does look again at a new price", () => {

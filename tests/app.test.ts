@@ -615,6 +615,26 @@ describe("changes Nickel and Claude make when asked", () => {
     await undoActivity(ctx, done.activityId);
   });
 
+  it("a one-off marked as an Extra is still a bill: it's set aside from what's left to spend until its date", async () => {
+    const before = await getOverview(ctx);
+    const done = await addBill(ctx, "claude", { name: "Concert tickets", amount: 20_000, frequency: "once", date: "2026-11-27", kind: "subscription" });
+    expect((await getRecurring(ctx)).series.find((s) => s.name === "Concert tickets")?.kind).toBe("bill");
+    expect((await getOverview(ctx)).plan.leftToSpend).toBe(before.plan.leftToSpend - 20_000);
+    await undoActivity(ctx, done.activityId);
+  });
+
+  it("an Extra added by hand is a reminder: nothing is set aside for it until the charge comes through", async () => {
+    const before = await getOverview(ctx);
+    const done = await addBill(ctx, "nickel", { name: "Music app", amount: 1_099, frequency: "monthly", date: "2026-11-28", kind: "subscription" });
+    expect(done.summary).toBe("Added an Extra: Music app, $10.99 every month, next on Nov 28.");
+    const r = await getRecurring(ctx);
+    expect(r.series.find((s) => s.name === "Music app")).toMatchObject({ kind: "subscription", active: true });
+    const after = await getOverview(ctx);
+    expect(after.plan.billsExpected).toBe(before.plan.billsExpected);
+    expect(after.plan.leftToSpend).toBe(before.plan.leftToSpend);
+    await undoActivity(ctx, done.activityId);
+  });
+
   it("works out a repeating bill's next date from when it started", () => {
     expect(nextDue({ frequency: "monthly", startDate: "2026-01-31" }, "2026-11-21")).toBe("2026-11-30");
     expect(nextDue({ frequency: "weekly", startDate: "2024-01-05" }, "2026-11-21")).toBe("2026-11-27");

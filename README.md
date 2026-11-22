@@ -109,7 +109,9 @@ Smaller things that make it easier to live with:
   - **Chat with Claude** opens a chat in your own Claude app (on your own Claude plan) with a question
     ready; Claude reads your numbers through the connector below.
   He also wanders the whole screen: every so often he trots somewhere (along the bottom, up a side,
-  out in the open) and sniffs around, and heads back to his spot as soon as you scroll or tap, so
+  out in the open) and sniffs around. He turns side-on to walk across, climbs up and down with his belly
+  and paws flat on the glass (never a diagonal: `src/lib/nickel/walk.ts`), and leaves little paw prints
+  that fade behind him. He heads back to his spot as soon as you scroll or tap, so
   he's never in the way. Never while you're touching the screen, while he's talking or asleep, or
   with "reduce motion" on; he hops up out of the way of messages. He cheers small money tasks (renaming,
   sorting, adding a bill, cancelling a subscription, making or adding to a goal, setting a limit,

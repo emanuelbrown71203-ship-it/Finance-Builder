@@ -186,7 +186,8 @@ export function manualSeries(bill: ManualBill, today: ISODate, bank: BankMatch =
   const base: RecurringSeries = {
     key: `manual:${bill.id}`,
     name: bill.name,
-    kind: bill.kind === "subscription" ? "subscription" : "bill",
+    // A one-off coming up is always a bill: set aside until its date. Only a repeating charge can be an Extra.
+    kind: !once && bill.kind === "subscription" ? "subscription" : "bill",
     category: bill.category,
     frequency,
     amount: bill.amount,

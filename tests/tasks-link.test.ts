@@ -328,7 +328,7 @@ describe("the Claude connector", () => {
       return { error: out.result.isError ? out.result.content[0].text : null, data: out.result.isError ? null : JSON.parse(out.result.content[0].text) };
     };
     const bill = await call("add_bill", { name: "Streaming", amount: 12.99, how_often: "monthly", next_due: "2026-12-03", kind: "subscription" });
-    expect(bill.data).toMatchObject({ done: true, what_changed: ["Added a subscription: Streaming, $12.99 every month, next on Dec 3."] });
+    expect(bill.data).toMatchObject({ done: true, what_changed: ["Added an Extra: Streaming, $12.99 every month, next on Dec 3."] });
     const once = await call("add_bill", { name: "Vet", amount: "250", how_often: "once", next_due: "2026-11-27" });
     expect(once.data.what_changed[0]).toBe("Added an upcoming bill: Vet, $250.00 due Nov 27.");
     const goal = await call("add_savings_goal", { name: "Bike", target: 900, target_date: "2027-06-30" });
@@ -341,7 +341,7 @@ describe("the Claude connector", () => {
     const items = await listActivity(ctx);
     expect(items.slice(0, 5).map((i) => i.actor)).toEqual(["claude", "claude", "claude", "claude", "claude"]);
     for (const item of items.filter((i) => i.actor === "claude" && !i.undone)) await undoActivity(ctx, item.id);
-    expect((await call("list_bills")).data.subscriptions.some((s: { name: string }) => s.name === "Streaming")).toBe(false);
+    expect((await call("list_bills")).data.extras.some((s: { name: string }) => s.name === "Streaming")).toBe(false);
     expect((await call("list_transactions", { search: "city light" })).data.transactions[0].name).toBe("City Light & Power");
 
     // Mistakes come back as short, useful messages, never a stack trace.

@@ -111,7 +111,7 @@ export function thinkAbout(input: NickelInput): { mood: Mood; tips: Tip[] } {
   const soon = input.upcoming.filter((u) => diffDays(u.date, today) >= 0 && diffDays(u.date, today) <= 7);
   if (soon.length >= 2) {
     const total = soon.reduce((sum, u) => sum + Math.abs(u.amount), 0);
-    say({ key: "week-bills", priority: 4, mood: "curious", text: `${soon.length} bills come out in the next week, ${money(total)} in all.`, href: "/bills", link: "See bills" });
+    say({ key: "week-bills", priority: 4, mood: "curious", text: `${soon.length} payments come out in the next week, ${money(total)} in all.`, href: "/bills", link: "See bills" });
   }
 
   if (input.noSpendStreak >= 2) say({ key: "streak", priority: 3, mood: "proud", text: s("streak", [`${input.noSpendStreak} no-spend days in a row. I’m so proud of you.`, `That’s ${input.noSpendStreak} days in a row without everyday spending. Good human!`]) });

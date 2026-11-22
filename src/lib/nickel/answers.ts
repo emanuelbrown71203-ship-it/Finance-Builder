@@ -157,7 +157,7 @@ export function judgePurchase(amount: number, item: string, s: Snapshot): { verd
   const after = s.leftToSpend - amount;
   const days = Math.max(1, s.daysLeft);
   if (cashAfter < 0) {
-    return { verdict: "no", reason: `Paying for ${what} would leave checking ${money(cashAfter)} short of the ${money(due)} in bills due before ${s.nextPayday ? `payday on ${formatShort(s.nextPayday)}` : "the month ends"}. That puts the household’s bills at risk.` };
+    return { verdict: "no", reason: `Paying for ${what} would leave checking ${money(cashAfter)} short of the ${money(due)} in bills and Extras due before ${s.nextPayday ? `payday on ${formatShort(s.nextPayday)}` : "the month ends"}. That puts the household’s bills at risk.` };
   }
   if (after < 0) {
     return { verdict: "no", reason: `${what[0].toUpperCase()}${what.slice(1)} would put this month ${money(after)} past what’s left after bills and goals${s.savings >= amount ? ", and paying from savings would set your goals back" : ""}.` };
