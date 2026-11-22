@@ -11,6 +11,7 @@ import { eq as eqOp } from "drizzle-orm";
 import { addBill, addGoal, addToGoal, changeGoal, changeLoan, findCharge, findDebt, findGoal, listActivity, renameCharges, undoActivity } from "@/server/actions";
 import { bankMatch, createManualBill, deleteManualBill, manualSeries, nextDue, restoreManualBill, updateManualBill } from "@/server/manual-bills";
 import { upcomingBetween } from "@/lib/finance/recurring";
+import { askNickel } from "@/server/nickel";
 import { getAccounts, getBudget, getDebt, getGoal, getGoals, getInvestments, getNetWorth, getOverview, getRecap, getRecurring, getTransactions } from "@/server/queries";
 
 /** End-to-end over the real SQL: seed the sample household into PGlite, then read it back. */
@@ -665,5 +666,23 @@ describe("changes Nickel and Claude make when asked", () => {
     const bill = (await getRecurring(ctx)).series.find((s) => s.name === "Cable")!;
     await expect(deleteManualBill(stranger, bill.manual!.id)).rejects.toMatchObject({ status: 404 });
     await undoActivity(ctx, done.activityId);
+  });
+});
+
+describe("asking Nickel", () => {
+  it("answers everyday questions and purchase questions from the household's numbers", async () => {
+    const left = await askNickel(ctx, "what's left to spend?");
+    expect(left?.text).toMatch(/left this month|past what’s left/);
+    const due = await askNickel(ctx, "what bills are coming up this month?");
+    expect(due?.text).toMatch(/due the rest of this month|Nothing due/);
+    const rent = await askNickel(ctx, "when is rent due?");
+    expect(rent?.text).toMatch(/^Parkview Apartments \(\$2,150\) is next due/);
+    const shop = await askNickel(ctx, "how much did I spend at Safeway this month?");
+    expect(shop?.text).toMatch(/^(You’ve spent \$[\d,.]+ at Safeway this month, across \d+ charges?\.|Nothing at “safeway” this month\.)$/);
+    const verdict = await askNickel(ctx, "can I afford a $25,000 car?");
+    expect(verdict?.verdict).toMatchObject({ amount: 2_500_000, item: "car", verdict: "no" });
+    const pushed = await askNickel(ctx, "but I really want it", verdict!.verdict!);
+    expect(pushed?.verdict?.verdict).toBe("no");
+    expect(await askNickel(ctx, "what's the weather like")).toBeNull();
   });
 });

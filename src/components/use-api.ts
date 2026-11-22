@@ -47,6 +47,11 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
   return data as T;
 }
 
+/** Reads something once (not kept up to date like useApi). */
+export function getJson<T>(url: string): Promise<T> {
+  return request<T>(url);
+}
+
 /** How often live screens re-check for new activity. */
 export const LIVE_INTERVAL = 5000;
 

@@ -40,11 +40,17 @@ for it to be remembered and used whenever an app is built.
 - Bills and subscriptions are worked out from transaction history each time; only the person's own
   choices ("I cancelled this") are stored.
 - Bank access tokens are stored encrypted. The app can read accounts and can never move money.
-- **Nickel (the robo dog) only points things out** from the person's own numbers. He never says
-  "you should", never gives investment advice, and says he isn't a financial advisor. His wording
-  lives in `src/lib/nickel/brain.ts` and a test checks for advice-like phrasing. His instructions
-  are understood on the device by rules (`src/lib/nickel/commands.ts`); "Chat with Claude" opens the
-  owner's own Claude app. A built-in AI chat would send data to an outside service: ask the owner first.
+- **Nickel (the robo dog) points things out** from the person's own numbers, and never gives
+  investment advice (no stock, fund or crypto picks); he says he isn't a financial advisor. His wording
+  lives in `src/lib/nickel/brain.ts` and tests check for advice-like phrasing.
+- **Asked about a purchase ("can I afford…?", "should I buy…?"), Nickel is headstrong**, at the owner's
+  request: a straight yes / not yet / no from the household's numbers (`judgePurchase` in
+  `src/lib/nickel/answers.ts`), with the reason in numbers, and a plain warning when bills would be at
+  risk. Pleading or asking again never changes it; only new numbers (a different price) do.
+- His instructions and questions are understood by rules (`src/lib/nickel/commands.ts`,
+  `answers.ts`); talking uses the phone's own speech recognition and voice (`voice.ts`). "Chat with
+  Claude" opens the owner's own Claude app. A built-in AI chat would send data to an outside service:
+  ask the owner first.
 - **Names never overwrite the bank's text.** `transactions.name` stays what the bank sent; shown names
   come from `custom_name`, `name_rules` and the tidy-up in `src/lib/finance/names.ts`, applied on read.
   Anything that matches charges (bills, category rules, the Tasks link) keys on the bank's text.

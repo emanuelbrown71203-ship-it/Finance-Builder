@@ -151,7 +151,7 @@ export const SMALL_TALK = [
 ];
 
 /** Said once, the first time he meets someone. */
-export const INTRO = "Hi, I’m Nickel! I sniff through your numbers and tell you what I notice. I’m a robot dog, not a financial advisor, so my ideas are just ideas. Tap me any time. Hold me to tell me what to add, like a bill or a goal.";
+export const INTRO = "Hi, I’m Nickel! I sniff through your numbers and tell you what I notice. I’m a robot dog, not a financial advisor, but ask me “can I afford it?” and I’ll give you a straight answer from your numbers. Tap me any time. Hold me to talk to me.";
 
 /* ---------- celebrating small money tasks ---------- */
 

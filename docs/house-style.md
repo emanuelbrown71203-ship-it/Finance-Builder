@@ -70,6 +70,11 @@ If a rule here and an app's own existing look disagree, the app's existing look 
   chases its tail). Never while you're touching the screen, while it's talking, asleep or being
   dragged, and not at all with "reduce motion" on; a Settings switch keeps it still. It moves out of
   the way of messages instead of hiding behind them.
+- **It can be talked to**, using only what the phone already has (its own speech recognition and
+  voice), and answers out loud. No AI service or keys unless the owner asks for one.
+- **On money decisions it's headstrong.** Asked "can I afford this?", it gives a straight yes / not yet /
+  no from the household's real numbers, warns plainly when bills would be at risk, and doesn't cave to
+  pleading. Only new numbers change its answer.
 - **It celebrates the small stuff.** Every small task (sorting or renaming something, adding a bill,
   cancelling a subscription, making a goal, putting money toward it, setting a limit) gets a quick
   cheer, and bigger moments (milestones, a cancelled subscription, a few chores in one day) get a

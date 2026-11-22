@@ -43,8 +43,9 @@ const securityHeaders = [
   { key: "Referrer-Policy", value: "no-referrer" },
   // Plaid's bank sign-in opens a pop-up that has to talk back to this page.
   { key: "Cross-Origin-Opener-Policy", value: "same-origin-allow-popups" },
-  // No camera, microphone or location. Face ID sign-in only from this site itself.
-  { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=(), payment=(), usb=(), browsing-topics=(), publickey-credentials-get=(self), publickey-credentials-create=(self)" },
+  // No camera or location. The microphone only for this site itself, so you can talk to Nickel (and only
+  // after the phone asks you); never for anything embedded. Face ID sign-in only from this site itself.
+  { key: "Permissions-Policy", value: "camera=(), microphone=(self), geolocation=(), payment=(), usb=(), browsing-topics=(), publickey-credentials-get=(self), publickey-credentials-create=(self)" },
 ];
 
 const nextConfig: NextConfig = {

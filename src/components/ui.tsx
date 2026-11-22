@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { ChevronDown, X } from "lucide-react";
-import { useEffect, useId, useRef, useState, useSyncExternalStore, type ButtonHTMLAttributes, type InputHTMLAttributes, type PointerEvent, type ReactNode, type SelectHTMLAttributes } from "react";
+import { useEffect, useId, useRef, useState, useSyncExternalStore, type ButtonHTMLAttributes, type InputHTMLAttributes, type PointerEvent, type ReactNode, type Ref, type SelectHTMLAttributes } from "react";
 
 /*
   Shared building blocks. They follow docs/house-style.md: phone first, tap
@@ -129,8 +129,8 @@ export function Field({ label, hint, error, children }: { label: string; hint?: 
   );
 }
 
-export function Input({ className, ...rest }: InputHTMLAttributes<HTMLInputElement>) {
-  return <input className={cx(fieldClass, className)} {...rest} />;
+export function Input({ className, ref, ...rest }: InputHTMLAttributes<HTMLInputElement> & { ref?: Ref<HTMLInputElement> }) {
+  return <input ref={ref} className={cx(fieldClass, className)} {...rest} />;
 }
 
 export function MoneyInput({ className, ...rest }: InputHTMLAttributes<HTMLInputElement>) {

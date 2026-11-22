@@ -18,6 +18,7 @@ const KEY = {
   intro: "passbook-nickel-intro",
   seen: "passbook-nickel-seen",
   roam: "passbook-nickel-roam",
+  voice: "passbook-nickel-voice",
   tasks: "passbook-nickel-tasks",
 } as const;
 
@@ -48,14 +49,14 @@ function write(key: string, value: string | null) {
   window.dispatchEvent(new Event(EVENT));
 }
 
-export type NickelSettings = { on: boolean; name: string; chatty: boolean; roams: boolean; napUntil: number; introDone: boolean; side: "left" | "right"; lift: number };
+export type NickelSettings = { on: boolean; name: string; chatty: boolean; roams: boolean; talksBack: boolean; napUntil: number; introDone: boolean; side: "left" | "right"; lift: number };
 
-const DEFAULTS: NickelSettings = { on: true, name: "Nickel", chatty: true, roams: true, napUntil: 0, introDone: false, side: "right", lift: 0 };
+const DEFAULTS: NickelSettings = { on: true, name: "Nickel", chatty: true, roams: true, talksBack: true, napUntil: 0, introDone: false, side: "right", lift: 0 };
 
 let cached: { raw: string; value: NickelSettings } | null = null;
 
 function snapshot(): NickelSettings {
-  const raw = [KEY.on, KEY.name, KEY.chatty, KEY.nap, KEY.intro, KEY.pos, KEY.roam].map(read).join("\u0000");
+  const raw = [KEY.on, KEY.name, KEY.chatty, KEY.nap, KEY.intro, KEY.pos, KEY.roam, KEY.voice].map(read).join("\u0000");
   if (cached?.raw === raw) return cached.value;
   let pos: { side?: string; lift?: number } = {};
   try {
@@ -66,6 +67,7 @@ function snapshot(): NickelSettings {
     name: (read(KEY.name) ?? "").trim().slice(0, 20) || DEFAULTS.name,
     chatty: read(KEY.chatty) !== "0",
     roams: read(KEY.roam) !== "0",
+    talksBack: read(KEY.voice) !== "0",
     napUntil: Number(read(KEY.nap) ?? 0) || 0,
     introDone: read(KEY.intro) === "1",
     side: pos.side === "left" ? "left" : "right",
@@ -93,6 +95,7 @@ export const nickelSettings = {
   setName: (name: string) => write(KEY.name, name.trim() ? name.trim().slice(0, 20) : null),
   setChatty: (chatty: boolean) => write(KEY.chatty, chatty ? null : "0"),
   setRoams: (roams: boolean) => write(KEY.roam, roams ? null : "0"),
+  setTalksBack: (on: boolean) => write(KEY.voice, on ? null : "0"),
   napFor: (ms: number) => write(KEY.nap, String(Date.now() + ms)),
   wake: () => write(KEY.nap, null),
   finishIntro: () => write(KEY.intro, "1"),

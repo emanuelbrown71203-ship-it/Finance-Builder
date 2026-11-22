@@ -1,18 +1,20 @@
 "use client";
 
-import { ChevronRight, X } from "lucide-react";
+import { ChevronRight, Mic, X } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { INTRO, SMALL_TALK, cheerFor, type Mood, type Tip } from "@/lib/nickel/brain";
 import { CLAUDE_PREFIX, CLAUDE_QUESTIONS, claudeLink } from "@/lib/nickel/claude";
 import { parseCommand, type Command } from "@/lib/nickel/commands";
+import type { Answer, LastVerdict } from "@/lib/nickel/answers";
 import { BillForm, type BillDraft } from "../bill-form";
 import { GoalDialog } from "../goals";
 import { formatShort } from "@/lib/dates";
 import { dollars } from "@/lib/money";
 import type { NickelPayload } from "@/server/nickel";
 import { Dialog, Input, cx, toast } from "../ui";
-import { send, useApi, useNow } from "../use-api";
+import { getJson, send, useApi, useNow } from "../use-api";
+import { canListen, hush, listen, prime, speak, yesOrNo } from "./voice";
 import { RoboDog, type Eyes, type Mouth } from "./robo-dog";
 import { countTask, markSeen, nickelSettings, seenToday, useNickelSettings, type NickelEvent } from "./store";
 
@@ -52,6 +54,7 @@ const isNight = () => {
 const UNPROMPTED_GAP = 8 * 60_000;
 /** How wide he is on screen, and how far he keeps from the edges. */
 const DOG_W = 72;
+const DOG_H = 75;
 /** Bits of colour for a party: where each one flies. */
 const CONFETTI = [
   { dx: -46, dy: -40, c: "var(--warn)" },
@@ -96,8 +99,8 @@ export function Nickel() {
   const [wide, setWide] = useState(false);
   const [screenH, setScreenH] = useState(800);
   const [screenW, setScreenW] = useState(390);
-  /** Where he's wandered to: px from the left edge. Null when he's sitting at his home side. */
-  const [spot, setSpot] = useState<number | null>(null);
+  /** Where he's wandered to: px from the left and top of the screen. Null when he's sitting at his home spot. */
+  const [spot, setSpot] = useState<{ x: number; y: number } | null>(null);
   const [walk, setWalk] = useState<{ dir: "l" | "r"; ms: number } | null>(null);
   /** Room an on-screen message takes at the bottom; he hops up over it. */
   const [toastSpace, setToastSpace] = useState(0);
@@ -262,26 +265,44 @@ export function Nickel() {
   useEffect(() => {
     calm.current = { asleep, bubble: bubble !== null, menu, drag: drag !== null };
   });
-  const spotRef = useRef<number | null>(null);
+  const spotRef = useRef<{ x: number; y: number } | null>(null);
   useEffect(() => {
     spotRef.current = spot;
   }, [spot]);
   const walkTimer = useRef(0);
+  /** Where his home spot is on screen, measured the last time he set off from it. */
+  const homeAt = useRef<{ x: number; y: number } | null>(null);
+  const goingHome = useRef(false);
 
-  /** Trots to a spot along the bottom of the screen (null: back to his home side), then does something doggy there. */
+  /** The area he can roam: below the screen's title bar, above his home line at the bottom, inside the edges. */
+  const bounds = useCallback(() => {
+    const margin = wide ? 24 : 10;
+    const vw = window.innerWidth;
+    const home = homeAt.current ?? { x: settings.side === "right" ? vw - margin - DOG_W : margin, y: window.innerHeight - (wide ? 20 : 80) - DOG_H - 34 };
+    return { minX: margin, maxX: vw - margin - DOG_W, minY: wide ? 96 : 118, maxY: Math.max(wide ? 96 : 118, home.y), home };
+  }, [wide, settings.side]);
+
+  /** Trots to a spot anywhere on the screen (null: back home), then does something doggy there. */
   const trot = useCallback(
-    (target: number | null) => {
-      const margin = wide ? 24 : 10;
-      const vw = window.innerWidth;
-      const home = settings.side === "right" ? vw - margin - DOG_W : margin;
-      const from = spotRef.current ?? home;
-      const to = Math.max(margin, Math.min(vw - margin - DOG_W, target ?? home));
-      const distance = Math.abs(to - from);
-      if (distance < 30) return;
-      const dir = to > from ? "r" : "l";
-      const ms = Math.round((distance / rand(85, 125)) * 1000);
-      setGaze({ x: dir === "r" ? 2.8 : -2.8, y: 0 });
-      // Start from where he is (switching from sitting at a side to a spot), then set off on the next frame.
+    (target: { x: number; y: number } | null) => {
+      // Setting off from home: remember exactly where home is, so he can come back to it.
+      if (spotRef.current === null) {
+        const r = root.current?.getBoundingClientRect();
+        if (r) homeAt.current = { x: r.left, y: r.top };
+      }
+      const b = bounds();
+      const from = spotRef.current ?? b.home;
+      const to = target === null ? b.home : { x: Math.max(b.minX, Math.min(b.maxX, target.x)), y: Math.max(b.minY, Math.min(b.maxY, target.y)) };
+      const distance = Math.hypot(to.x - from.x, to.y - from.y);
+      if (distance < 30) {
+        if (target === null) setSpot(null);
+        return;
+      }
+      const dir = to.x >= from.x ? "r" : "l";
+      const ms = Math.round((distance / rand(90, 130)) * 1000);
+      goingHome.current = target === null;
+      setGaze({ x: Math.max(-2.8, Math.min(2.8, ((to.x - from.x) / distance) * 2.8)), y: Math.max(-2.2, Math.min(2.2, ((to.y - from.y) / distance) * 2.2)) });
+      // Start from where he is (switching from sitting at home to a spot), then set off on the next frame.
       setSpot(from);
       window.clearTimeout(walkTimer.current);
       requestAnimationFrame(() =>
@@ -291,14 +312,18 @@ export function Nickel() {
           walkTimer.current = window.setTimeout(() => {
             setWalk(null);
             setGaze({ x: 0, y: 0 });
-            if (target === null) setSpot(null);
+            goingHome.current = false;
+            if (target === null) {
+              setSpot(null);
+              return;
+            }
             // What a dog does on arriving somewhere.
             const roll = Math.random();
             if (roll < 0.35) act("sniff");
             else if (roll < 0.55) act("look");
             else if (roll < 0.65) act("stretch");
             else if (roll < 0.72) act("wiggle");
-            else if (roll < 0.76) {
+            else if (roll < 0.77) {
               act("spin"); // chasing his tail
               pop("hearts");
             }
@@ -306,7 +331,7 @@ export function Nickel() {
         }),
       );
     },
-    [wide, settings.side, act, pop],
+    [bounds, act, pop],
   );
 
   useEffect(() => {
@@ -318,15 +343,20 @@ export function Nickel() {
         const c = calm.current;
         const quiet = Date.now() - lastActive.current > 3500 && !press.current && document.visibilityState === "visible" && !document.querySelector("dialog[open]");
         if (!reduced.matches && quiet && !c.asleep && !c.bubble && !c.menu && !c.drag) {
-          const margin = wide ? 24 : 10;
-          const vw = window.innerWidth;
           const here = spotRef.current;
-          // Now and then he heads home; otherwise somewhere a fair way from where he is.
           if (here !== null && Math.random() < 0.3) trot(null);
           else {
-            const start = here ?? (settings.side === "right" ? vw - margin - DOG_W : margin);
-            let target = start;
-            for (let i = 0; i < 8 && Math.abs(target - start) < 90; i++) target = rand(margin, vw - margin - DOG_W);
+            const b = bounds();
+            const start = here ?? b.home;
+            // Anywhere on the screen: along the bottom, up a side, or out in the open, a fair way from where he is.
+            const pickSpot = () => {
+              const roll = Math.random();
+              if (roll < 0.3) return { x: rand(b.minX, b.maxX), y: b.maxY };
+              if (roll < 0.55) return { x: Math.random() < 0.5 ? b.minX : b.maxX, y: rand(b.minY, b.maxY) };
+              return { x: rand(b.minX, b.maxX), y: rand(b.minY, b.maxY) };
+            };
+            let target = pickSpot();
+            for (let i = 0; i < 10 && Math.hypot(target.x - start.x, target.y - start.y) < 110; i++) target = pickSpot();
             trot(target);
           }
         }
@@ -335,9 +365,32 @@ export function Nickel() {
     };
     loop();
     return () => window.clearTimeout(timer);
-  }, [visible, settings.roams, settings.side, wide, trot]);
+  }, [visible, settings.roams, bounds, trot]);
 
-  // Switched off, or when he's put back by hand: he goes home.
+  // Out in the middle of the screen when you start scrolling or tapping, he trots back to his spot so he's
+  // never in the way, the way a dog heads back to its bed when people start moving about.
+  useEffect(() => {
+    if (!visible) return;
+    let t = 0;
+    const outOfTheWay = (e: Event) => {
+      const here = spotRef.current;
+      if (here === null || goingHome.current || calm.current.drag) return;
+      if (e.type === "pointerdown" && root.current?.contains(e.target as Node)) return;
+      const b = bounds();
+      if (here.y >= b.maxY - 40) return; // already along the bottom
+      window.clearTimeout(t);
+      t = window.setTimeout(() => trot(null), 250);
+    };
+    window.addEventListener("pointerdown", outOfTheWay, { passive: true });
+    window.addEventListener("scroll", outOfTheWay, { passive: true });
+    return () => {
+      window.removeEventListener("pointerdown", outOfTheWay);
+      window.removeEventListener("scroll", outOfTheWay);
+      window.clearTimeout(t);
+    };
+  }, [visible, bounds, trot]);
+
+  // Switched off: he goes home.
   useEffect(() => {
     if (settings.roams) return;
     const t = window.setTimeout(() => {
@@ -354,7 +407,8 @@ export function Nickel() {
     const r = root.current?.getBoundingClientRect();
     window.clearTimeout(walkTimer.current);
     setWalk(null);
-    if (r) setSpot(r.left);
+    goingHome.current = false;
+    if (r) setSpot({ x: r.left, y: r.top });
   };
 
   useEffect(() => {
@@ -544,10 +598,11 @@ export function Nickel() {
   // Where he sat is re-checked against today's screen, so turning an iPad never leaves him off the edge.
   const lift = Math.min(settings.lift, Math.max(0, screenH - 300));
   // Up high, his bubble opens below him instead of off the top of the screen.
-  const bubbleBelow = lift > screenH / 2 - 120;
+  const bubbleBelow = spot ? spot.y < screenH / 2 - 60 : lift > screenH / 2 - 120;
   const margin = wide ? 24 : 10;
   // Wherever he wandered, re-checked against today's screen width.
-  const x = spot === null ? null : Math.max(margin, Math.min(screenW - margin - DOG_W, spot));
+  const x = spot === null ? null : Math.max(margin, Math.min(screenW - margin - DOG_W, spot.x));
+  const y = spot === null ? null : Math.max(0, Math.min(screenH - DOG_H - 8, spot.y));
   const sideStyle = useMemo(() => {
     const bottomBase = wide ? 20 : 80;
     if (drag) return { left: drag.x - 38, top: drag.y - 40 };
@@ -555,9 +610,9 @@ export function Nickel() {
     const over = !wide && lift < toastSpace + 12 ? toastSpace : 0;
     const bottom = `calc(${bottomBase + lift + over}px + ${wide ? "0px" : "env(safe-area-inset-bottom)"})`;
     const hop = "bottom 0.38s cubic-bezier(0.3, 1.45, 0.5, 1)";
-    if (x !== null) return { left: x, bottom, transition: walk ? `${hop}, left ${walk.ms}ms linear` : hop };
+    if (x !== null && y !== null) return { left: x, top: y, transition: walk ? `left ${walk.ms}ms linear, top ${walk.ms}ms linear` : undefined };
     return { [settings.side]: margin, bottom, transition: hop };
-  }, [drag, settings.side, lift, wide, x, walk, margin, toastSpace]);
+  }, [drag, settings.side, lift, wide, x, y, walk, margin, toastSpace]);
   // Out in the middle of the screen, his bubble stays on screen and its point stays on him.
   const bubbleW = Math.min(304, screenW - 24);
   const bubbleLeft = x === null ? null : Math.max(12, Math.min(screenW - 12 - bubbleW, x + DOG_W / 2 - bubbleW / 2));
@@ -586,6 +641,7 @@ export function Nickel() {
                 today={data.today}
                 goals={data.goals ?? []}
                 loans={data.loans ?? []}
+                talksBack={settings.talksBack}
                 onDone={(done) => {
                   setMenu(false);
                   setDoing(false);
@@ -602,7 +658,7 @@ export function Nickel() {
               />
             ) : menu ? (
               <ul className="-mx-1 mt-1 flex flex-col">
-                <MenuItem onClick={() => setDoing(true)}>Tell me what to do</MenuItem>
+                <MenuItem onClick={() => setDoing(true)}>Talk to me</MenuItem>
                 <MenuItem onClick={() => (setMenu(false), act("bark"), say(nextLine()))}>Tell me something</MenuItem>
                 <MenuItem onClick={() => setAsking(true)}>Chat with Claude about my money</MenuItem>
                 <MenuItem onClick={() => (setMenu(false), nickelSettings.napFor(60 * 60_000))}>Nap for an hour</MenuItem>
@@ -791,41 +847,167 @@ function plan(c: Command, loans: { name: string }[]): Plan {
   }
 }
 
+/** What he last decided about a purchase, kept for a few minutes so asking again (or pleading) gets the same answer. */
+let lastVerdict: { verdict: LastVerdict; at: number } | null = null;
+const rememberedVerdict = () => (lastVerdict && Date.now() - lastVerdict.at < 10 * 60_000 ? lastVerdict.verdict : null);
+
+const VERDICT_CHIP: Record<LastVerdict["verdict"], { label: string; className: string }> = {
+  yes: { label: "YES", className: "bg-mint text-mint-ink" },
+  wait: { label: "NOT YET", className: "bg-canary text-canary-ink" },
+  no: { label: "NO", className: "bg-pink text-pink-ink" },
+};
+
 /**
- * "Tell me what to do": Nickel takes an instruction in plain words, reads
- * back what he understood, does it on "Do it", and reports back with Undo.
- * The words are understood right here on the phone (no AI service); when
- * something's missing he asks for just that, or opens the bill form with what
- * he understood filled in.
+ * "Talk to me": say it or type it. Instructions ("add Netflix $15.99 on the
+ * 5th") are read back and done on "yes" or "Do it", with Undo. Questions
+ * ("what's left?", "can I afford a $300 jacket?") are answered from the
+ * household's own numbers. Hearing uses the phone's own speech recognition
+ * and he answers in the phone's own voice: no AI service, no keys, no cost.
  */
-function NickelDo({ today, goals, loans, onDone, onBill, onGoal, onLeave }: { today: string; goals: { name: string }[]; loans: { name: string }[]; onDone: (d: Done) => void; onBill: (draft: Partial<BillDraft>) => void; onGoal: () => void; onLeave: () => void }) {
+function NickelDo({ today, goals, loans, talksBack, onDone, onBill, onGoal, onLeave }: { today: string; goals: { name: string }[]; loans: { name: string }[]; talksBack: boolean; onDone: (d: Done) => void; onBill: (draft: Partial<BillDraft>) => void; onGoal: () => void; onLeave: () => void }) {
   const [text, setText] = useState("");
   const [hint, setHint] = useState<string | null>(null);
-  const [pending, setPending] = useState<{ body: Record<string, unknown>; read: string; form?: Partial<BillDraft> } | null>(null);
+  const [pending, setPending] = useState<{ body: Record<string, unknown>; read: string; form?: Partial<BillDraft>; byVoice: boolean } | null>(null);
   const [busy, setBusy] = useState(false);
+  const [listening, setListening] = useState(false);
+  const [youSaid, setYouSaid] = useState<string | null>(null);
+  const [reply, setReply] = useState<Answer | null>(null);
+  const stop = useRef<() => void>(() => {});
+  const input = useRef<HTMLInputElement>(null);
+  useEffect(() => () => (stop.current(), hush()), []);
 
-  const submit = (e: React.FormEvent) => {
-    e.preventDefault();
-    setPending(null);
-    const command = parseCommand(text, { today, goals: goals.map((g) => g.name), loans: loans.map((l) => l.name) });
-    if (!command) return setHint(`I didn’t catch that. Try “${EXAMPLES[0]}” or “${EXAMPLES[2]}”.`);
-    const next = plan(command, loans);
-    if ("ask" in next) return setHint(next.ask);
-    if (!("body" in next)) return onBill(next.form);
-    setHint(null);
-    setPending(next);
+  /** Says something back: on screen always, out loud too when it was said to him. */
+  const answer = (words: string, byVoice: boolean, then?: () => void) => {
+    if (byVoice && talksBack) speak(words, then);
+    else then?.();
   };
 
-  const run = async () => {
+  const run = async (byVoice: boolean) => {
     if (!pending) return;
     setBusy(true);
     try {
-      onDone(await send<Done>("POST", "/api/nickel/do", pending.body));
+      const done = await send<Done>("POST", "/api/nickel/do", pending.body);
+      answer(`Done! ${done.summary}`, byVoice);
+      onDone(done);
     } catch (err) {
-      setHint(err instanceof Error ? err.message : "That didn’t work. Try again.");
+      const msg = err instanceof Error ? err.message : "That didn’t work. Try again.";
+      setHint(msg);
+      answer(msg, byVoice);
       setPending(null);
       setBusy(false);
     }
+  };
+
+  /** After reading an instruction back out loud, he listens for "yes" or "no". */
+  const hearYesNo = (next: { body: Record<string, unknown>; read: string }) => {
+    if (!canListen()) return;
+    setListening(true);
+    stop.current = listen({
+      onWords: () => {},
+      onDone: (said) => {
+        setListening(false);
+        const yn = yesOrNo(said);
+        if (yn === "yes") void runFor(next, true);
+        else if (yn === "no") {
+          setPending(null);
+          answer("Okay, I won’t.", true);
+        } else setHint("Say “yes” or “no”, or tap a button.");
+      },
+      onError: () => setListening(false),
+    });
+  };
+  // run() reads `pending` from state; when confirming by voice straight after setting it, use the plan directly.
+  const runFor = async (next: { body: Record<string, unknown> }, byVoice: boolean) => {
+    setBusy(true);
+    try {
+      const done = await send<Done>("POST", "/api/nickel/do", next.body);
+      answer(`Done! ${done.summary}`, byVoice);
+      onDone(done);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "That didn’t work. Try again.";
+      setHint(msg);
+      answer(msg, byVoice);
+      setPending(null);
+      setBusy(false);
+    }
+  };
+
+  const handle = async (words: string, byVoice: boolean) => {
+    const said = words.trim();
+    if (!said) return;
+    setYouSaid(said);
+    setReply(null);
+    setHint(null);
+    setPending(null);
+    const command = parseCommand(said, { today, goals: goals.map((g) => g.name), loans: loans.map((l) => l.name) });
+    if (command) {
+      const next = plan(command, loans);
+      if ("ask" in next) {
+        setHint(next.ask);
+        answer(next.ask, byVoice);
+        return;
+      }
+      if (!("body" in next)) return onBill(next.form);
+      setPending({ ...next, byVoice });
+      answer(`Got it. ${next.read} Shall I do it?`, byVoice, () => byVoice && talksBack && hearYesNo(next));
+      return;
+    }
+    // A question: answered from the household's own numbers.
+    setBusy(true);
+    try {
+      const last = rememberedVerdict();
+      const { answer: a } = await getJson<{ answer: Answer | null }>(`/api/nickel/ask?q=${encodeURIComponent(said.slice(0, 300))}${last ? `&last=${encodeURIComponent(JSON.stringify(last))}` : ""}`);
+      if (!a) {
+        const miss = "I didn’t catch that. Ask me what’s left to spend, what’s due, what you’ve spent on something, how a goal is doing, or “can I afford…?”. Or tell me to add a bill or a goal.";
+        setHint(miss);
+        answer("I didn’t catch that. Try asking what’s left to spend, or tell me to add a bill.", byVoice);
+      } else {
+        setReply(a);
+        if (a.verdict) lastVerdict = { verdict: a.verdict, at: Date.now() };
+        answer(a.text, byVoice);
+      }
+    } catch (err) {
+      setHint(err instanceof Error ? err.message : "I couldn’t look that up just now.");
+    } finally {
+      setBusy(false);
+      setText("");
+    }
+  };
+
+  const submit = (e: React.FormEvent) => {
+    e.preventDefault();
+    void handle(text, false);
+  };
+
+  const mic = () => {
+    if (listening) {
+      stop.current();
+      setListening(false);
+      return;
+    }
+    if (!canListen()) {
+      setHint("This browser can’t listen. Tap the box, then the microphone on your keyboard to talk.");
+      input.current?.focus();
+      return;
+    }
+    // This tap is what lets the phone speak and listen.
+    prime();
+    hush();
+    setHint(null);
+    setText("");
+    setListening(true);
+    stop.current = listen({
+      onWords: setText,
+      onDone: (final) => {
+        setListening(false);
+        if (final.trim()) void handle(final, true);
+        else setHint("I didn’t hear anything. Tap the mic and try again.");
+      },
+      onError: (e) => {
+        setListening(false);
+        setHint(e === "not-allowed" ? "I need the microphone. Allow it when your phone asks, or in your phone’s settings for this site." : e === "no-speech" ? "I didn’t hear anything. Tap the mic and try again." : "I couldn’t listen just now. Type it instead.");
+      },
+    });
   };
 
   const chip = "inline-flex min-h-10 items-center rounded-full border border-line px-3 text-small font-bold text-ink-2 active:bg-sunk";
@@ -834,24 +1016,52 @@ function NickelDo({ today, goals, loans, onDone, onBill, onGoal, onLeave }: { to
       <div className="mt-1">
         <p className="text-micro font-extrabold uppercase tracking-wide text-ink-3">Got it</p>
         <p className="mt-1 leading-relaxed">{pending.read}</p>
-        <div className="mt-3 flex flex-wrap gap-2">
-          <button type="button" disabled={busy} onClick={run} className="min-h-11 rounded-full bg-accent px-5 font-bold text-on-accent active:scale-[0.97] disabled:opacity-50">
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <button type="button" disabled={busy} onClick={() => void run(pending.byVoice)} className="min-h-11 rounded-full bg-accent px-5 font-bold text-on-accent active:scale-[0.97] disabled:opacity-50">
             {busy ? "Doing it…" : "Do it"}
           </button>
-          <button type="button" disabled={busy} onClick={() => (pending.form ? onBill(pending.form) : setPending(null))} className={chip}>
+          <button type="button" disabled={busy} onClick={() => (stop.current(), pending.form ? onBill(pending.form) : setPending(null))} className={chip}>
             Change it
           </button>
+          {listening && <span className="text-small font-bold text-accent-text">Listening… say “yes” or “no”</span>}
         </div>
+        {hint && <p className="mt-2 text-ink-2">{hint}</p>}
       </div>
     );
   }
   return (
     <div className="mt-1">
-      <p className="leading-relaxed">What should I add or change? Say it like you’d tell a friend.</p>
+      {reply || youSaid ? (
+        <div className="mb-2.5" aria-live="polite">
+          {youSaid && <p className="text-micro font-bold text-ink-3">You: “{youSaid}”</p>}
+          {reply && (
+            <div className="mt-1">
+              {reply.verdict && <span className={cx("mb-1 inline-block rounded-md px-2 py-0.5 text-micro font-extrabold tracking-wider", VERDICT_CHIP[reply.verdict.verdict].className)}>{VERDICT_CHIP[reply.verdict.verdict].label}</span>}
+              <p className="leading-relaxed">{reply.text}</p>
+              {reply.href && (
+                <Link href={reply.href} onClick={onLeave} className="mt-1.5 inline-flex min-h-10 items-center rounded-full bg-accent-soft px-3.5 text-small font-bold text-accent-text">
+                  {reply.link ?? "Show me"}
+                </Link>
+              )}
+            </div>
+          )}
+        </div>
+      ) : (
+        <p className="leading-relaxed">Tap the mic and talk, or type. Ask what’s left, what’s due, “can I afford…?”, or tell me to add something.</p>
+      )}
       <form onSubmit={submit} className="mt-2 flex gap-2">
-        <Input value={text} onChange={(e) => setText(e.target.value)} autoFocus enterKeyHint="go" maxLength={300} aria-label="What should Nickel do?" placeholder="Add Netflix $15.99 on the 5th" className="min-w-0 flex-1" />
-        <button type="submit" disabled={!text.trim()} className="min-h-12 shrink-0 rounded-control bg-accent px-4 font-bold text-on-accent active:scale-[0.97] disabled:opacity-50">
-          Go
+        <Input ref={input} value={text} onChange={(e) => setText(e.target.value)} enterKeyHint="go" maxLength={300} aria-label="What should Nickel do?" placeholder={listening ? "Listening…" : "Ask or tell me…"} className="min-w-0 flex-1" />
+        <button
+          type="button"
+          onClick={mic}
+          aria-label={listening ? "Stop listening" : "Talk to Nickel"}
+          aria-pressed={listening}
+          className={cx("inline-flex size-12 shrink-0 items-center justify-center rounded-control font-bold active:scale-[0.97]", listening ? "animate-pulse bg-bad text-sheet" : "bg-accent-soft text-accent-text")}
+        >
+          <Mic size={20} aria-hidden />
+        </button>
+        <button type="submit" disabled={busy || !text.trim()} className="min-h-12 shrink-0 rounded-control bg-accent px-3.5 font-bold text-on-accent active:scale-[0.97] disabled:opacity-50">
+          {busy ? "…" : "Go"}
         </button>
       </form>
       {hint && (
@@ -869,11 +1079,11 @@ function NickelDo({ today, goals, loans, onDone, onBill, onGoal, onLeave }: { to
         <button type="button" className={chip} onClick={onGoal}>
           New goal
         </button>
-        <Link href="/debt" onClick={onLeave} className={chip}>
-          Loans
-        </Link>
+        <button type="button" className={chip} onClick={() => void handle("what's left to spend?", false)}>
+          What’s left?
+        </button>
       </div>
-      <p className="mt-2.5 text-micro text-ink-3">Like: {EXAMPLES.slice(1).map((x) => `“${x}”`).join(", ")}. Everything I do shows under Settings, Activity, with Undo.</p>
+      <p className="mt-2.5 text-micro text-ink-3">Like: “{EXAMPLES[1]}”, “can I afford a $300 jacket?”, “when is rent due?”. Changes I make show under Settings, Activity, with Undo.</p>
     </div>
   );
 }

@@ -70,19 +70,26 @@ Smaller things that make it easier to live with:
   goals behind or ahead, payday, streaks); hold him for options; drag him to the other side.
   He points things out and is clear he isn't a financial advisor. His "brain" is rules over your
   own numbers (`src/lib/nickel/brain.ts`), so nothing leaves the app. Hold him for options:
-  - **Tell me what to do**: type it the way you'd say it ("add Netflix $15.99 on the 5th",
+  - **Talk to me**: tap the mic and talk (the phone's own speech recognition, no AI service or cost)
+    or type. He answers out loud in the phone's own voice. Ask everyday questions answered from your
+    numbers ("what's left to spend?", "when is rent due?", "how much did I spend on dining?", "how's
+    my Japan goal?"), or ask about a purchase ("can I afford a $300 jacket?") for a straight yes /
+    not yet / no with the reason; he holds to it when pushed, and only new numbers change it.
+    Or give an instruction the way you'd say it ("add Netflix $15.99 on the 5th",
     "upcoming vet bill $250 next friday", "new goal Japan $4,500 by June", "add $200 to the
     emergency fund", "student loan rate 4.5%", "rename SQ *TARTINE to Tartine"). He understands it
     on the phone with plain rules (`src/lib/nickel/commands.ts`, no AI service), does it, and reports
     back with Undo. If something's missing he asks for just that, or opens the bill form filled in.
   - **Chat with Claude** opens a chat in your own Claude app (on your own Claude plan) with a question
     ready; Claude reads your numbers through the connector below.
-  He also wanders: every so often he trots to a new spot along the bottom of the screen and sniffs
-  around (never while you're touching the screen, while he's talking or asleep, or with "reduce
-  motion" on), and hops up out of the way of messages. He cheers small money tasks (renaming,
+  He also wanders the whole screen: every so often he trots somewhere (along the bottom, up a side,
+  out in the open) and sniffs around, and heads back to his spot as soon as you scroll or tap, so
+  he's never in the way. Never while you're touching the screen, while he's talking or asleep, or
+  with "reduce motion" on; he hops up out of the way of messages. He cheers small money tasks (renaming,
   sorting, adding a bill, cancelling a subscription, making or adding to a goal, setting a limit,
   changing the debt plan) and throws a little party for milestones, cancelled subscriptions and
-  every few chores in a day. Settings: show him, quiet mode, wandering on or off, rename him.
+  every few chores in a day. Settings: show him, quiet mode, wandering on or off, answers out loud,
+  rename him.
 
 ## Connections
 

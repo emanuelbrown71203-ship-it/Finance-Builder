@@ -377,7 +377,7 @@ export function NickelSection() {
         <span aria-hidden className="shrink-0">
           <RoboDog eyes="happy" mouth="smile" antenna="var(--good)" cheeks tongue gaze={{ x: 0, y: 0 }} size={56} />
         </span>
-        <SheetHeader title={`${settings.name}, your robo dog`} hint="He sits in the corner, notices things in your numbers and tells you about them. Tap him to hear what he’s found. Hold him to tell him what to add or change (a bill, an upcoming bill, a goal, a loan) or to chat with Claude. He wanders about, and cheers when you get little money jobs done. Drag him if he’s in the way." />
+        <SheetHeader title={`${settings.name}, your robo dog`} hint="He sits in the corner, notices things in your numbers and tells you about them. Tap him to hear what he’s found. Hold him and pick “Talk to me” to talk or type: ask what’s left, what’s due or “can I afford…?”, or tell him to add a bill or a goal. He gives straight answers and sticks to them. He wanders about, and cheers when you get little money jobs done. Drag him if he’s in the way." />
       </div>
       <div className="divide-y divide-line-soft border-y border-line-soft">
         <div className="flex min-h-14 items-center justify-between gap-4 py-2">
@@ -400,6 +400,13 @@ export function NickelSection() {
             <p className="text-small text-ink-3">Now and then he trots to a new spot along the bottom. Off: he stays put.</p>
           </div>
           <Switch checked={settings.roams} onChange={nickelSettings.setRoams} label="Wanders around" />
+        </div>
+        <div className="flex min-h-14 items-center justify-between gap-4 py-2">
+          <div>
+            <p className="font-bold">Answers out loud</p>
+            <p className="text-small text-ink-3">When you talk to him with the mic, he talks back. Uses your phone’s own voice and speech recognition: no AI service, no cost.</p>
+          </div>
+          <Switch checked={settings.talksBack} onChange={nickelSettings.setTalksBack} label="Answers out loud" />
         </div>
         <NickelName key={settings.name} current={settings.name} />
       </div>
