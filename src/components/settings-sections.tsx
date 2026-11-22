@@ -404,7 +404,7 @@ export function NickelSection() {
         <div className="flex min-h-14 items-center justify-between gap-4 py-2">
           <div>
             <p className="font-bold">Answers out loud</p>
-            <p className="text-small text-ink-3">When you talk to him with the mic, he talks back. Uses your phone’s own voice and speech recognition: no AI service, no cost.</p>
+            <p className="text-small text-ink-3">When you talk to him with the mic, he talks back. Listening uses your phone’s own speech recognition (Apple’s on an iPhone, Google’s in Chrome), and he speaks with a voice on the device. No AI chat service, no cost.</p>
           </div>
           <Switch checked={settings.talksBack} onChange={nickelSettings.setTalksBack} label="Answers out loud" />
         </div>

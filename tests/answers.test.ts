@@ -120,3 +120,41 @@ describe("a straight answer about a purchase, and he holds to it", () => {
   });
 });
 
+
+describe("the things a review caught", () => {
+  it("never takes a bare number for a price, but does count '2 at $45 each'", () => {
+    expect(ask("should I buy a 65 inch tv").text).toMatch(/^How much is it\?/);
+    expect(ask("can I afford an iphone 16 pro").text).toMatch(/^How much is it\?/);
+    expect(ask("can I afford 2 tickets at $45 each").verdict).toMatchObject({ amount: 9_000, item: "tickets" });
+    expect(ask("can I afford a $25,000 car").verdict?.item).toBe("car");
+  });
+
+  it("stays out of investing", () => {
+    for (const q of ["should I buy $500 of bitcoin", "can I afford $300 of an index fund", "is it a good idea to buy stocks"]) {
+      const a = ask(q);
+      expect(a.verdict, q).toBeUndefined();
+      expect(a.text, q).toMatch(/I don’t pick investments: I’m a robot dog, not a financial advisor/);
+    }
+  });
+
+  it("doesn't warn about bills at risk when there's no checking account to go by", () => {
+    const cardsOnly = { ...snap, cash: null };
+    expect((answerQuestion("can I afford a $100 dinner", cardsOnly) as Answer).verdict?.verdict).toBe("yes");
+    expect((answerQuestion("can I afford a $100 dinner", cardsOnly) as Answer).text).not.toMatch(/at risk/);
+  });
+
+  it("answers a real follow-up question instead of treating it as pleading", () => {
+    const first = ask("can I afford a $2,000 couch");
+    expect((answerQuestion("but when is rent due", snap, first.verdict) as Answer).text).toBe("Parkview Apartments ($2,150) is next due on Dec 1.");
+    expect((answerQuestion("please tell me what's due this month", snap, first.verdict) as Answer).text).toMatch(/due the rest of this month/);
+    expect((answerQuestion("but I want it", snap, first.verdict) as Answer).text).toMatch(/^(Still no|I hear you|No again)/);
+  });
+
+  it("gets the smaller questions right", () => {
+    expect(answerQuestion("is netflix worth it", snap)).not.toMatchObject({ text: expect.stringMatching(/net worth/) });
+    expect(ask("when is payday?").text).toBe("Next payday looks like Nov 27, in 6 days.");
+    expect(ask("what bills are due before payday").text).toMatch(/due before payday on Nov 27/);
+    expect(ask("how much did I spend for the month").text).toMatch(/spent so far this month/);
+    expect((answerQuestion("how much did I spend on dining last month", { ...snap, spending: [{ ...snap.spending[0], lastMonth: 41_000 }] }) as Answer).text).toBe("You spent $410 on Restaurants & coffee last month.");
+  });
+});

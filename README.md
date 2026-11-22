@@ -70,7 +70,8 @@ Smaller things that make it easier to live with:
   goals behind or ahead, payday, streaks); hold him for options; drag him to the other side.
   He points things out and is clear he isn't a financial advisor. His "brain" is rules over your
   own numbers (`src/lib/nickel/brain.ts`), so nothing leaves the app. Hold him for options:
-  - **Talk to me**: tap the mic and talk (the phone's own speech recognition, no AI service or cost)
+  - **Talk to me**: tap the mic and talk (the phone's own speech recognition: Apple's on an iPhone,
+    Google's in Chrome; no AI chat service, no cost)
     or type. He answers out loud in the phone's own voice. Ask everyday questions answered from your
     numbers ("what's left to spend?", "when is rent due?", "how much did I spend on dining?", "how's
     my Japan goal?"), or ask about a purchase ("can I afford a $300 jacket?") for a straight yes /

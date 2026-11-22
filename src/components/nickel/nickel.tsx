@@ -270,16 +270,24 @@ export function Nickel() {
     spotRef.current = spot;
   }, [spot]);
   const walkTimer = useRef(0);
-  /** Where his home spot is on screen, measured the last time he set off from it. */
-  const homeAt = useRef<{ x: number; y: number } | null>(null);
+  /** Where his home spot is on screen, measured the last time he set off from it (for this screen size). */
+  const homeAt = useRef<{ x: number; y: number; w: number; h: number } | null>(null);
   const goingHome = useRef(false);
+  const homeTimer = useRef(0);
 
-  /** The area he can roam: below the screen's title bar, above his home line at the bottom, inside the edges. */
+  /**
+   * The area he can roam: below the screen's title bar, above the tab bar, inside the edges, and clear
+   * of the sidebar on a laptop.
+   */
   const bounds = useCallback(() => {
     const margin = wide ? 24 : 10;
     const vw = window.innerWidth;
-    const home = homeAt.current ?? { x: settings.side === "right" ? vw - margin - DOG_W : margin, y: window.innerHeight - (wide ? 20 : 80) - DOG_H - 34 };
-    return { minX: margin, maxX: vw - margin - DOG_W, minY: wide ? 96 : 118, maxY: Math.max(wide ? 96 : 118, home.y), home };
+    const vh = window.innerHeight;
+    const measured = homeAt.current && homeAt.current.w === vw && homeAt.current.h === vh ? homeAt.current : null;
+    const lowest = vh - (wide ? 20 : 80) - DOG_H - 8;
+    const home = measured ?? { x: settings.side === "right" ? vw - margin - DOG_W : margin, y: lowest - 26 };
+    const minX = wide ? 276 : margin;
+    return { minX, maxX: vw - margin - DOG_W, minY: wide ? 96 : 118, maxY: Math.max(wide ? 96 : 118, Math.min(lowest, home.y)), home: { x: home.x, y: Math.min(lowest, home.y) } };
   }, [wide, settings.side]);
 
   /** Trots to a spot anywhere on the screen (null: back home), then does something doggy there. */
@@ -288,7 +296,7 @@ export function Nickel() {
       // Setting off from home: remember exactly where home is, so he can come back to it.
       if (spotRef.current === null) {
         const r = root.current?.getBoundingClientRect();
-        if (r) homeAt.current = { x: r.left, y: r.top };
+        if (r) homeAt.current = { x: r.left, y: r.top, w: window.innerWidth, h: window.innerHeight };
       }
       const b = bounds();
       const from = spotRef.current ?? b.home;
@@ -371,22 +379,22 @@ export function Nickel() {
   // never in the way, the way a dog heads back to its bed when people start moving about.
   useEffect(() => {
     if (!visible) return;
-    let t = 0;
     const outOfTheWay = (e: Event) => {
       const here = spotRef.current;
-      if (here === null || goingHome.current || calm.current.drag) return;
+      // Not while you're talking with him or holding him: he stays put with his bubble.
+      if (here === null || goingHome.current || calm.current.drag || calm.current.bubble || calm.current.menu || press.current) return;
       if (e.type === "pointerdown" && root.current?.contains(e.target as Node)) return;
       const b = bounds();
       if (here.y >= b.maxY - 40) return; // already along the bottom
-      window.clearTimeout(t);
-      t = window.setTimeout(() => trot(null), 250);
+      window.clearTimeout(homeTimer.current);
+      homeTimer.current = window.setTimeout(() => trot(null), 250);
     };
     window.addEventListener("pointerdown", outOfTheWay, { passive: true });
     window.addEventListener("scroll", outOfTheWay, { passive: true });
     return () => {
       window.removeEventListener("pointerdown", outOfTheWay);
       window.removeEventListener("scroll", outOfTheWay);
-      window.clearTimeout(t);
+      window.clearTimeout(homeTimer.current);
     };
   }, [visible, bounds, trot]);
 
@@ -403,6 +411,7 @@ export function Nickel() {
 
   /** Stops where he is (when touched mid-trot). */
   const halt = () => {
+    window.clearTimeout(homeTimer.current);
     if (!walk) return;
     const r = root.current?.getBoundingClientRect();
     window.clearTimeout(walkTimer.current);
@@ -601,8 +610,9 @@ export function Nickel() {
   const bubbleBelow = spot ? spot.y < screenH / 2 - 60 : lift > screenH / 2 - 120;
   const margin = wide ? 24 : 10;
   // Wherever he wandered, re-checked against today's screen width.
-  const x = spot === null ? null : Math.max(margin, Math.min(screenW - margin - DOG_W, spot.x));
-  const y = spot === null ? null : Math.max(0, Math.min(screenH - DOG_H - 8, spot.y));
+  const x = spot === null ? null : Math.max(wide ? 276 : margin, Math.min(screenW - margin - DOG_W, spot.x));
+  // Kept below the title bar and above the tab bar even after the screen turns.
+  const y = spot === null ? null : Math.max(wide ? 96 : 118, Math.min(screenH - (wide ? 20 : 80) - DOG_H - 8, spot.y));
   const sideStyle = useMemo(() => {
     const bottomBase = wide ? 20 : 80;
     if (drag) return { left: drag.x - 38, top: drag.y - 40 };
@@ -873,23 +883,47 @@ function NickelDo({ today, goals, loans, talksBack, onDone, onBill, onGoal, onLe
   const [youSaid, setYouSaid] = useState<string | null>(null);
   const [reply, setReply] = useState<Answer | null>(null);
   const stop = useRef<() => void>(() => {});
+  const quiet = useRef<() => void>(() => {});
   const input = useRef<HTMLInputElement>(null);
-  useEffect(() => () => (stop.current(), hush()), []);
+  /** False once the panel has closed: nothing heard or finished after that does anything. */
+  const alive = useRef(true);
+  /** A change is on its way to the server; a second "yes" or tap doesn't send it again. */
+  const sending = useRef(false);
+  /** The last thing said ("Done! …") may finish after the panel closes. */
+  const letFinish = useRef(false);
+  useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
+      stop.current();
+      quiet.current();
+      if (!letFinish.current) hush();
+    };
+  }, []);
 
   /** Says something back: on screen always, out loud too when it was said to him. */
   const answer = (words: string, byVoice: boolean, then?: () => void) => {
-    if (byVoice && talksBack) speak(words, then);
+    if (byVoice && talksBack) quiet.current = speak(words, () => alive.current && then?.());
     else then?.();
   };
 
-  const run = async (byVoice: boolean) => {
-    if (!pending) return;
+  /** Does a read-back instruction: from the "Do it" button or a spoken "yes". Only ever once. */
+  const doIt = async (body: Record<string, unknown>, byVoice: boolean) => {
+    if (sending.current || !alive.current) return;
+    sending.current = true;
+    stop.current();
+    setListening(false);
     setBusy(true);
     try {
-      const done = await send<Done>("POST", "/api/nickel/do", pending.body);
-      answer(`Done! ${done.summary}`, byVoice);
-      onDone(done);
+      const done = await send<Done>("POST", "/api/nickel/do", body);
+      if (byVoice && talksBack) {
+        letFinish.current = true;
+        speak(`Done! ${done.summary}`);
+      }
+      if (alive.current) onDone(done);
     } catch (err) {
+      sending.current = false;
+      if (!alive.current) return;
       const msg = err instanceof Error ? err.message : "That didn’t work. Try again.";
       setHint(msg);
       answer(msg, byVoice);
@@ -898,38 +932,24 @@ function NickelDo({ today, goals, loans, talksBack, onDone, onBill, onGoal, onLe
     }
   };
 
-  /** After reading an instruction back out loud, he listens for "yes" or "no". */
+  /** After reading an instruction back out loud, he listens for "yes" or "no". Anything unclear does nothing. */
   const hearYesNo = (next: { body: Record<string, unknown>; read: string }) => {
-    if (!canListen()) return;
+    if (!canListen() || !alive.current) return;
     setListening(true);
     stop.current = listen({
       onWords: () => {},
       onDone: (said) => {
+        if (!alive.current) return;
         setListening(false);
         const yn = yesOrNo(said);
-        if (yn === "yes") void runFor(next, true);
+        if (yn === "yes") void doIt(next.body, true);
         else if (yn === "no") {
           setPending(null);
           answer("Okay, I won’t.", true);
         } else setHint("Say “yes” or “no”, or tap a button.");
       },
-      onError: () => setListening(false),
+      onError: () => alive.current && setListening(false),
     });
-  };
-  // run() reads `pending` from state; when confirming by voice straight after setting it, use the plan directly.
-  const runFor = async (next: { body: Record<string, unknown> }, byVoice: boolean) => {
-    setBusy(true);
-    try {
-      const done = await send<Done>("POST", "/api/nickel/do", next.body);
-      answer(`Done! ${done.summary}`, byVoice);
-      onDone(done);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "That didn’t work. Try again.";
-      setHint(msg);
-      answer(msg, byVoice);
-      setPending(null);
-      setBusy(false);
-    }
   };
 
   const handle = async (words: string, byVoice: boolean) => {
@@ -957,6 +977,7 @@ function NickelDo({ today, goals, loans, talksBack, onDone, onBill, onGoal, onLe
     try {
       const last = rememberedVerdict();
       const { answer: a } = await getJson<{ answer: Answer | null }>(`/api/nickel/ask?q=${encodeURIComponent(said.slice(0, 300))}${last ? `&last=${encodeURIComponent(JSON.stringify(last))}` : ""}`);
+      if (!alive.current) return;
       if (!a) {
         const miss = "I didn’t catch that. Ask me what’s left to spend, what’s due, what you’ve spent on something, how a goal is doing, or “can I afford…?”. Or tell me to add a bill or a goal.";
         setHint(miss);
@@ -967,10 +988,12 @@ function NickelDo({ today, goals, loans, talksBack, onDone, onBill, onGoal, onLe
         answer(a.text, byVoice);
       }
     } catch (err) {
-      setHint(err instanceof Error ? err.message : "I couldn’t look that up just now.");
+      if (alive.current) setHint(err instanceof Error ? err.message : "I couldn’t look that up just now.");
     } finally {
-      setBusy(false);
-      setText("");
+      if (alive.current) {
+        setBusy(false);
+        setText("");
+      }
     }
   };
 
@@ -997,13 +1020,15 @@ function NickelDo({ today, goals, loans, talksBack, onDone, onBill, onGoal, onLe
     setText("");
     setListening(true);
     stop.current = listen({
-      onWords: setText,
+      onWords: (w) => alive.current && setText(w),
       onDone: (final) => {
+        if (!alive.current) return;
         setListening(false);
         if (final.trim()) void handle(final, true);
         else setHint("I didn’t hear anything. Tap the mic and try again.");
       },
       onError: (e) => {
+        if (!alive.current) return;
         setListening(false);
         setHint(e === "not-allowed" ? "I need the microphone. Allow it when your phone asks, or in your phone’s settings for this site." : e === "no-speech" ? "I didn’t hear anything. Tap the mic and try again." : "I couldn’t listen just now. Type it instead.");
       },
@@ -1017,7 +1042,7 @@ function NickelDo({ today, goals, loans, talksBack, onDone, onBill, onGoal, onLe
         <p className="text-micro font-extrabold uppercase tracking-wide text-ink-3">Got it</p>
         <p className="mt-1 leading-relaxed">{pending.read}</p>
         <div className="mt-3 flex flex-wrap items-center gap-2">
-          <button type="button" disabled={busy} onClick={() => void run(pending.byVoice)} className="min-h-11 rounded-full bg-accent px-5 font-bold text-on-accent active:scale-[0.97] disabled:opacity-50">
+          <button type="button" disabled={busy} onClick={() => void doIt(pending.body, pending.byVoice)} className="min-h-11 rounded-full bg-accent px-5 font-bold text-on-accent active:scale-[0.97] disabled:opacity-50">
             {busy ? "Doing it…" : "Do it"}
           </button>
           <button type="button" disabled={busy} onClick={() => (stop.current(), pending.form ? onBill(pending.form) : setPending(null))} className={chip}>

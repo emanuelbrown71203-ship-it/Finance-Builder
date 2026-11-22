@@ -91,13 +91,18 @@ export async function askNickel(ctx: Ctx, question: string, last: LastVerdict | 
     daysLeft: overview.plan.daysLeft,
     incomeReceived: overview.plan.incomeReceived,
     incomeExpected: overview.plan.incomeExpected,
-    bills: recurring.series.filter((s) => s.kind !== "income").map((s) => ({ name: s.name, nextDate: s.nextDate, amount: s.amount, active: s.active, category: s.category })),
-    spending: budget.rows.map((r) => ({ category: r.category, label: category(r.category).label, spent: r.spent, limit: r.limit })),
+    // Repeating bills, plus card payments that are coming due.
+    bills: [
+      ...recurring.series.filter((s) => s.kind !== "income").map((s) => ({ name: s.name, nextDate: s.nextDate, amount: s.amount, active: s.active, category: s.category })),
+      ...recurring.upcoming.filter((u) => u.kind === "card").map((u) => ({ name: u.name, nextDate: u.date, amount: u.amount, active: true, category: "card" })),
+    ],
+    spending: budget.rows.map((r) => ({ category: r.category, label: category(r.category).label, spent: r.spent, limit: r.limit, lastMonth: r.lastMonth })),
     goals: goals.goals.map((g) => ({ id: g.id, name: g.name, saved: g.saved, target: g.target, status: g.status, perMonth: g.perMonth, targetDate: g.targetDate, projectedDate: g.projectedDate })),
     netWorth: overview.netWorth.net,
     netWorthChange: overview.netWorth.change,
     latest: latest ? { name: latest.name, amount: latest.amount, date: latest.date } : null,
-    cash: all.filter((a) => a.type === "depository" && a.subtype !== "savings").reduce((sum, a) => sum + a.balance, 0),
+    // Only checking counts as what bills come out of (not savings, CDs or HSAs). None linked: no cash test.
+    cash: all.some((a) => a.type === "depository" && a.subtype === "checking") ? all.filter((a) => a.type === "depository" && a.subtype === "checking").reduce((sum, a) => sum + a.balance, 0) : null,
     savings: all.filter((a) => a.type === "depository" && a.subtype === "savings").reduce((sum, a) => sum + a.balance, 0),
     nextPayday: paydays[0] ?? null,
     priciestDebt: debts[0] ? { name: debts[0].name, apr: debts[0].aprPercent! } : null,
@@ -106,7 +111,9 @@ export async function askNickel(ctx: Ctx, question: string, last: LastVerdict | 
   if (!answer || !("merchant" in answer)) return answer;
   // Spending at a place: add up this month's charges there.
   const found = await getTransactions(ctx, { q: answer.merchant.slice(0, 60), month, flow: "out", limit: 200, offset: 0 });
-  const charges = found.transactions.filter((t) => t.category !== "transfer");
+  // Whole words only: "ross" is Ross, not Crossfit.
+  const word = new RegExp(`\\b${answer.merchant.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i");
+  const charges = found.transactions.filter((t) => t.category !== "transfer" && (word.test(t.name) || word.test(t.bankName) || word.test(t.rawName ?? "")));
   if (charges.length === 0) return { text: `Nothing at “${answer.merchant.slice(0, 40)}” this month.`, href: "/transactions", link: "See transactions" };
   const spent = charges.reduce((sum, t) => sum - t.amount, 0);
   return {

@@ -20,13 +20,13 @@ export type Snapshot = {
   /** Bills and subscriptions that repeat (or were added by hand), with when each is next due. */
   bills: { name: string; nextDate: ISODate; amount: number; active: boolean; category: string }[];
   /** This month's spending by category. */
-  spending: { category: string; label: string; spent: number; limit: number | null }[];
+  spending: { category: string; label: string; spent: number; limit: number | null; lastMonth?: number }[];
   goals: { id: string; name: string; saved: number; target: number; status: string; perMonth: number | null; targetDate: ISODate | null; projectedDate: ISODate | null }[];
   netWorth: number;
   netWorthChange: number;
   latest: { name: string; amount: number; date: ISODate } | null;
-  /** Money in checking (what bills come out of), and in savings. */
-  cash: number;
+  /** Money in checking (what bills come out of), or null when there's no checking account to go by. */
+  cash: number | null;
   savings: number;
   nextPayday: ISODate | null;
   priciestDebt: { name: string; apr: number } | null;
@@ -102,22 +102,46 @@ function goalLine(g: Snapshot["goals"][number]): string {
 
 /* ---------- straight answers about a purchase ---------- */
 
-/** "$1,200", "1200 dollars", "1.2k", "25k" in what was said, in cents. */
-function amountIn(q: string): number | null {
-  const m = /\$\s?(\d[\d,]*(?:\.\d{1,2})?)\s?(k)?\b/i.exec(q) ?? /\b(\d[\d,]*(?:\.\d{1,2})?)\s?(k|grand|thousand)?\s*(?:dollars|bucks)\b/i.exec(q) ?? /\b(\d[\d,]*(?:\.\d{1,2})?)(k)\b/i.exec(q) ?? /\b(\d{2,}[\d,]*(?:\.\d{1,2})?)\b/.exec(q);
+/**
+ * A price in what was said, in cents: "$1,200", "1200 dollars", "1.2k", "25k", "2 tickets at $45 each".
+ * A bare number ("a 65 inch TV", "iPhone 16") is never taken for a price, except as a follow-up
+ * ("what about 300?") when `bare` is set.
+ */
+function amountIn(q: string, bare = false): number | null {
+  const each = /\b(\d{1,2})\s+[a-z]+\s+(?:at|for)\s+\$\s?(\d[\d,]*(?:\.\d{1,2})?)\s*(?:each|apiece|a piece)\b/i.exec(q);
+  if (each) return Math.round(Number(each[1]) * Number(each[2].replace(/,/g, "")) * 100);
+  const m =
+    /\$\s?(\d[\d,]*(?:\.\d{1,2})?)\s?(k)?\b/i.exec(q) ??
+    /\b(\d[\d,]*(?:\.\d{1,2})?)\s?(k|grand|thousand)?\s*(?:dollars|bucks)\b/i.exec(q) ??
+    /\b(\d[\d,]*(?:\.\d{1,2})?)(k|grand)\b/i.exec(q) ??
+    (bare ? /\b(\d{2,}[\d,]*(?:\.\d{1,2})?)\b/.exec(q) : null);
   if (!m) return null;
   const n = Number(m[1].replace(/,/g, "")) * (m[2] ? 1000 : 1);
   return Number.isFinite(n) && n > 0 && n < 10_000_000 ? Math.round(n * 100) : null;
 }
 
+/** Investing: he doesn't give verdicts on stocks, funds or crypto. */
+const INVESTING = /\b(stocks?|shares?|bitcoin|btc|crypto|ethereum|eth|etfs?|index funds?|mutual funds?|invest|investing|investment|options|nfts?|bonds?|gold|forex|day trad\w*)\b/;
+
 const PURCHASE = /\b(can i afford|afford|should i (buy|get|spend|order|book|splurge)|is it (ok|okay|fine|smart|wise|a good idea) to (buy|spend|get|book)|thinking (of|about) (buying|getting|booking)|i want to (buy|get|book)|worth (buying|getting)|ok to spend|okay to spend|good idea to (buy|get|spend))\b/;
 const PUSHBACK = /\b(but|please|come on|are you sure|really|just this once|i want it|i need it|on sale|i deserve|treat myself|it'?s fine|trust me|change your mind|reconsider|you'?re wrong|why not|pretty please|i promise|it'?s worth it|i'?ll be fine|let me|seriously)\b/;
 
+const ITEM_STOP = new Set(["on", "for", "at", "in", "this", "next", "today", "tomorrow", "right", "now", "by", "before", "after", "with", "from", "if", "or", "and", "to", "each", "apiece", "off", "until", "when", "because"]);
+const ITEM_SKIP = new Set(["a", "an", "the", "some", "this", "that", "those", "these", "my", "new", "it"]);
+
+/** What's being bought: the few words after "buy" / "afford", without prices, dates or filler. */
 function itemIn(q: string): string {
-  const cleaned = q.replace(/\$\s?\d[\d,]*(?:\.\d{1,2})?\s?k?|\b\d[\d,]*(?:\.\d{1,2})?\s?(?:k|grand|thousand)?\s*(?:dollars|bucks)?\b/gi, " ").replace(/\s+/g, " ");
-  const m = /(?:afford|buy|get|order|book|spend on|buying|getting|booking|splurge on)\s+(?:a|an|the|some|this|that|those|these|my|new)?\s*(.+?)(?:\s+(?:right now|now|today|this month|this week|for|at|on|off)\b.*)?$/.exec(cleaned);
-  const item = (m?.[1] ?? "").replace(/^(a|an|the|some|new)\s+/, "").replace(/\b(it|that|this)\b/g, "").trim();
-  return item.slice(0, 40);
+  const cleaned = q.replace(/\$\s?\d[\d,]*(?:\.\d{1,2})?\s?k?|\b\d[\d,]*(?:\.\d{1,2})?\s?(?:k|grand|thousand)?\s*(?:dollars|bucks)\b/gi, " ").replace(/\s+/g, " ");
+  const m = /\b(?:afford|buy|get|order|book|spend on|buying|getting|booking|splurge on)\b\s*(.*)$/.exec(cleaned);
+  const words: string[] = [];
+  for (const w of (m?.[1] ?? "").split(" ").filter(Boolean)) {
+    if (ITEM_STOP.has(w) && words.length > 0) break;
+    // Prices and amounts aren't part of the name ("25 000 car" is a car).
+    if (ITEM_SKIP.has(w) || ITEM_STOP.has(w) || /^\d[\d.]*k?$/.test(w) || /^(grand|thousand|dollars?|bucks)$/.test(w)) continue;
+    words.push(w);
+    if (words.length === 4) break;
+  }
+  return words.join(" ").slice(0, 40);
 }
 
 /**
@@ -128,7 +152,8 @@ function itemIn(q: string): string {
 export function judgePurchase(amount: number, item: string, s: Snapshot): { verdict: Verdict; reason: string } {
   const what = item ? `the ${item}` : "that";
   const due = s.bills.filter((b) => b.active && b.nextDate >= s.today && b.nextDate <= (s.nextPayday ?? s.today.slice(0, 8) + "31")).reduce((sum, b) => sum + Math.abs(b.amount), 0);
-  const cashAfter = s.cash - amount - due;
+  // Without a checking account to go by (cards only, or none linked) there's no cash test, only the month's plan.
+  const cashAfter = s.cash === null ? Infinity : s.cash - amount - due;
   const after = s.leftToSpend - amount;
   const days = Math.max(1, s.daysLeft);
   if (cashAfter < 0) {
@@ -166,15 +191,16 @@ export function answerQuestion(question: string, s: Snapshot, last?: LastVerdict
   const q = plain(question);
   if (!q) return null;
 
+  const seed = `${q}:${s.today}`;
+  // Investing: no verdicts on stocks, funds or crypto, ever.
+  if (INVESTING.test(q) && (PURCHASE.test(q) || /\b(should i|is it|good idea|worth)\b/.test(q))) {
+    return { text: `That’s investing, and I don’t pick investments: I’m a robot dog, not a financial advisor. What I can tell you: after bills and goals there’s ${money(s.leftToSpend)} left this month.`, href: "/investing", link: "See investing" };
+  }
   // A purchase: a straight answer from the numbers, and he holds to it unless the numbers change.
-  const amount = amountIn(question);
-  if (PURCHASE.test(q) || (last && (PUSHBACK.test(q) || /\b(what about|how about|and if|if it'?s|if it was|only)\b/.test(q)))) {
-    const seed = `${q}:${s.today}`;
-    if (amount === null && last && PUSHBACK.test(q)) {
-      const { verdict, reason } = judgePurchase(last.amount, last.item, s);
-      return { text: `${pick(HOLDING[verdict], seed)} ${reason}`, verdict: { ...last, verdict }, href: "/", link: "See the month" };
-    }
-    if (amount === null && !last) return { text: "How much is it? Ask me like “can I afford a $300 jacket?”" };
+  const followUp = last !== null && last !== undefined && /\b(what about|how about|and if|if it'?s|if it was|what if)\b/.test(q);
+  if (PURCHASE.test(q) || followUp) {
+    const amount = amountIn(question, followUp);
+    if (amount === null && !followUp) return { text: "How much is it? Ask me like “can I afford a $300 jacket?”" };
     if (amount !== null) {
       const item = itemIn(q) || last?.item || "";
       const { verdict, reason } = judgePurchase(amount, item, s);
@@ -191,8 +217,8 @@ export function answerQuestion(question: string, s: Snapshot, last?: LastVerdict
     return { text: "I’m a robot dog who reads your numbers. Ask me what’s left to spend, what bills are coming up, what you’ve spent on something, or how a goal is doing. Or tell me to add a bill or a goal. I’m not a financial advisor, just a very good boy." };
   }
 
-  // Net worth.
-  if (/\bnet worth\b|\bworth\b/.test(q)) {
+  // Net worth ("is Netflix worth it" isn't about net worth).
+  if (/\bnet worth\b|\bwhat am i worth\b|\bhow much am i worth\b/.test(q)) {
     const change = s.netWorthChange === 0 ? "" : `, ${s.netWorthChange > 0 ? "up" : "down"} ${money(s.netWorthChange)} over the last 30 days`;
     return { text: `Your net worth is ${s.netWorth < 0 ? "−" : ""}${money(s.netWorth)}${change}.`, href: "/net-worth", link: "See net worth" };
   }
@@ -203,8 +229,15 @@ export function answerQuestion(question: string, s: Snapshot, last?: LastVerdict
     return { text: `The latest is ${money(s.latest.amount)} ${s.latest.amount < 0 ? "at" : "from"} ${s.latest.name} on ${formatShort(s.latest.date)}.`, href: "/transactions", link: "See transactions" };
   }
 
+  // Payday.
+  if (/\b(when'?s|when is|next) (my )?(payday|pay day|paycheck|pay check)\b|\bwhen do i (next )?get paid\b/.test(q)) {
+    if (!s.nextPayday) return { text: "I can’t see a regular paycheck yet, so I don’t know when payday is." };
+    const days = diffDays(s.nextPayday, s.today);
+    return { text: `Next payday looks like ${days === 0 ? "today" : days === 1 ? "tomorrow" : `${formatShort(s.nextPayday)}, in ${days} days`}.`, href: "/", link: "See the month" };
+  }
+
   // Money in.
-  if (/\b(paycheck|pay check|salary|income|payday|get paid|got paid|money in)\b/.test(q)) {
+  if (/\b(paycheck|pay check|salary|income|get paid|got paid|money in)\b/.test(q) && !/\bbefore\b/.test(q)) {
     return { text: `${money(s.incomeReceived)} has come in this month, of about ${money(s.incomeExpected)} expected.`, href: "/", link: "See the month" };
   }
 
@@ -230,14 +263,16 @@ export function answerQuestion(question: string, s: Snapshot, last?: LastVerdict
   if (spendQ) {
     const cat = Object.entries(CATEGORY_WORDS).find(([, words]) => words.some((w) => ` ${q} `.includes(` ${w} `)));
     const row = cat ? s.spending.find((r) => r.category === cat[0]) : undefined;
+    const lastMonth = /\blast month\b/.test(q);
     if (cat) {
       const label = row?.label ?? cat[0];
+      if (lastMonth) return { text: `You spent ${money(row?.lastMonth ?? 0)} on ${label} last month.`, href: `/transactions?category=${cat[0]}`, link: "See them" };
       const spent = row?.spent ?? 0;
       const limit = row?.limit ? ` of your ${money(row.limit)} limit` : "";
       return { text: `You’ve spent ${money(spent)} on ${label} this month${limit}.`, href: `/transactions?category=${cat[0]}`, link: "See them" };
     }
-    const place = /\b(?:at|on|for)\s+(.+?)(?:\s+(?:this|last)\s+(?:month|week))?$/.exec(q);
-    if (place && place[1].length >= 2) return { merchant: place[1] };
+    const place = /\b(?:at|on)\s+(.+?)(?:\s+(?:this|last)\s+(?:month|week|year))?$/.exec(q);
+    if (place && place[1].length >= 2 && !/^(the )?(month|week|year|today|average|total)$/.test(place[1])) return { merchant: place[1] };
     const total = s.spending.reduce((sum, r) => sum + r.spent, 0);
     return { text: `${money(total)} spent so far this month, not counting transfers.`, href: "/budget", link: "See budget" };
   }
@@ -252,14 +287,21 @@ export function answerQuestion(question: string, s: Snapshot, last?: LastVerdict
     return { text: `${bill.name} (${money(bill.amount)}) is next due ${when}.`, href: "/bills", link: "See bills" };
   }
   if (/\b(bills?|due|coming up|upcoming|subscriptions?|payments? coming)\b/.test(q)) {
-    const until = /\bthis month\b/.test(q) ? monthEnd(monthOf(s.today)) : /\btoday\b/.test(q) ? s.today : null;
+    const until = /\bbefore payday\b/.test(q) && s.nextPayday ? s.nextPayday : /\bthis month\b/.test(q) ? monthEnd(monthOf(s.today)) : /\btoday\b/.test(q) ? s.today : null;
     const limitDays = until ? diffDays(until, s.today) : 7;
     const soon = s.bills.filter((b) => b.active && diffDays(b.nextDate, s.today) >= 0 && diffDays(b.nextDate, s.today) <= limitDays).sort((a, b) => (a.nextDate < b.nextDate ? -1 : 1));
-    const span = until ? (until === s.today ? "today" : "the rest of this month") : "the next week";
+    const span = until ? (until === s.today ? "today" : until === s.nextPayday ? `before payday on ${formatShort(until)}` : "the rest of this month") : "the next week";
     if (soon.length === 0) return { text: `Nothing due ${span}. *relaxed tail wag*`, href: "/bills", link: "See bills" };
     const list = soon.slice(0, 4).map((b) => `${b.name} ${money(b.amount)} ${diffDays(b.nextDate, s.today) === 0 ? "today" : formatShort(b.nextDate)}`);
     const total = soon.reduce((sum, b) => sum + Math.abs(b.amount), 0);
     return { text: `${soon.length} due ${span}, ${money(total)} in all: ${list.join(", ")}${soon.length > 4 ? ", and more" : ""}.`, href: "/bills", link: "See bills" };
+  }
+
+  // Pushing back on a purchase answer, and nothing else was asked: he holds his ground.
+  if (last && PUSHBACK.test(q)) {
+    const { verdict, reason } = judgePurchase(last.amount, last.item, s);
+    if (verdict !== last.verdict) return { text: `The numbers have moved since I last looked. ${pick(OPENERS[verdict], seed)} ${reason}`, verdict: { ...last, verdict }, href: "/", link: "See the month" };
+    return { text: `${pick(HOLDING[verdict], seed)} ${reason}`, verdict: { ...last, verdict }, href: "/", link: "See the month" };
   }
 
   if (/\bbudget\b/.test(q)) {
