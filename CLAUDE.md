@@ -54,6 +54,14 @@ for it to be remembered and used whenever an app is built.
 - **The app has five places** (`src/components/nav.tsx`): Home, Spending, Bills, Wealth, You. No "More"
   menu. A new screen joins a place (as a tab under its title, or a row on You), and Home stays short.
 - Bank access tokens are stored encrypted. The app can read accounts and can never move money.
+- **Apple Card comes in from its statements** (Apple shares it only with App Store apps, so Plaid can't
+  link it on the web). `src/lib/finance/card-import.ts` reads Wallet's CSV export, and only Apple's own
+  columns (OFX is refused: no categories, different dates); `src/server/card-import.ts` keeps it as a
+  card account with no bank connection (`item_id` null, `plaid_account_id` "import:apple-card:<person>").
+  Each cleared purchase is keyed by the day it was made, the day it cleared, its amount and its place
+  among identical ones, so a statement brought in twice adds nothing. An import shows what's new before
+  saving, asks what the card owes, and has Undo. The sample household uses a made-up statement, never
+  the person's file.
 - **Nickel (the robo dog) points things out** from the person's own numbers, and never gives
   investment advice (no stock, fund or crypto picks); he says he isn't a financial advisor. His wording
   lives in `src/lib/nickel/brain.ts` and tests check for advice-like phrasing.

@@ -12,6 +12,7 @@ import { FREQUENCY_LABEL, detectRecurring, monthlyEquivalent, seriesKeyFor, upco
 import { cancelHelp, isKnownSubscription } from "@/lib/finance/subscriptions";
 import type { Namer } from "@/lib/finance/names";
 import { HttpError } from "./errors";
+import { appleCardSummary } from "./card-import";
 import { bankMatch, listManualBills, manualSeries } from "./manual-bills";
 import { bankNames, loadNamer } from "./names";
 import type {
@@ -65,7 +66,7 @@ async function listAccounts(ctx: Ctx): Promise<AccountView[]> {
 }
 
 export async function getAccounts(ctx: Ctx): Promise<AccountsPayload> {
-  const [all, itemRows] = await Promise.all([listAccounts(ctx), ctx.db.select().from(items).where(eq(items.userId, ctx.userId)).orderBy(asc(items.institutionName))]);
+  const [all, itemRows, appleCard] = await Promise.all([listAccounts(ctx), ctx.db.select().from(items).where(eq(items.userId, ctx.userId)).orderBy(asc(items.institutionName)), appleCardSummary(ctx)]);
   return {
     institutions: itemRows.map((i) => ({
       id: i.id,
@@ -75,7 +76,8 @@ export async function getAccounts(ctx: Ctx): Promise<AccountsPayload> {
       lastSyncedAt: i.lastSyncedAt?.toISOString() ?? null,
       accounts: all.filter((a) => a.itemId === i.id),
     })),
-    manual: all.filter((a) => a.itemId === null),
+    manual: all.filter((a) => a.itemId === null && a.id !== appleCard?.accountId),
+    appleCard,
   };
 }
 

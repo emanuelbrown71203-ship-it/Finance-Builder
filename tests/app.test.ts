@@ -6,7 +6,8 @@ import type { Ctx } from "@/server/auth";
 import { budgetState, deleteDeposit, setBudget, setBudgets, setDebtPlan, setDebtSettings, setRecurringOverride, setRollover, updateGoal, updateTransaction } from "@/server/mutations";
 import { loadRules } from "@/server/rules";
 import { countUnclear, createNameRule, deleteNameRule, getNames, previewNameRule, renameRule, restoreNameRule } from "@/server/names";
-import { budgets as budgetsTable, transactions as transactionsTable } from "@/db/schema";
+import { budgets as budgetsTable, categoryRules as categoryRulesTable, playerWins as playerWinsTable, transactions as transactionsTable } from "@/db/schema";
+import { importAppleCard, previewAppleCard, undoAppleCardImport } from "@/server/card-import";
 import { and, eq as eqOp } from "drizzle-orm";
 import { addBill, addGoal, addToGoal, changeGoal, changeLoan, findCharge, findDebt, findGoal, listActivity, renameCharges, undoActivity } from "@/server/actions";
 import { bankMatch, createManualBill, deleteManualBill, manualSeries, nextDue, restoreManualBill, updateManualBill } from "@/server/manual-bills";
@@ -844,5 +845,109 @@ describe("asking Nickel", () => {
     const pushed = await askNickel(ctx, "but I really want it", verdict!.verdict!);
     expect(pushed?.verdict?.verdict).toBe("no");
     expect(await askNickel(ctx, "what's the weather like")).toBeNull();
+  });
+});
+
+describe("Apple Card, brought in from its statements", () => {
+  // Made-up purchases in the columns of Apple Card's "Export Transactions" spreadsheet.
+  const statement = [
+    "Transaction Date,Clearing Date,Description,Merchant,Category,Type,Amount (USD),Purchased By",
+    "11/03/2026,11/04/2026,BLUE BOTTLE COFFEE OAKLAND CA,Blue Bottle Coffee,Restaurants,Purchase,6.50,Sam Sample",
+    "11/03/2026,11/04/2026,BLUE BOTTLE COFFEE OAKLAND CA,Blue Bottle Coffee,Restaurants,Purchase,6.50,Sam Sample",
+    "11/05/2026,11/06/2026,GREEN GROCER 44,Green Grocer,Grocery,Purchase,84.12,Sam Sample",
+    "11/10/2026,11/10/2026,ACH DEPOSIT INTERNET TRANSFER,Ach Deposit Internet Transfer,Payment,Payment,-500.00,Sam Sample",
+    "11/12/2026,11/12/2026,PIXEL TOYS 9,Pixel Toys,Shopping,Purchase,40.00,Sam Sample",
+    "11/18/2026,,CORNER SHOP,Corner Shop,Shopping,Purchase,3.00,Sam Sample",
+  ].join("\n");
+  // The owner with real data: in the sample household a made-up statement is used instead (tested below).
+  const real = (): Ctx => ({ ...ctx, demo: false });
+  const wins = () => db.select({ ref: playerWinsTable.ref }).from(playerWinsTable).where(and(eqOp(playerWinsTable.userId, DEMO_USER_ID), eqOp(playerWinsTable.kind, "import")));
+
+  it("brings a statement in as a card account: cleared purchases only, sorted, with what's owed", async () => {
+    const spentBefore = (await getBudget(real(), "2026-11")).totalSpent;
+    const preview = await previewAppleCard(real(), statement);
+    // The purchase that hasn't cleared waits for the next statement; with no balance to start from, the person types it.
+    expect(preview).toMatchObject({ from: "2026-11-03", to: "2026-11-12", total: 5, fresh: 5, already: 0, pending: 1, owedNow: null, suggestedOwed: null, sample: false });
+
+    const done = await importAppleCard(real(), statement, 61_234);
+    expect(done).toMatchObject({ added: 5, skipped: 0, from: "2026-11-03", to: "2026-11-12", previousOwed: null, owed: 61_234, earned: true });
+    const accounts = await getAccounts(real());
+    expect(accounts.appleCard).toMatchObject({ accountId: done.accountId, owed: 61_234, transactions: 5, lastDate: "2026-11-12" });
+    // It's a card, not something tracked by hand.
+    expect(accounts.manual.map((a) => a.name)).not.toContain("Apple Card");
+    const { transactions: rows } = await getTransactions(real(), { accountId: done.accountId, limit: 100, offset: 0 });
+    expect(rows.map((t) => [t.name, t.amount, t.category]).sort()).toEqual(
+      [
+        ["Ach Deposit Internet Transfer", 50_000, "transfer"],
+        ["Blue Bottle Coffee", -650, "dining"],
+        ["Blue Bottle Coffee", -650, "dining"],
+        ["Green Grocer", -8_412, "groceries"],
+        ["Pixel Toys", -4_000, "shopping"],
+      ].sort(),
+    );
+    // Its purchases count in the month's everyday spending; paying the card off doesn't.
+    expect((await getBudget(real(), "2026-11")).totalSpent).toBe(spentBefore + 650 + 650 + 8_412 + 4_000);
+    // And what it owes counts as a debt in net worth.
+    expect((await getNetWorth(real(), "6m")).accounts.find((a) => a.id === done.accountId)?.balance).toBe(-61_234);
+    expect((await wins()).map((w) => w.ref)).toEqual([`${done.accountId}:2026-11-12`]);
+  });
+
+  it("brings the same month in twice without doubling anything; its Undo leaves the first import's XP alone", async () => {
+    expect(await previewAppleCard(real(), statement)).toMatchObject({ fresh: 0, already: 5, owedNow: 61_234, suggestedOwed: 61_234 });
+    const again = await importAppleCard(real(), statement, 60_000);
+    expect(again).toMatchObject({ added: 0, skipped: 5, previousOwed: 61_234, earned: false });
+    expect((await getAccounts(real())).appleCard).toMatchObject({ owed: 60_000, transactions: 5 });
+    await undoAppleCardImport(real(), again);
+    expect((await getAccounts(real())).appleCard).toMatchObject({ owed: 61_234, transactions: 5 });
+    expect(await wins()).toHaveLength(1);
+  });
+
+  it("sorts a merchant the way the person always sorts it, and Undo takes out exactly one import", async () => {
+    const card = (await getAccounts(real())).appleCard!;
+    await db.insert(categoryRulesTable).values({ id: "rule-apple-test", userId: DEMO_USER_ID, merchantKey: "corner bakery", category: "groceries" });
+    const next = statement.split("\n")[0] + "\n12/02/2026,12/03/2026,CORNER BAKERY 12,Corner Bakery,Restaurants,Purchase,9.25,Sam Sample";
+    // The last balance plus the new charge.
+    expect((await previewAppleCard(real(), next)).suggestedOwed).toBe(62_159);
+    const done = await importAppleCard(real(), next, 62_159);
+    expect(done).toMatchObject({ added: 1, earned: true });
+    const bakery = (await getTransactions(real(), { accountId: card.accountId, limit: 100, offset: 0 })).transactions.find((t) => t.name === "Corner Bakery");
+    expect(bakery?.category).toBe("groceries");
+
+    await undoAppleCardImport(real(), done);
+    expect((await getAccounts(real())).appleCard).toMatchObject({ owed: 61_234, transactions: 5, lastDate: "2026-11-12" });
+    expect(await wins()).toHaveLength(1);
+    await db.delete(categoryRulesTable).where(eqOp(categoryRulesTable.id, "rule-apple-test"));
+  });
+
+  it("a stale Undo leaves a balance that has changed since alone", async () => {
+    const next = statement.split("\n")[0] + "\n12/04/2026,12/05/2026,PIXEL TOYS 9,Pixel Toys,Shopping,Purchase,5.00,Sam Sample";
+    const done = await importAppleCard(real(), next, 61_734);
+    // Changed by hand afterwards, on the Net worth screen.
+    await importAppleCard(real(), next, 70_000);
+    await undoAppleCardImport(real(), done);
+    expect((await getAccounts(real())).appleCard).toMatchObject({ owed: 70_000, transactions: 5 });
+  });
+
+  it("uses a made-up statement in the sample household, so nobody's real purchases land in it", async () => {
+    const preview = await previewAppleCard(ctx, statement);
+    expect(preview).toMatchObject({ sample: true, total: 8, from: "2026-10-02", to: "2026-10-24" });
+  });
+
+  it("says plainly when a file isn't an Apple Card statement, and never touches anyone else's card", async () => {
+    await expect(previewAppleCard(real(), "name,amount\nCoffee,3")).rejects.toMatchObject({ status: 400 });
+    const stranger: Ctx = { ...ctx, userId: "someone-else", user: { id: "someone-else", name: "Pat", email: "pat@example.com" }, demo: false };
+    expect(await previewAppleCard(stranger, statement)).toMatchObject({ fresh: 5, owedNow: null });
+    const card = (await getAccounts(real())).appleCard!;
+    const rows = await db.select({ createdAt: transactionsTable.createdAt }).from(transactionsTable).where(eqOp(transactionsTable.accountId, card.accountId)).limit(1);
+    await undoAppleCardImport(stranger, { batch: rows[0].createdAt.toISOString(), to: "2026-11-12", previousOwed: null, owed: 0, earned: true });
+    expect((await getAccounts(real())).appleCard).toMatchObject({ transactions: 5 });
+  });
+
+  it("Undo of the first statement takes Apple Card away again", async () => {
+    const card = (await getAccounts(real())).appleCard!;
+    const rows = await db.select({ createdAt: transactionsTable.createdAt }).from(transactionsTable).where(eqOp(transactionsTable.accountId, card.accountId)).limit(1);
+    await undoAppleCardImport(real(), { batch: rows[0].createdAt.toISOString(), to: "2026-11-12", previousOwed: null, owed: card.owed, earned: true });
+    expect((await getAccounts(real())).appleCard).toBeNull();
+    expect(await wins()).toHaveLength(0);
   });
 });

@@ -79,6 +79,12 @@ Smaller things that make it easier to live with:
   bills, remembered categories and the Tasks for Two link keep matching.
 - **Subscription help.** A warning before a yearly charge renews, a note when a known service charges
   for the first time, and where to go to cancel.
+- **Apple Card from its statements.** Apple shares Apple Card only with App Store apps, so it can't
+  be linked through Plaid on the web. Instead, on You → Accounts, pick the statement exported from
+  Wallet (Apple Card → Card Balance → a statement → Export Transactions → CSV). Passbook shows
+  what's new before saving, asks what the card owes now, and brings it in as a card account with Undo.
+  Bringing the same month in twice adds nothing. Purchases count in budgets; paying the card off is a
+  transfer.
 - **A little celebration** when a savings goal is reached (it can be switched off).
 - **Small wins add up, like a game.** Sorting a charge, giving bank code a clear name, adding a bill,
   cancelling a subscription, setting a budget limit, putting money toward a goal, a goal passing

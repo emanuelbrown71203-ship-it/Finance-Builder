@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { AppleCardSheet } from "@/components/apple-card";
 import { LinkBankButton } from "@/components/link-bank";
 import { Button, Dialog, EmptyState, ErrorNote, PageHeader, Sheet, SheetHeader, Skeleton, Tag } from "@/components/ui";
 import { send, useApi, useNow } from "@/components/use-api";
@@ -109,6 +110,7 @@ export default function AccountsPage() {
               </EmptyState>
             </Sheet>
           )}
+          <AppleCardSheet card={data.appleCard} demo={me?.demo ?? false} />
           {data.manual.length > 0 && (
             <Sheet>
               <SheetHeader title="Tracked by hand" hint="Update these on the Net worth screen." />

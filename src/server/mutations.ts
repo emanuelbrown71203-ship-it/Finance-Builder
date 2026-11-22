@@ -317,7 +317,8 @@ async function manualAccount(ctx: Ctx, id: string) {
 
 export async function updateManualAccount(ctx: Ctx, id: string, patch: { name?: string; value?: number }) {
   const row = await manualAccount(ctx, id);
-  const balance = patch.value === undefined ? row.balance : row.balance < 0 ? -Math.abs(patch.value) : Math.abs(patch.value);
+  const debt = row.type === "credit" || row.type === "loan" || row.balance < 0;
+  const balance = patch.value === undefined ? row.balance : debt ? -Math.abs(patch.value) : Math.abs(patch.value);
   await ctx.db.update(accounts).set({ name: patch.name ?? row.name, balance }).where(eq(accounts.id, id));
   await ctx.db
     .insert(balanceSnapshots)

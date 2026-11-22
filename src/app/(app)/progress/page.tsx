@@ -30,9 +30,10 @@ const DO: Record<WinKind, { what: string; href: string | null }> = {
   allunder: { what: "Keep every budget for a whole month", href: "/budget" },
   plan: { what: "Tune your debt payoff plan", href: "/debt" },
   nospend: { what: "Have a day with no everyday spending", href: null },
+  import: { what: "Bring in your Apple Card statement", href: "/accounts" },
 };
 
-const ORDER: WinKind[] = ["checkin", "budget", "under", "allunder", "sort", "rename", "note", "bill", "cancel", "goal", "save", "milestone", "plan", "nospend"];
+const ORDER: WinKind[] = ["checkin", "budget", "under", "allunder", "sort", "rename", "note", "bill", "cancel", "goal", "save", "milestone", "plan", "import", "nospend"];
 
 export default function ProgressPage() {
   const { data, error, mutate } = useApi<GamePayload>(GAME_URL);

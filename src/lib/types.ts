@@ -288,6 +288,41 @@ export type LinkedInstitution = {
 export type AccountsPayload = {
   institutions: LinkedInstitution[];
   manual: AccountView[];
+  /** Apple Card, brought in from its statements (Apple doesn't let websites link it). Null until the first one. */
+  appleCard: { accountId: string; owed: number; transactions: number; lastDate: ISODate | null } | null;
+};
+
+/** What an Apple Card statement holds, before it's brought in. */
+export type AppleCardPreview = {
+  from: ISODate;
+  to: ISODate;
+  total: number;
+  /** Not brought in before. */
+  fresh: number;
+  already: number;
+  /** In the file but not cleared yet: they come in with a later statement. */
+  pending: number;
+  /** What Passbook has the card owing now (null before the first statement). */
+  owedNow: number | null;
+  /** A starting point for "what it owes now": the last balance plus new charges, less new payments. Null for the first statement. */
+  suggestedOwed: number | null;
+  /** Sample household: a made-up statement is used, never the person's file. */
+  sample: boolean;
+};
+
+export type AppleCardImport = {
+  added: number;
+  skipped: number;
+  from: ISODate;
+  to: ISODate;
+  /** When it was brought in: Undo finds exactly these rows by it. */
+  batch: string;
+  previousOwed: number | null;
+  /** What this import set the card owing, so a stale Undo leaves a newer balance alone. */
+  owed: number;
+  /** Whether this import earned XP (only then does Undo take it back). */
+  earned: boolean;
+  accountId: string;
 };
 
 export type HoldingView = {

@@ -6,7 +6,7 @@ import { addDays, type ISODate } from "../dates";
  * come from what's been won. Pure, so it's tested and works on sample data.
  */
 
-export type WinKind = "sort" | "rename" | "note" | "bill" | "cancel" | "goal" | "save" | "milestone" | "budget" | "under" | "allunder" | "plan" | "checkin" | "nospend";
+export type WinKind = "sort" | "rename" | "note" | "bill" | "cancel" | "goal" | "save" | "milestone" | "budget" | "under" | "allunder" | "plan" | "checkin" | "nospend" | "import";
 
 /** XP for each kind of win, and how many of that kind count in a day (so busywork doesn't farm XP). */
 export const WINS: Record<WinKind, { xp: number; perDay: number; label: string }> = {
@@ -24,6 +24,7 @@ export const WINS: Record<WinKind, { xp: number; perDay: number; label: string }
   plan: { xp: 15, perDay: 3, label: "Tuned the debt plan" },
   checkin: { xp: 5, perDay: 1, label: "Checked in" },
   nospend: { xp: 15, perDay: 1, label: "A no-spend day" },
+  import: { xp: 20, perDay: 3, label: "Brought in a card statement" },
 };
 
 export const isWinKind = (k: string): k is WinKind => k in WINS;
