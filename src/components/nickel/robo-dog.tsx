@@ -64,10 +64,15 @@ export function RoboDog({ eyes, mouth, antenna, cheeks, gaze, tongue = false, si
         </text>
         {/* Front legs and paws */}
         <g className="nk-legs">
-          <rect x="45" y="96" width="11" height="17" rx="5.5" fill="var(--sunk)" stroke={line} strokeWidth="1.8" />
-          <rect x="64" y="96" width="11" height="17" rx="5.5" fill="var(--sunk)" stroke={line} strokeWidth="1.8" />
-          <ellipse cx="50.5" cy="113" rx="7.5" ry="4" fill="var(--sheet)" stroke={line} strokeWidth="1.6" />
-          <ellipse cx="69.5" cy="113" rx="7.5" ry="4" fill="var(--sheet)" stroke={line} strokeWidth="1.6" />
+          {/* Each leg steps on its own when he trots */}
+          <g className="nk-leg-l">
+            <rect x="45" y="96" width="11" height="17" rx="5.5" fill="var(--sunk)" stroke={line} strokeWidth="1.8" />
+            <ellipse cx="50.5" cy="113" rx="7.5" ry="4" fill="var(--sheet)" stroke={line} strokeWidth="1.6" />
+          </g>
+          <g className="nk-leg-r">
+            <rect x="64" y="96" width="11" height="17" rx="5.5" fill="var(--sunk)" stroke={line} strokeWidth="1.8" />
+            <ellipse cx="69.5" cy="113" rx="7.5" ry="4" fill="var(--sheet)" stroke={line} strokeWidth="1.6" />
+          </g>
         </g>
         {/* Collar */}
         <rect x="40" y="59" width="40" height="6.5" rx="3.25" fill="var(--accent-strong)" />

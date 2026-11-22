@@ -5,6 +5,7 @@ import { validName } from "@/lib/finance/names";
 import { dollarsExact } from "@/lib/money";
 import { Button, ErrorNote, Field, Input, Segmented, cx, toast } from "./ui";
 import { send, useApi } from "./use-api";
+import { nickelReact } from "./nickel/store";
 
 /*
  * Renaming: the shared pieces used by a transaction's sheet, a bill's sheet
@@ -145,6 +146,7 @@ export function RenameForm({
     try {
       const result = await renameEvery(transactionId, clean, allowExact && exact);
       toast(renamedMessage(clean, result.count), { action: { label: "Undo", run: () => undoRename(result.undo) } });
+      nickelReact({ type: "task", task: "rename" });
       onDone();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Couldn’t save. Try again.");

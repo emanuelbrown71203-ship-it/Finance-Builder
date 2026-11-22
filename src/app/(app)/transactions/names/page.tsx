@@ -3,6 +3,7 @@
 import { Check, ChevronRight } from "lucide-react";
 import { useState } from "react";
 import { RenameForm, renameEvery, renamedMessage, undoRename } from "@/components/names";
+import { nickelReact } from "@/components/nickel/store";
 import { Button, Dialog, ErrorNote, Field, Input, PageHeader, Sheet, SheetHeader, Skeleton, toast } from "@/components/ui";
 import { send, useApi } from "@/components/use-api";
 import { formatShort } from "@/lib/dates";
@@ -23,6 +24,7 @@ export default function NamesPage() {
     try {
       const result = await renameEvery(u.sampleId, u.suggestion, false);
       toast(renamedMessage(u.suggestion, result.count), { action: { label: "Undo", run: () => undoRename(result.undo) } });
+      nickelReact({ type: "task", task: "rename" });
     } catch (e) {
       toast(e instanceof Error ? e.message : "Couldn’t save. Try again.", { tone: "error" });
     } finally {
@@ -134,6 +136,7 @@ function RuleForm({ rule, onClose }: { rule: NameRuleView; onClose: () => void }
     try {
       await send("PATCH", `/api/names/${rule.id}`, { name: clean });
       toast(`Renamed to ${clean}`, { action: { label: "Undo", run: () => send("PATCH", `/api/names/${rule.id}`, { name: rule.name }) } });
+      nickelReact({ type: "task", task: "rename" });
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Couldn’t save. Try again.");

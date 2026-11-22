@@ -342,8 +342,14 @@ export function Toaster() {
     () => toasts,
     () => NO_TOASTS,
   );
+  // Tells Nickel how much room a message takes, so he hops up above it instead of hiding behind it.
+  const box = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const space = list.length > 0 && box.current ? box.current.offsetHeight + 8 : 0;
+    window.dispatchEvent(new CustomEvent("passbook-toast-space", { detail: space }));
+  }, [list]);
   return (
-    <div aria-live="polite" className="pointer-events-none fixed inset-x-0 bottom-[calc(84px+env(safe-area-inset-bottom))] z-50 flex flex-col items-center gap-2 px-3 lg:bottom-6">
+    <div ref={box} aria-live="polite" className="pointer-events-none fixed inset-x-0 bottom-[calc(84px+env(safe-area-inset-bottom))] z-50 flex flex-col items-center gap-2 px-3 lg:bottom-6">
       {list.map((t) => (
         <div key={t.id} role="status" className={cx("toast pointer-events-auto flex w-full max-w-[440px] items-center justify-between gap-4 rounded-control px-4 py-3 text-small font-semibold shadow-float", t.tone === "error" ? "bg-bad text-sheet" : "bg-ink text-sheet")}>
           <span>{t.message}</span>

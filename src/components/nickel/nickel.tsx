@@ -3,7 +3,7 @@
 import { ChevronRight, X } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
-import { INTRO, SMALL_TALK, type Mood, type Tip } from "@/lib/nickel/brain";
+import { INTRO, SMALL_TALK, cheerFor, type Mood, type Tip } from "@/lib/nickel/brain";
 import { CLAUDE_PREFIX, CLAUDE_QUESTIONS, claudeLink } from "@/lib/nickel/claude";
 import { parseCommand, type Command } from "@/lib/nickel/commands";
 import { BillForm, type BillDraft } from "../bill-form";
@@ -14,7 +14,7 @@ import type { NickelPayload } from "@/server/nickel";
 import { Dialog, Input, cx, toast } from "../ui";
 import { send, useApi, useNow } from "../use-api";
 import { RoboDog, type Eyes, type Mouth } from "./robo-dog";
-import { markSeen, nickelSettings, seenToday, useNickelSettings, type NickelEvent } from "./store";
+import { countTask, markSeen, nickelSettings, seenToday, useNickelSettings, type NickelEvent } from "./store";
 
 /*
  * Nickel, the robo dog who lives in the corner of every screen.
@@ -31,7 +31,7 @@ import { markSeen, nickelSettings, seenToday, useNickelSettings, type NickelEven
  */
 
 type Action = "hop" | "spin" | "shake" | "sniff" | "bark" | "stretch" | "look" | "wiggle";
-type Effect = "hearts" | "bang" | "question" | "sparkle";
+type Effect = "hearts" | "bang" | "question" | "sparkle" | "party";
 type Bubble = { text: string; href?: string; link?: string; tipId?: string; sticky: boolean; kind: "tip" | "intro" | "talk" | "event" | "done"; undo?: string };
 
 const LOOK: Record<Mood, { eyes: Eyes; mouth: Mouth; wag: string; antenna: string; cheeks: boolean; ears: "" | "perk" | "down" }> = {
@@ -50,6 +50,23 @@ const isNight = () => {
 };
 
 const UNPROMPTED_GAP = 8 * 60_000;
+/** How wide he is on screen, and how far he keeps from the edges. */
+const DOG_W = 72;
+/** Bits of colour for a party: where each one flies. */
+const CONFETTI = [
+  { dx: -46, dy: -40, c: "var(--warn)" },
+  { dx: -30, dy: -64, c: "var(--sky-ink)" },
+  { dx: -8, dy: -72, c: "var(--good)" },
+  { dx: 14, dy: -70, c: "var(--pink-ink)" },
+  { dx: 34, dy: -58, c: "var(--canary-ink)" },
+  { dx: 50, dy: -34, c: "var(--accent)" },
+  { dx: -54, dy: -10, c: "var(--pink-ink)" },
+  { dx: 56, dy: -6, c: "var(--sky-ink)" },
+];
+const localToday = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+};
 const EVENT_GAP = 3 * 60_000;
 
 export function Nickel() {
@@ -78,6 +95,12 @@ export function Nickel() {
   const [drag, setDrag] = useState<{ x: number; y: number } | null>(null);
   const [wide, setWide] = useState(false);
   const [screenH, setScreenH] = useState(800);
+  const [screenW, setScreenW] = useState(390);
+  /** Where he's wandered to: px from the left edge. Null when he's sitting at his home side. */
+  const [spot, setSpot] = useState<number | null>(null);
+  const [walk, setWalk] = useState<{ dir: "l" | "r"; ms: number } | null>(null);
+  /** Room an on-screen message takes at the bottom; he hops up over it. */
+  const [toastSpace, setToastSpace] = useState(0);
 
   const root = useRef<HTMLDivElement>(null);
   const lastActive = useRef(0);
@@ -232,6 +255,114 @@ export function Nickel() {
     };
   }, [visible, wake]);
 
+  /* ---------- wandering, like a real dog ---------- */
+
+  // The latest of what the wander loop needs to know, without restarting it every time something changes.
+  const calm = useRef({ asleep, bubble: false, menu: false, drag: false });
+  useEffect(() => {
+    calm.current = { asleep, bubble: bubble !== null, menu, drag: drag !== null };
+  });
+  const spotRef = useRef<number | null>(null);
+  useEffect(() => {
+    spotRef.current = spot;
+  }, [spot]);
+  const walkTimer = useRef(0);
+
+  /** Trots to a spot along the bottom of the screen (null: back to his home side), then does something doggy there. */
+  const trot = useCallback(
+    (target: number | null) => {
+      const margin = wide ? 24 : 10;
+      const vw = window.innerWidth;
+      const home = settings.side === "right" ? vw - margin - DOG_W : margin;
+      const from = spotRef.current ?? home;
+      const to = Math.max(margin, Math.min(vw - margin - DOG_W, target ?? home));
+      const distance = Math.abs(to - from);
+      if (distance < 30) return;
+      const dir = to > from ? "r" : "l";
+      const ms = Math.round((distance / rand(85, 125)) * 1000);
+      setGaze({ x: dir === "r" ? 2.8 : -2.8, y: 0 });
+      // Start from where he is (switching from sitting at a side to a spot), then set off on the next frame.
+      setSpot(from);
+      window.clearTimeout(walkTimer.current);
+      requestAnimationFrame(() =>
+        requestAnimationFrame(() => {
+          setWalk({ dir, ms });
+          setSpot(to);
+          walkTimer.current = window.setTimeout(() => {
+            setWalk(null);
+            setGaze({ x: 0, y: 0 });
+            if (target === null) setSpot(null);
+            // What a dog does on arriving somewhere.
+            const roll = Math.random();
+            if (roll < 0.35) act("sniff");
+            else if (roll < 0.55) act("look");
+            else if (roll < 0.65) act("stretch");
+            else if (roll < 0.72) act("wiggle");
+            else if (roll < 0.76) {
+              act("spin"); // chasing his tail
+              pop("hearts");
+            }
+          }, ms);
+        }),
+      );
+    },
+    [wide, settings.side, act, pop],
+  );
+
+  useEffect(() => {
+    if (!visible || !settings.roams) return;
+    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)");
+    let timer = 0;
+    const loop = () => {
+      timer = window.setTimeout(() => {
+        const c = calm.current;
+        const quiet = Date.now() - lastActive.current > 3500 && !press.current && document.visibilityState === "visible" && !document.querySelector("dialog[open]");
+        if (!reduced.matches && quiet && !c.asleep && !c.bubble && !c.menu && !c.drag) {
+          const margin = wide ? 24 : 10;
+          const vw = window.innerWidth;
+          const here = spotRef.current;
+          // Now and then he heads home; otherwise somewhere a fair way from where he is.
+          if (here !== null && Math.random() < 0.3) trot(null);
+          else {
+            const start = here ?? (settings.side === "right" ? vw - margin - DOG_W : margin);
+            let target = start;
+            for (let i = 0; i < 8 && Math.abs(target - start) < 90; i++) target = rand(margin, vw - margin - DOG_W);
+            trot(target);
+          }
+        }
+        loop();
+      }, rand(16_000, 40_000));
+    };
+    loop();
+    return () => window.clearTimeout(timer);
+  }, [visible, settings.roams, settings.side, wide, trot]);
+
+  // Switched off, or when he's put back by hand: he goes home.
+  useEffect(() => {
+    if (settings.roams) return;
+    const t = window.setTimeout(() => {
+      window.clearTimeout(walkTimer.current);
+      setWalk(null);
+      setSpot(null);
+    }, 0);
+    return () => window.clearTimeout(t);
+  }, [settings.roams]);
+
+  /** Stops where he is (when touched mid-trot). */
+  const halt = () => {
+    if (!walk) return;
+    const r = root.current?.getBoundingClientRect();
+    window.clearTimeout(walkTimer.current);
+    setWalk(null);
+    if (r) setSpot(r.left);
+  };
+
+  useEffect(() => {
+    const onSpace = (e: Event) => setToastSpace(Number((e as CustomEvent<number>).detail) || 0);
+    window.addEventListener("passbook-toast-space", onSpace);
+    return () => window.removeEventListener("passbook-toast-space", onSpace);
+  }, []);
+
   /* ---------- noticing things ---------- */
 
   // A new charge or deposit arrived since he last looked: he perks up and sniffs it.
@@ -296,6 +427,22 @@ export function Nickel() {
       } else if (ev.type === "refreshed") {
         act("shake");
         pop("sparkle");
+      } else if (ev.type === "task") {
+        // A small money task done: he cheers, and throws a party for the big ones and every few in a day.
+        const today = localToday();
+        const n = countTask(today);
+        const cheer = cheerFor(ev.task, { name: ev.name, amount: ev.amount, percent: ev.percent }, n, `${today}:${n}`);
+        if (cheer.party) {
+          act("spin");
+          pop("party");
+          feel("excited", 8000);
+          window.setTimeout(() => pop("hearts"), 1300);
+        } else {
+          act((["hop", "wiggle", "bark"] as const)[n % 3]);
+          pop(n % 2 ? "hearts" : "sparkle");
+          feel("proud", 5000);
+        }
+        if (settings.chatty || cheer.party) say({ text: cheer.text, sticky: false, kind: "event" }, cheer.party ? 6500 : 4500);
       }
     };
     window.addEventListener("passbook-nickel-react", onReact);
@@ -307,6 +454,7 @@ export function Nickel() {
     const update = () => {
       setWide(mq.matches);
       setScreenH(window.innerHeight);
+      setScreenW(window.innerWidth);
     };
     const t = window.setTimeout(update, 0);
     mq.addEventListener("change", update);
@@ -328,6 +476,7 @@ export function Nickel() {
 
   const onDown = (e: ReactPointerEvent<HTMLButtonElement>) => {
     e.currentTarget.setPointerCapture(e.pointerId);
+    halt();
     const timer = window.setTimeout(() => {
       if (press.current && !press.current.moved) {
         press.current.held = true;
@@ -363,6 +512,7 @@ export function Nickel() {
       const baseBottom = wide ? 20 : 80;
       const lift = Math.max(0, Math.min(window.innerHeight - 260, window.innerHeight - e.clientY - 40 - baseBottom));
       nickelSettings.setPlace(side, lift);
+      setSpot(null);
       setDrag(null);
       setOverride(null);
       act("hop");
@@ -395,14 +545,23 @@ export function Nickel() {
   const lift = Math.min(settings.lift, Math.max(0, screenH - 300));
   // Up high, his bubble opens below him instead of off the top of the screen.
   const bubbleBelow = lift > screenH / 2 - 120;
+  const margin = wide ? 24 : 10;
+  // Wherever he wandered, re-checked against today's screen width.
+  const x = spot === null ? null : Math.max(margin, Math.min(screenW - margin - DOG_W, spot));
   const sideStyle = useMemo(() => {
     const bottomBase = wide ? 20 : 80;
     if (drag) return { left: drag.x - 38, top: drag.y - 40 };
-    return {
-      [settings.side]: wide ? 24 : 10,
-      bottom: `calc(${bottomBase + lift}px + ${wide ? "0px" : "env(safe-area-inset-bottom)"})`,
-    };
-  }, [drag, settings.side, lift, wide]);
+    // On a phone, a message along the bottom would cover him: he hops up above it, and back down after.
+    const over = !wide && lift < toastSpace + 12 ? toastSpace : 0;
+    const bottom = `calc(${bottomBase + lift + over}px + ${wide ? "0px" : "env(safe-area-inset-bottom)"})`;
+    const hop = "bottom 0.38s cubic-bezier(0.3, 1.45, 0.5, 1)";
+    if (x !== null) return { left: x, bottom, transition: walk ? `${hop}, left ${walk.ms}ms linear` : hop };
+    return { [settings.side]: margin, bottom, transition: hop };
+  }, [drag, settings.side, lift, wide, x, walk, margin, toastSpace]);
+  // Out in the middle of the screen, his bubble stays on screen and its point stays on him.
+  const bubbleW = Math.min(304, screenW - 24);
+  const bubbleLeft = x === null ? null : Math.max(12, Math.min(screenW - 12 - bubbleW, x + DOG_W / 2 - bubbleW / 2));
+  const bubblePlace = x === null || bubbleLeft === null ? null : { box: { left: bubbleLeft - x, width: bubbleW }, point: { left: Math.max(16, Math.min(bubbleW - 32, x + DOG_W / 2 - bubbleLeft - 8)) } };
 
   if (!visible) return null;
 
@@ -412,7 +571,7 @@ export function Nickel() {
     <div ref={root} data-no-pull className={cx("nk-root fixed z-30 select-none", drag && "nk-dragging")} style={sideStyle}>
       {/* What he says */}
       {(bubble || menu) && !drag && (
-        <div className={cx("nk-bubble absolute w-[min(19rem,calc(100vw-1.5rem))]", bubbleBelow ? "top-[86px]" : "bottom-[86px]", settings.side === "right" ? "right-0" : "left-0")}>
+        <div className={cx("nk-bubble absolute w-[min(19rem,calc(100vw-1.5rem))]", bubbleBelow ? "top-[86px]" : "bottom-[86px]", !bubblePlace && (settings.side === "right" ? "right-0" : "left-0"))} style={bubblePlace?.box}>
           <div role="status" aria-live="polite" className="rounded-[18px] border border-line bg-sheet p-3.5 text-small text-ink shadow-float">
             <div className="flex items-start justify-between gap-2">
               <p className="text-micro font-extrabold uppercase tracking-wide text-accent-text">{settings.name}</p>
@@ -430,8 +589,10 @@ export function Nickel() {
                 onDone={(done) => {
                   setMenu(false);
                   setDoing(false);
-                  act("hop");
-                  pop("sparkle");
+                  const n = countTask(localToday());
+                  const party = cheerFor("done", {}, n, String(n)).party;
+                  act(party ? "spin" : "hop");
+                  pop(party ? "party" : "sparkle");
                   feel("excited", 6000);
                   say({ kind: "done", text: `Done! ${done.summary}`, href: done.href, link: "See it", undo: done.activityId, sticky: true });
                 }}
@@ -497,7 +658,7 @@ export function Nickel() {
               )
             )}
           </div>
-          <span aria-hidden className={cx("absolute size-4 rotate-45 border-line bg-sheet", bubbleBelow ? "-top-[7px] border-l border-t" : "-bottom-[7px] border-b border-r", settings.side === "right" ? "right-8" : "left-8")} />
+          <span aria-hidden className={cx("absolute size-4 rotate-45 border-line bg-sheet", bubbleBelow ? "-top-[7px] border-l border-t" : "-bottom-[7px] border-b border-r", !bubblePlace && (settings.side === "right" ? "right-8" : "left-8"))} style={bubblePlace?.point} />
         </div>
       )}
 
@@ -508,11 +669,7 @@ export function Nickel() {
               today={data.today}
               draft={billDraft}
               via="nickel"
-              onDone={() => {
-                setBillDraft(null);
-                act("hop");
-                feel("excited", 5000);
-              }}
+              onDone={() => setBillDraft(null)}
               onCancel={() => setBillDraft(null)}
             />
           )}
@@ -540,7 +697,7 @@ export function Nickel() {
             say(nextLine());
           }
         }}
-        className="nk-btn relative block touch-none rounded-full outline-offset-4"
+        className={cx("nk-btn relative block touch-none rounded-full outline-offset-4", walk && `nk-walking nk-walk-${walk.dir}`)}
         style={{ ["--nk-wag" as string]: look.wag }}
       >
         <div key={action?.key} className={cx("nk-wrap", action && `nk-act-${action.name}`)} onAnimationEnd={() => setAction(null)}>
@@ -572,6 +729,8 @@ export function Nickel() {
                 <span className="nk-heart text-[var(--pink-ink)]" style={{ animationDelay: "0.3s", marginLeft: 18 }}>♥</span>
               </>
             )}
+            {effect.name === "party" &&
+              CONFETTI.map((p, i) => <span key={i} className="nk-confetti" style={{ background: p.c, animationDelay: `${(i % 3) * 0.06}s`, ["--dx" as string]: `${p.dx}px`, ["--dy" as string]: `${p.dy}px` }} />)}
             {effect.name === "sparkle" && (
               <>
                 <span className="nk-heart text-[var(--warn)]" style={{ animationDelay: "0s", marginLeft: -20 }}>✦</span>

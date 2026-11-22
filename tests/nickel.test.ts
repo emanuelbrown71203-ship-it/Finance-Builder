@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { pick, thinkAbout, type NickelInput } from "@/lib/nickel/brain";
+import { cheerFor, pick, thinkAbout, type NickelInput, type TaskKind } from "@/lib/nickel/brain";
 
 const quiet: NickelInput = {
   today: "2026-11-21",
@@ -124,3 +124,30 @@ describe("what Nickel notices", () => {
     expect(pick(["x", "y", "z"], "seed")).toBe(pick(["x", "y", "z"], "seed"));
   });
 });
+
+describe("cheering small money tasks", () => {
+  const kinds: TaskKind[] = ["rename", "category", "note", "bill", "cancelled", "goal", "deposit", "milestone", "budget", "plan", "done"];
+
+  it("has a cheer for every kind of task, with the details filled in", () => {
+    for (const k of kinds) expect(cheerFor(k, { name: "Netflix", amount: 21_588, percent: 50 }, 1, "2026-11-22").text.length).toBeGreaterThan(5);
+    expect(cheerFor("cancelled", { name: "Hulu", amount: 11_988 }, 1, "a").text).toMatch(/Hulu/);
+    expect(cheerFor("milestone", { name: "Japan", percent: 50 }, 1, "a").text).toContain("50%");
+  });
+
+  it("throws a party for a cancelled subscription, a milestone, and every few chores in a day", () => {
+    expect(cheerFor("rename", {}, 1, "a").party).toBe(false);
+    expect(cheerFor("cancelled", { name: "Hulu" }, 1, "a").party).toBe(true);
+    expect(cheerFor("milestone", { name: "Japan", percent: 75 }, 2, "a").party).toBe(true);
+    expect(cheerFor("category", {}, 3, "a")).toEqual({ text: "That’s 3 money chores today! *crunches a celebration bone*", party: true });
+    expect(cheerFor("category", {}, 4, "a").party).toBe(false);
+  });
+
+  it("never tells anyone what they should do", () => {
+    for (const k of kinds) {
+      for (const seed of ["a", "b", "c", "d"]) {
+        expect(cheerFor(k, { name: "X", amount: 100, percent: 25 }, 1, seed).text.toLowerCase()).not.toMatch(/\byou should\b|\byou must\b|\bi recommend\b|\binvest in\b/);
+      }
+    }
+  });
+});
+

@@ -1,6 +1,7 @@
 "use client";
 
 import { useSyncExternalStore } from "react";
+import type { TaskKind } from "@/lib/nickel/brain";
 
 /*
  * Nickel's settings and memory, kept on this device only (like the light/dark
@@ -16,6 +17,8 @@ const KEY = {
   nap: "passbook-nickel-nap",
   intro: "passbook-nickel-intro",
   seen: "passbook-nickel-seen",
+  roam: "passbook-nickel-roam",
+  tasks: "passbook-nickel-tasks",
 } as const;
 
 const EVENT = "passbook-nickel-change";
@@ -45,14 +48,14 @@ function write(key: string, value: string | null) {
   window.dispatchEvent(new Event(EVENT));
 }
 
-export type NickelSettings = { on: boolean; name: string; chatty: boolean; napUntil: number; introDone: boolean; side: "left" | "right"; lift: number };
+export type NickelSettings = { on: boolean; name: string; chatty: boolean; roams: boolean; napUntil: number; introDone: boolean; side: "left" | "right"; lift: number };
 
-const DEFAULTS: NickelSettings = { on: true, name: "Nickel", chatty: true, napUntil: 0, introDone: false, side: "right", lift: 0 };
+const DEFAULTS: NickelSettings = { on: true, name: "Nickel", chatty: true, roams: true, napUntil: 0, introDone: false, side: "right", lift: 0 };
 
 let cached: { raw: string; value: NickelSettings } | null = null;
 
 function snapshot(): NickelSettings {
-  const raw = [KEY.on, KEY.name, KEY.chatty, KEY.nap, KEY.intro, KEY.pos].map(read).join("\u0000");
+  const raw = [KEY.on, KEY.name, KEY.chatty, KEY.nap, KEY.intro, KEY.pos, KEY.roam].map(read).join("\u0000");
   if (cached?.raw === raw) return cached.value;
   let pos: { side?: string; lift?: number } = {};
   try {
@@ -62,6 +65,7 @@ function snapshot(): NickelSettings {
     on: read(KEY.on) !== "0",
     name: (read(KEY.name) ?? "").trim().slice(0, 20) || DEFAULTS.name,
     chatty: read(KEY.chatty) !== "0",
+    roams: read(KEY.roam) !== "0",
     napUntil: Number(read(KEY.nap) ?? 0) || 0,
     introDone: read(KEY.intro) === "1",
     side: pos.side === "left" ? "left" : "right",
@@ -88,6 +92,7 @@ export const nickelSettings = {
   setOn: (on: boolean) => write(KEY.on, on ? null : "0"),
   setName: (name: string) => write(KEY.name, name.trim() ? name.trim().slice(0, 20) : null),
   setChatty: (chatty: boolean) => write(KEY.chatty, chatty ? null : "0"),
+  setRoams: (roams: boolean) => write(KEY.roam, roams ? null : "0"),
   napFor: (ms: number) => write(KEY.nap, String(Date.now() + ms)),
   wake: () => write(KEY.nap, null),
   finishIntro: () => write(KEY.intro, "1"),
@@ -114,8 +119,28 @@ export function markSeen(today: string, id: string) {
   } catch {}
 }
 
+/** Counts the small money tasks done today on this device (for Nickel's streak parties). */
+export function countTask(today: string): number {
+  let parsed: { date?: string; n?: number } = {};
+  try {
+    parsed = JSON.parse(read(KEY.tasks) ?? "{}");
+  } catch {}
+  const n = (parsed.date === today ? (parsed.n ?? 0) : 0) + 1;
+  const value = JSON.stringify({ date: today, n });
+  memory.set(KEY.tasks, value);
+  try {
+    localStorage.setItem(KEY.tasks, value);
+  } catch {}
+  return n;
+}
+
 /** Things happening elsewhere in the app that Nickel reacts to. */
-export type NickelEvent = { type: "deposit"; amount: number; goal: string } | { type: "celebrate" } | { type: "refreshed" };
+export type NickelEvent =
+  | { type: "deposit"; amount: number; goal: string }
+  | { type: "celebrate" }
+  | { type: "refreshed" }
+  /** A small money task was just done: he cheers. */
+  | { type: "task"; task: TaskKind; name?: string; amount?: number; percent?: number };
 
 export function nickelReact(event: NickelEvent) {
   if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent<NickelEvent>("passbook-nickel-react", { detail: event }));

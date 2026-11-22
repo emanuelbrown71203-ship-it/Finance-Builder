@@ -1,5 +1,6 @@
 "use client";
 
+import { nickelReact } from "@/components/nickel/store";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
@@ -32,6 +33,7 @@ function LimitForm({ row, onClose }: { row: BudgetRow; onClose: () => void }) {
       onClose();
       const name = category(row.category).label;
       const before = row.limit;
+      if (monthlyLimit !== null) nickelReact({ type: "task", task: "budget", name });
       toast(monthlyLimit === null ? `Limit removed from ${name}` : `${name} limit set to ${dollars(monthlyLimit)}`, {
         action: { label: "Undo", run: () => send("PUT", "/api/budget", { category: row.category, monthlyLimit: before }) },
       });

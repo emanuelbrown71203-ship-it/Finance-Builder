@@ -8,6 +8,7 @@ import { CategoryIcon } from "@/components/category-icon";
 import { BankSays, RenameForm } from "@/components/names";
 import { Button, Dialog, EmptyState, ErrorNote, Fold, PageHeader, Sheet, SheetHeader, Skeleton, Tag, toast } from "@/components/ui";
 import { send, useApi } from "@/components/use-api";
+import { nickelReact } from "@/components/nickel/store";
 import { diffDays, formatDistance, formatMedium, formatShort } from "@/lib/dates";
 import { FREQUENCY_LABEL } from "@/lib/finance/recurring";
 import type { CancelHelp } from "@/lib/finance/subscriptions";
@@ -93,6 +94,7 @@ function SeriesDialog({ series, today, onClose: close }: { series: RecurringView
     const before = { kind: series.kind === "income" ? undefined : series.kind, cancelled: series.cancelled };
     try {
       await send("PATCH", "/api/recurring", { key: series.key, ...patch });
+      if (patch.cancelled) nickelReact({ type: "task", task: "cancelled", name: series.name, amount: series.monthly * 12 });
       onClose();
       toast(done, { action: { label: "Undo", run: () => send("PATCH", "/api/recurring", { key: series.key, ...before }) } });
     } catch (e) {
@@ -210,6 +212,7 @@ function ManualBillDialog({ series, today, onClose }: { series: RecurringView; t
   const cancel = (cancelled: boolean) =>
     run(async () => {
       await send("PATCH", `/api/bills/${manual.id}`, { cancelled });
+      if (cancelled) nickelReact({ type: "task", task: "cancelled", name: series.name, amount: series.monthly * 12 });
       toast(cancelled ? `${series.name} marked as cancelled` : `${series.name} is back in your bills`, { action: { label: "Undo", run: () => send("PATCH", `/api/bills/${manual.id}`, { cancelled: !cancelled }) } });
     });
   const remove = () =>

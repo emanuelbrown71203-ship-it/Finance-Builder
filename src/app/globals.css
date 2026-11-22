@@ -545,6 +545,23 @@ input[type="number"]::-webkit-inner-spin-button {
 @keyframes nk-sniff { 0%, 100% { transform: none; } 20%, 60% { transform: translateY(5px) rotate(-7deg); } 40%, 80% { transform: translateY(4px) rotate(7deg); } }
 @keyframes nk-look { 25% { transform: rotate(-12deg); } 65% { transform: rotate(10deg); } }
 
+/* Trotting to a new spot: legs step in turn, the body bobs, he leans the way he's going and wags fast. */
+.nk-walking .nk-leg-l { animation: nk-step 0.34s ease-in-out infinite; }
+.nk-walking .nk-leg-r { animation: nk-step 0.34s ease-in-out infinite 0.17s; }
+.nk-walking .nk-float { animation: nk-trot 0.34s ease-in-out infinite; }
+.nk-walking .nk-tail { animation-duration: 0.22s; }
+.nk-walking .nk-shadow { animation: nk-shadow 0.34s ease-in-out infinite; }
+.nk-walk-r .nk-wrap { transform: rotate(5deg); transition: transform 0.25s ease; }
+.nk-walk-l .nk-wrap { transform: rotate(-5deg); transition: transform 0.25s ease; }
+@keyframes nk-step { 50% { transform: translateY(-4px); } }
+@keyframes nk-trot { 50% { transform: translateY(-3px); } }
+@keyframes nk-shadow { 50% { transform: scaleX(0.88); opacity: 0.08; } }
+/* A party: bits of colour burst out around him. */
+.nk-confetti { position: absolute; left: 50%; top: 40%; width: 7px; height: 7px; border-radius: 2px; opacity: 0; animation: nk-confetti 1.2s ease-out forwards; }
+@keyframes nk-confetti { 0% { opacity: 1; transform: translate(0, 0) rotate(0); } 100% { opacity: 0; transform: translate(var(--dx), var(--dy)) rotate(260deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .nk-walking .nk-leg-l, .nk-walking .nk-leg-r, .nk-walking .nk-float, .nk-walking .nk-shadow { animation: none; }
+}
 .nk-z { position: absolute; right: 0; top: 0; opacity: 0; animation: nk-z 3s ease-in infinite; }
 @keyframes nk-z { 0% { opacity: 0; transform: translate(0, 4px) scale(0.6); } 25% { opacity: 1; } 100% { opacity: 0; transform: translate(14px, -26px) scale(1.15); } }
 .nk-pop { display: inline-block; animation: nk-pop 1.1s ease-out forwards; }

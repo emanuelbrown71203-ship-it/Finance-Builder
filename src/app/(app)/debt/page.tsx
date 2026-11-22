@@ -1,5 +1,6 @@
 "use client";
 
+import { nickelReact } from "@/components/nickel/store";
 import { Minus, Plus } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
@@ -38,6 +39,7 @@ function EditDebt({ debt, onClose }: { debt: DebtView; onClose: () => void }) {
       await send("PATCH", `/api/debt/${debt.id}`, { aprPercent: rate, monthlyPayment: cents });
       onClose();
       toast(`${debt.name} updated`);
+      nickelReact({ type: "task", task: "plan" });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Couldn’t save. Try again.");
       setBusy(false);
@@ -198,7 +200,7 @@ export default function DebtPage() {
                     full
                     label="Where the extra goes first"
                     value={data.strategy}
-                    onChange={(strategy) => void send("PUT", "/api/debt", { strategy })}
+                    onChange={(strategy) => void send("PUT", "/api/debt", { strategy }).then(() => nickelReact({ type: "task", task: "plan" }))}
                     options={[
                       { value: "avalanche", label: "Highest interest" },
                       { value: "snowball", label: "Smallest balance" },

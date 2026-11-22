@@ -6,6 +6,7 @@ import { FREQUENCY_LABEL } from "@/lib/finance/recurring";
 import { dollars, parseDollarsToCents } from "@/lib/money";
 import { Button, ErrorNote, Field, Input, MoneyInput, Segmented, Select, toast } from "./ui";
 import { send } from "./use-api";
+import { nickelReact } from "./nickel/store";
 
 /*
  * Adding (or changing) a bill by hand: a new subscription, a bill paid by
@@ -51,9 +52,11 @@ export function BillForm({ today, draft, editing, via = "you", onDone, onCancel 
       } else if (via === "nickel") {
         const done = await send<{ activityId: string; summary: string }>("POST", "/api/nickel/do", frequency === "once" ? { kind: "upcoming", name, amount: cents, date } : { kind: "bill", name, amount: cents, frequency, date, billKind: kind });
         toast(done.summary, { action: { label: "Undo", run: () => send("POST", `/api/activity/${done.activityId}/undo`) } });
+        nickelReact({ type: "task", task: "bill", name: name.trim() });
       } else {
         const { id } = await send<{ id: string }>("POST", "/api/bills", { name, amount: cents, frequency, startDate: date, kind });
         toast(`${name.trim()} added to your bills`, { action: { label: "Undo", run: () => send("DELETE", `/api/bills/${id}`) } });
+        nickelReact({ type: "task", task: "bill", name: name.trim() });
       }
       onDone();
     } catch (err) {

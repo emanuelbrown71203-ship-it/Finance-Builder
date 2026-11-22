@@ -77,7 +77,12 @@ Smaller things that make it easier to live with:
     back with Undo. If something's missing he asks for just that, or opens the bill form filled in.
   - **Chat with Claude** opens a chat in your own Claude app (on your own Claude plan) with a question
     ready; Claude reads your numbers through the connector below.
-  Settings: show him, quiet mode, rename him.
+  He also wanders: every so often he trots to a new spot along the bottom of the screen and sniffs
+  around (never while you're touching the screen, while he's talking or asleep, or with "reduce
+  motion" on), and hops up out of the way of messages. He cheers small money tasks (renaming,
+  sorting, adding a bill, cancelling a subscription, making or adding to a goal, setting a limit,
+  changing the debt plan) and throws a little party for milestones, cancelled subscriptions and
+  every few chores in a day. Settings: show him, quiet mode, wandering on or off, rename him.
 
 ## Connections
 

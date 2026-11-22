@@ -65,6 +65,15 @@ If a rule here and an app's own existing look disagree, the app's existing look 
   (blinks, breathing, ear twitches, looking at what you touch, dozing off when left alone) and
   reactions to what happens in the app. It points things out rather than giving orders, and can
   be hidden, quietened or renamed in Settings.
+- **It should feel like a real pet on the screen.** Now and then it gets up and wanders to a new spot
+  (trotting legs, looking where it's going) and does something doggy when it arrives (sniffs, stretches,
+  chases its tail). Never while you're touching the screen, while it's talking, asleep or being
+  dragged, and not at all with "reduce motion" on; a Settings switch keeps it still. It moves out of
+  the way of messages instead of hiding behind them.
+- **It celebrates the small stuff.** Every small task (sorting or renaming something, adding a bill,
+  cancelling a subscription, making a goal, putting money toward it, setting a limit) gets a quick
+  cheer, and bigger moments (milestones, a cancelled subscription, a few chores in one day) get a
+  little party.
 
 ## 6. Feedback
 

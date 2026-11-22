@@ -10,6 +10,7 @@ import { CategoryIcon } from "./category-icon";
 import { ScopeChoice, renameEvery, renamedMessage, undoRename, type Scope } from "./names";
 import { Button, Dialog, ErrorNote, Field, Input, Select, Tag, cx, toast } from "./ui";
 import { send } from "./use-api";
+import { nickelReact } from "./nickel/store";
 
 /** Remembers which rows have been shown, so only genuinely new ones animate in. */
 function useArrivals(transactions: TxView[]): Set<string> {
@@ -234,6 +235,7 @@ function CategoryPicker({ tx, onClose }: { tx: TxView | null; onClose: () => voi
     setBusy(true);
     try {
       await changeCategory(tx, { category: key, remember: true });
+      nickelReact({ type: "task", task: "category" });
       onClose();
     } catch (e) {
       toast(e instanceof Error ? e.message : "Couldn’t save. Try again.", { tone: "error" });
@@ -306,6 +308,7 @@ function TxForm({ tx, onClose }: { tx: TxView; onClose: () => void }) {
         !renamed && !body.name && !changed && body.note !== undefined ? "Note saved" : "",
       ].filter(Boolean);
       if (parts.length > 0) {
+        nickelReact({ type: "task", task: renamed || body.name ? "rename" : changed ? "category" : "note" });
         toast(parts.join(" "), {
           action: {
             label: "Undo",

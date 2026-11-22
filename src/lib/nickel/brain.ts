@@ -152,3 +152,39 @@ export const SMALL_TALK = [
 
 /** Said once, the first time he meets someone. */
 export const INTRO = "Hi, I’m Nickel! I sniff through your numbers and tell you what I notice. I’m a robot dog, not a financial advisor, so my ideas are just ideas. Tap me any time. Hold me to tell me what to add, like a bill or a goal.";
+
+/* ---------- celebrating small money tasks ---------- */
+
+/** Small money chores Nickel cheers for. */
+export type TaskKind = "rename" | "category" | "note" | "bill" | "cancelled" | "goal" | "deposit" | "milestone" | "budget" | "plan" | "done";
+
+export type TaskDetail = { name?: string; amount?: number; percent?: number };
+
+const CHEERS: Record<TaskKind, ((d: TaskDetail) => string)[]> = {
+  rename: [() => "Ooh, a name I can read! *wag wag*", () => "One less mystery charge. Good human!", () => "Tidy! I love tidy."],
+  category: [() => "Sorted! *happy beeps*", () => "Into the right basket it goes!", () => "Fetched and filed. Nice!"],
+  note: [() => "Noted! I’ll guard it with my life.", () => "A note! So organised."],
+  bill: [(d) => `${d.name ?? "That bill"} is on the calendar. No surprises now!`, () => "Bill added. I’ll keep an ear out for it. *ear twitch*"],
+  cancelled: [(d) => (d.amount ? `You cancelled ${d.name ?? "it"}! That’s ${money(d.amount)} a year back in your pocket. ZOOMIES!` : `You cancelled ${d.name ?? "it"}! *zoomies*`), (d) => `Bye bye, ${d.name ?? "subscription"}! *victory spin*`],
+  goal: [(d) => `A new goal${d.name ? `: “${d.name}”` : ""}! I’ll cheer every dollar.`, (d) => `${d.name ? `“${d.name}”` : "A new goal"}! Let’s gooo! *tail helicopter*`],
+  deposit: [(d) => `Woof! ${d.amount ? money(d.amount) : "More"} closer${d.name ? ` to “${d.name}”` : ""}.`, (d) => `*happy hop* ${d.amount ? `${money(d.amount)} in` : "Money in"}${d.name ? ` for “${d.name}”` : ""}!`],
+  milestone: [(d) => `${d.percent ?? 25}% of “${d.name ?? "your goal"}”! *does a little spin*`, (d) => `Look at that: “${d.name ?? "your goal"}” is ${d.percent ?? 25}% there! Best. Human. Ever.`],
+  budget: [(d) => `A limit for ${d.name ?? "that"}! I’ll keep an eye on it.`, () => "Budget set. *salutes with a paw*"],
+  plan: [() => "Plan updated! *proud beeps*", () => "The debt plan just got smarter. Nice!"],
+  done: [() => "*happy hop*", () => "On it, done it!"],
+};
+
+/** A party line for every few chores in a day. */
+const STREAK: Record<number, string> = {
+  3: "That’s 3 money chores today! *crunches a celebration bone*",
+  5: "5 money chores today! I’m doing zoomies around the screen!",
+  10: "10 today?! You’re the best human a robot dog could ask for.",
+};
+
+/** What Nickel says when a small task is done, and whether it's a big moment (a streak or a cancelled subscription). */
+export function cheerFor(task: TaskKind, detail: TaskDetail, countToday: number, seed: string): { text: string; party: boolean } {
+  const streak = STREAK[countToday];
+  if (streak) return { text: streak, party: true };
+  const line = pick(CHEERS[task], `${task}:${seed}`)(detail);
+  return { text: line, party: task === "cancelled" || task === "milestone" };
+}

@@ -89,7 +89,13 @@ function MoneyForm({ kind, goal, onClose }: { kind: "add" | "withdraw"; goal: Go
       if (kind === "add" && goal.saved < goal.target && goal.saved + cents >= goal.target) celebrate("You did it!", `“${goal.name}” is fully funded: ${dollars(goal.target)} saved.`);
       const undo = depositId ? { label: "Undo", run: () => send("DELETE", `/api/goals/${goal.id}/deposits/${depositId}`) } : undefined;
       toast(kind === "add" ? `Added ${dollars(cents)} to ${goal.name}` : `Took ${dollars(cents)} out of ${goal.name}`, { action: undo });
-      if (kind === "add") nickelReact({ type: "deposit", amount: cents, goal: goal.name });
+      if (kind === "add") {
+        // Crossing a quarter of the way (25, 50, 75%) is a milestone worth a party; reaching 100% gets the big celebration above.
+        const before = Math.floor((goal.saved / goal.target) * 4);
+        const after = Math.floor(((goal.saved + cents) / goal.target) * 4);
+        if (after > before && after < 4) nickelReact({ type: "task", task: "milestone", name: goal.name, percent: after * 25 });
+        else nickelReact({ type: "task", task: "deposit", name: goal.name, amount: cents });
+      }
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Couldn’t save. Try again.");
@@ -142,6 +148,7 @@ function GoalForm({ goal, today, onClose, onDeleted }: { goal: GoalView | null; 
       if (goal) await send("PATCH", `/api/goals/${goal.id}`, body);
       else await send("POST", "/api/goals", { ...body, saved: startCents });
       toast(goal ? "Goal saved" : `“${name.trim()}” added to your goals`);
+      if (!goal) nickelReact({ type: "task", task: "goal", name: name.trim() });
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Couldn’t save. Try again.");
