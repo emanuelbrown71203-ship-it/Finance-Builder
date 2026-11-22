@@ -11,8 +11,10 @@ export function proxy(request: NextRequest) {
   const { pathname, search } = request.nextUrl;
   // The site has one real address (APP_URL). Any other address Vercel adds (like the short
   // project-name one) forwards there, because sign-in, cookies and Face ID only work on the real one.
+  // The address asked for is only compared, never used to build anything: the forward always goes to APP_URL.
   const origin = siteOrigin();
-  if (origin && request.nextUrl.host !== new URL(origin).host) return NextResponse.redirect(new URL(pathname + search, origin), 308);
+  const asked = (request.headers.get("x-forwarded-host") ?? request.headers.get("host") ?? request.nextUrl.host).split(",")[0].trim().toLowerCase();
+  if (origin && asked && asked !== new URL(origin).host) return NextResponse.redirect(new URL(pathname + search, origin), 308);
   const signedIn = request.cookies.has(SESSION_COOKIE);
   const authPage = pathname === "/login" || pathname === "/signup";
   if (!signedIn && !authPage) return NextResponse.redirect(new URL("/login", request.url));
