@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gt, gte, ilike, inArray, isNull, lte, ne, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, ilike, inArray, isNull, lte, ne, or, sql } from "drizzle-orm";
 import { accounts, balanceSnapshots, budgets, debtPlans, goalDeposits, goals, holdings, items, recurringOverrides, transactions, userSettings, type Account } from "@/db/schema";
 import { category } from "@/lib/categories";
 import { DEFAULT_TIMEZONE } from "@/lib/config";
@@ -7,7 +7,7 @@ import { goalIdeas, goalPlan } from "@/lib/finance/goalplan";
 import { dollars, dollarsExact } from "@/lib/money";
 import { buildMonthPlan, spendingByCategory } from "@/lib/finance/plan";
 import { budgetPlan, categoryBudgets, monthProgress, suggestLimits, type Limit } from "@/lib/finance/budget";
-import { payoffPlan, payoffOrder, recentMonthlyPayment, type Debt, type Strategy } from "@/lib/finance/payoff";
+import { payoffPlan, payoffOrder, recentMonthlyPaydown, type Debt, type Strategy } from "@/lib/finance/payoff";
 import { FREQUENCY_LABEL, detectRecurring, monthlyEquivalent, seriesKeyFor, upcomingBetween, type RecurringKind } from "@/lib/finance/recurring";
 import { cancelHelp, isKnownSubscription } from "@/lib/finance/subscriptions";
 import type { Namer } from "@/lib/finance/names";
@@ -31,6 +31,7 @@ import type {
   NetWorthPayload,
   NetWorthPoint,
   Overview,
+  PaidBill,
   RecurringPayload,
   RecurringView,
   SyncStatus,
@@ -264,6 +265,26 @@ async function loadRecurring(ctx: Ctx): Promise<RecurringBundle> {
   return { series, history, accounts: accountList, possible: [...possible.values()] };
 }
 
+/**
+ * What bills and Extras charged this month and last, newest first. Paying a card is a transfer, so it never
+ * shows here: rent put on a card shows once, as rent.
+ */
+function paidLately(bundle: RecurringBundle, today: ISODate): PaidBill[] {
+  const from = `${addMonthsToMonth(monthOf(today), -1)}-01`;
+  const seen = new Set<string>();
+  const out: PaidBill[] = [];
+  for (const s of bundle.series) {
+    if (s.kind === "income") continue;
+    for (const h of s.history) {
+      // A bill added by hand can share its payment with the bank's own series: count it once.
+      if (h.amount >= 0 || h.date < from || h.date > today || seen.has(h.id)) continue;
+      seen.add(h.id);
+      out.push({ id: h.id, seriesKey: s.key, date: h.date, name: s.name, amount: h.amount, kind: s.kind, category: s.category, accountName: s.accountName });
+    }
+  }
+  return out.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : a.amount - b.amount));
+}
+
 function upcomingBills(bundle: RecurringBundle, today: ISODate, days: number): UpcomingBill[] {
   const to = addDays(today, days);
   const out: UpcomingBill[] = [];
@@ -291,6 +312,7 @@ export async function getRecurring(ctx: Ctx): Promise<RecurringPayload> {
     today: ctx.today,
     series: bundle.series,
     upcoming: upcomingBills(bundle, ctx.today, 45),
+    paid: paidLately(bundle, ctx.today),
     monthlyBills: live.filter((s) => s.kind === "bill").reduce((sum, s) => sum + s.monthly, 0),
     monthlySubscriptions: live.filter((s) => s.kind === "subscription").reduce((sum, s) => sum + s.monthly, 0),
     possible: bundle.possible,
@@ -702,24 +724,29 @@ export async function getDebt(ctx: Ctx): Promise<DebtPayload> {
   const strategy: Strategy = settings?.debtStrategy === "snowball" ? "snowball" : "avalanche";
   const extra = settings?.debtExtra ?? 0;
 
-  // For cards: have the payments over the last 90 days kept up with the spending? And what has actually
-  // been paid lately (it varies, and a big balance is paid down over time, not all at once).
+  // For cards: have the payments over the last 90 days kept up with the spending, with no interest
+  // charged? And how fast is the balance actually going down? Paying back rent or the month's spending
+  // isn't paying down debt, so only what's paid beyond new charges counts (`recentMonthlyPaydown`).
   const cardIds = owed.filter((a) => a.type === "credit").map((a) => a.id);
-  const cardFlow = new Map<string, { paid: number; spent: number }>();
+  const cardFlow = new Map<string, { paid: number; spent: number; interest: boolean }>();
   const cardPaid = new Map<string, number>();
   if (cardIds.length > 0) {
     const rows = await ctx.db
-      .select({ accountId: transactions.accountId, paid: sql<number>`coalesce(sum(case when ${transactions.amount} > 0 then ${transactions.amount} else 0 end), 0)::float8`, spent: sql<number>`coalesce(sum(case when ${transactions.amount} < 0 then -${transactions.amount} else 0 end), 0)::float8` })
+      .select({ accountId: transactions.accountId, date: transactions.date, amount: transactions.amount, category: transactions.category })
       .from(transactions)
-      .where(and(eq(transactions.userId, ctx.userId), inArray(transactions.accountId, cardIds), gte(transactions.date, addDays(ctx.today, -90))))
-      .groupBy(transactions.accountId);
-    for (const r of rows) cardFlow.set(r.accountId, { paid: Number(r.paid), spent: Number(r.spent) });
-    const payments = await ctx.db
-      .select({ accountId: transactions.accountId, date: transactions.date, amount: transactions.amount })
-      .from(transactions)
-      .where(and(eq(transactions.userId, ctx.userId), inArray(transactions.accountId, cardIds), eq(transactions.category, "transfer"), gt(transactions.amount, 0), gte(transactions.date, addDays(ctx.today, -100))));
+      // From the 1st of the month three months back, so each whole month has its charges and its payments.
+      .where(and(eq(transactions.userId, ctx.userId), inArray(transactions.accountId, cardIds), gte(transactions.date, `${addMonthsToMonth(monthOf(ctx.today), -3)}-01`)));
+    const since = addDays(ctx.today, -90);
+    for (const r of rows) {
+      if (r.date < since) continue;
+      const f = cardFlow.get(r.accountId) ?? { paid: 0, spent: 0, interest: false };
+      if (r.amount > 0) f.paid += r.amount;
+      else f.spent -= r.amount;
+      if (r.amount < 0 && r.category === "fees") f.interest = true;
+      cardFlow.set(r.accountId, f);
+    }
     for (const id of cardIds) {
-      const paid = recentMonthlyPayment(payments.filter((p) => p.accountId === id), monthOf(ctx.today));
+      const paid = recentMonthlyPaydown(rows.filter((r) => r.accountId === id), monthOf(ctx.today));
       if (paid) cardPaid.set(id, paid);
     }
   }
@@ -731,6 +758,9 @@ export async function getDebt(ctx: Ctx): Promise<DebtPayload> {
     const paidLately = cardPaid.get(a.id) ?? null;
     const payment = own?.monthlyPayment ?? (series ? Math.abs(monthlyEquivalent(series)) : (paidLately ?? a.minimumPayment));
     const flow = cardFlow.get(a.id);
+    const paidInFull = a.type === "credit" && own?.monthlyPayment == null && !!flow && flow.spent > 0 && !flow.interest && flow.paid >= flow.spent * 0.85;
+    // Bills put on a card this month (rent, say) are part of its balance until they're paid back.
+    const billsOnCard = a.type === "credit" ? bundle.series.filter((s) => s.kind === "bill" && s.accountId === a.id).map((s) => ({ name: s.name, amount: s.history.filter((h) => h.amount < 0 && monthOf(h.date) === monthOf(ctx.today)).reduce((t, h) => t - h.amount, 0) })).filter((b) => b.amount > 0) : [];
     return {
       id: a.id,
       name: a.name,
@@ -740,7 +770,9 @@ export async function getDebt(ctx: Ctx): Promise<DebtPayload> {
       aprPercent: own?.aprPercent ?? a.aprPercent,
       payment,
       paymentSource: own?.monthlyPayment != null ? "yours" : series || paidLately ? "history" : a.minimumPayment != null ? "bank" : null,
-      paidInFull: a.type === "credit" && own?.monthlyPayment == null && !!flow && flow.spent > 0 && flow.paid >= flow.spent * 0.85,
+      paidInFull,
+      notShrinking: a.type === "credit" && !paidInFull && own?.monthlyPayment == null && !paidLately && !!flow && flow.paid > 0,
+      billsThisMonth: billsOnCard.length > 0 ? { total: billsOnCard.reduce((t, b) => t + b.amount, 0), names: billsOnCard.map((b) => b.name) } : null,
       paidOffMonth: null,
       interest: 0,
       order: null,

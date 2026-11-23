@@ -57,6 +57,19 @@ describe("detectRecurring", () => {
     expect(upcomingBetween(s, today, "2027-01-31")).toEqual(["2026-11-27", "2026-12-27", "2027-01-27"]);
   });
 
+  it("counts rent, insurance or a loan as a bill from its second month", () => {
+    const rent = [tx("2026-09-01", "The Lofts Rent", -1800, "housing"), tx("2026-10-01", "The Lofts Rent", -2050, "housing")];
+    const [s] = detectRecurring(rent, today);
+    expect(s).toMatchObject({ kind: "bill", frequency: "monthly", nextDate: "2026-11-01", active: true });
+    // Two of an everyday or Extra charge aren't enough, and neither are two very different amounts.
+    expect(detectRecurring(monthly("Spotify", "2026-09-27", [-11.99, -11.99]), today)).toEqual([]);
+    expect(detectRecurring([tx("2026-09-04", "City Power", -60, "utilities"), tx("2026-10-04", "City Power", -240, "utilities")], today)).toEqual([]);
+  });
+
+  it("never makes a bill of interest and fees", () => {
+    expect(detectRecurring(monthly("Interest Charge On Purchases", "2026-06-15", [-41, -38, -44, -40, -39], "fees"), today)).toEqual([]);
+  });
+
   it("detects a yearly charge from two occurrences", () => {
     const [s] = detectRecurring([tx("2025-10-10", "Amazon Prime", -139, "shopping"), tx("2026-10-10", "Amazon Prime", -139, "shopping")], today);
     expect(s).toMatchObject({ frequency: "yearly", nextDate: "2027-10-10", active: true });

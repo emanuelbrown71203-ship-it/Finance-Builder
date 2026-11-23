@@ -211,10 +211,15 @@ export type TransactionsPayload = {
   accounts: { id: string; name: string; mask: string | null }[];
 };
 
+/** One charge from a bill or an Extra that has gone out. Amount is signed (negative). */
+export type PaidBill = { id: string; seriesKey: string; date: ISODate; name: string; amount: number; kind: "bill" | "subscription"; category: string; accountName: string };
+
 export type RecurringPayload = {
   today: ISODate;
   series: RecurringView[];
   upcoming: UpcomingBill[];
+  /** What bills and Extras charged this month and last, newest first. Card payments are transfers, so never here. */
+  paid: PaidBill[];
   monthlyBills: number;
   monthlySubscriptions: number;
   possible: PossibleSubscription[];
@@ -232,6 +237,10 @@ export type DebtView = {
   paymentSource: "yours" | "bank" | "history" | null;
   /** A card that is paid off as it goes isn't costing interest, so it is left out of the plan. */
   paidInFull: boolean;
+  /** A card whose payments lately only cover what's put on it (rent paid back, say), so it isn't going down. */
+  notShrinking: boolean;
+  /** Bills charged to this card this month (rent, say): part of its balance until they're paid back. */
+  billsThisMonth: { total: number; names: string[] } | null;
   paidOffMonth: string | null;
   interest: number;
   /** Position in the order extra money is aimed (1 = first). Null when not in the plan. */

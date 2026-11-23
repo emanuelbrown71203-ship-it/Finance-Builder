@@ -191,6 +191,58 @@ describe("sample household", () => {
     await setDebtSettings(ctx, { extra: 0 });
   });
 
+  it("doesn't count rent put on a card and paid back as paying it down, and a card charging interest isn't paid as you go", async () => {
+    const card = "rent-card";
+    await db.insert(accountsTable).values({ id: card, userId: DEMO_USER_ID, itemId: null, plaidAccountId: "test:rent-card", name: "Rent Card", institutionName: "Meridian Card", type: "credit", subtype: "credit card", balance: -250_000, aprPercent: 27.9, minimumPayment: 0 });
+    // Rent goes on the card each month and is paid back in pieces; interest is charged on what's left.
+    const rows = ["2026-08", "2026-09", "2026-10"].flatMap((m, i) => [
+      { id: `rent-${i}`, date: `${m}-01`, name: "PARKVIEW APTS RENT", amount: -200_000, category: "housing" },
+      { id: `back-a-${i}`, date: `${m}-09`, name: "PAYMENT THANK YOU", amount: 120_000, category: "transfer" },
+      { id: `back-b-${i}`, date: `${m}-24`, name: "PAYMENT THANK YOU", amount: 80_000, category: "transfer" },
+      { id: `int-${i}`, date: `${m}-28`, name: "INTEREST CHARGE ON PURCHASES", amount: -5_800, category: "fees" },
+    ]);
+    await db.insert(transactionsTable).values(rows.map((r) => ({ ...r, userId: DEMO_USER_ID, accountId: card, rawName: r.name })));
+    try {
+      const flat = (await getDebt(ctx)).debts.find((d) => d.id === card)!;
+      // $6,000 paid in three months, but all of it was rent: the balance isn't going down.
+      expect(flat).toMatchObject({ paidInFull: false, notShrinking: true, order: null });
+
+      // Paying $600 beyond the rent in October is $200 a month toward it.
+      await db.insert(transactionsTable).values({ id: "extra-pay", userId: DEMO_USER_ID, accountId: card, date: "2026-10-30", name: "PAYMENT THANK YOU", rawName: "PAYMENT THANK YOU", amount: 60_000, category: "transfer" });
+      const going = (await getDebt(ctx)).debts.find((d) => d.id === card)!;
+      expect(going).toMatchObject({ paidInFull: false, notShrinking: false, payment: 20_000, paymentSource: "history" });
+      expect(going.order).not.toBeNull();
+
+      // This month's rent on the card is shown as part of its balance until it's paid back.
+      expect(going.billsThisMonth).toBeNull();
+      await db.insert(transactionsTable).values({ id: "rent-now", userId: DEMO_USER_ID, accountId: card, date: "2026-11-01", name: "PARKVIEW APTS RENT", rawName: "PARKVIEW APTS RENT", amount: -205_000, category: "housing" });
+      const now = (await getDebt(ctx)).debts.find((d) => d.id === card)!;
+      expect(now.billsThisMonth).toMatchObject({ total: 205_000 });
+      expect(now.billsThisMonth!.names).toHaveLength(1);
+      // This month isn't over, so it doesn't change how fast the card is going down.
+      expect(now.payment).toBe(20_000);
+    } finally {
+      await db.delete(transactionsTable).where(inArrayOp(transactionsTable.id, [...rows.map((r) => r.id), "extra-pay", "rent-now"]));
+      await db.delete(accountsTable).where(eqOp(accountsTable.id, card));
+    }
+  });
+
+  it("lists what bills and Extras charged this month and last, never card payments", async () => {
+    const { paid, series } = await getRecurring(ctx);
+    expect(paid.length).toBeGreaterThan(0);
+    expect(paid.every((p) => p.date >= "2026-10-01" && p.date <= today && p.amount < 0)).toBe(true);
+    expect(paid.map((p) => p.date)).toEqual([...paid.map((p) => p.date)].sort().reverse());
+    expect(new Set(paid.map((p) => p.id)).size).toBe(paid.length);
+    // Each one is a charge from a bill or an Extra on the Bills screen, labelled the same way.
+    const kindOf = new Map(series.map((s) => [s.key, s.kind]));
+    expect(paid.every((p) => kindOf.get(p.seriesKey) === p.kind && p.kind !== ("income" as string))).toBe(true);
+    expect(paid.some((p) => p.name === "Parkview Apartments" && p.kind === "bill")).toBe(true);
+    expect(paid.some((p) => p.kind === "subscription")).toBe(true);
+    // Paying a card is moving your own money, not a bill.
+    const transfers = new Set((await db.select({ id: transactionsTable.id }).from(transactionsTable).where(eqOp(transactionsTable.category, "transfer"))).map((t) => t.id));
+    expect(paid.some((p) => transfers.has(p.id))).toBe(false);
+  });
+
   it("recaps last week, Monday to Sunday", async () => {
     const r = await getRecap(ctx, 0);
     // Today is Thursday Nov 19, so last week ran Nov 9 to Nov 15.

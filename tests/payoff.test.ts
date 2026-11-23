@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { payoffOrder, payoffPlan, recentMonthlyPayment, type Debt } from "@/lib/finance/payoff";
+import { payoffOrder, payoffPlan, recentMonthlyPaydown, type Debt } from "@/lib/finance/payoff";
 import { cancelHelp, isKnownSubscription } from "@/lib/finance/subscriptions";
 
 const debt = (id: string, dollars: number, aprPercent: number, payment: number): Debt => ({ id, name: id, balance: dollars * 100, aprPercent, payment: payment * 100 });
@@ -82,22 +82,61 @@ describe("subscription help", () => {
 });
 
 describe("what's actually been paid toward a card lately", () => {
-  it("averages the last three whole months, counting a month with no payment as $0, whatever the amounts", () => {
-    const payments = [
-      { date: "2026-07-20", amount: 99_999 }, // too long ago
-      { date: "2026-09-05", amount: 50_000 },
-      { date: "2026-09-25", amount: 10_000 },
-      { date: "2026-10-12", amount: 30_000 },
-      { date: "2026-11-02", amount: 80_000 }, // this month: not over yet
-      { date: "2026-10-03", amount: -5_000 }, // a charge, not a payment
+  it("averages the last three whole months of payments less new charges, counting a month with neither as $0", () => {
+    const rows = [
+      { date: "2026-07-20", amount: 99_999, category: "transfer" }, // too long ago
+      { date: "2026-09-05", amount: 50_000, category: "transfer" },
+      { date: "2026-09-25", amount: 10_000, category: "transfer" },
+      { date: "2026-10-12", amount: 30_000, category: "transfer" },
+      { date: "2026-11-02", amount: 80_000, category: "transfer" }, // this month: not over yet
+      { date: "2026-10-03", amount: -5_000, category: "shopping" }, // a new charge
+      { date: "2026-10-09", amount: 2_000, category: "shopping" }, // part of it refunded
+      { date: "2026-10-28", amount: -4_000, category: "fees" }, // interest: the plan adds that itself
     ];
-    // August $0, September $600, October $300 (November isnt over): (0 + 600 + 300) / 3.
-    expect(recentMonthlyPayment(payments, "2026-11")).toBe(30_000);
-    expect(recentMonthlyPayment(payments, "2026-11", 2)).toBe(45_000);
+    // August $0, September $600, October $300 - $50 + $20 = $270 (November isn't over): (0 + 600 + 270) / 3.
+    expect(recentMonthlyPaydown(rows, "2026-11")).toBe(29_000);
+    expect(recentMonthlyPaydown(rows, "2026-11", 2)).toBe(43_500);
   });
 
-  it("is nothing when nothing was paid", () => {
-    expect(recentMonthlyPayment([], "2026-11")).toBeNull();
-    expect(recentMonthlyPayment([{ date: "2026-11-02", amount: 1000 }], "2026-11")).toBeNull();
+  it("doesn't count paying back rent put on the card as paying it down", () => {
+    const rows = [
+      // Rent goes on the card each month and is paid back in pieces through the month.
+      ...["2026-08", "2026-09", "2026-10"].flatMap((m) => [
+        { date: `${m}-01`, amount: -200_000, category: "housing" },
+        { date: `${m}-08`, amount: 80_000, category: "transfer" },
+        { date: `${m}-15`, amount: 70_000, category: "transfer" },
+        { date: `${m}-27`, amount: 50_000, category: "transfer" },
+      ]),
+    ];
+    // $2,000 paid each month, all of it rent: the balance isn't going down.
+    expect(recentMonthlyPaydown(rows, "2026-11")).toBeNull();
+    // An extra $300 one month on top of paying the rent back: that's $100 a month toward it.
+    expect(recentMonthlyPaydown([...rows, { date: "2026-10-30", amount: 30_000, category: "transfer" }], "2026-11")).toBe(10_000);
+  });
+
+  it("doesn't count a payment the bank sent back", () => {
+    const rows = [
+      // Returned as a "fee" for the same amount, then paid again for real.
+      { date: "2026-09-15", amount: 374_106, category: "transfer" },
+      { date: "2026-09-18", amount: -374_106, category: "fees" },
+      { date: "2026-09-20", amount: 375_020, category: "transfer" },
+      // An autopay returned as a negative transfer, plus the late fee: only the fee is a fee.
+      { date: "2026-10-07", amount: 7_100, category: "transfer" },
+      { date: "2026-10-11", amount: -7_100, category: "transfer" },
+      { date: "2026-10-11", amount: -2_900, category: "fees" },
+      // Bounced just after the month ended: October's payment never happened.
+      { date: "2026-10-30", amount: 50_000, category: "transfer" },
+      { date: "2026-11-02", amount: -50_000, category: "fees" },
+      // Cash sent to someone with the card adds to what's owed.
+      { date: "2026-10-12", amount: -15_020, category: "transfer" },
+    ];
+    // $3,750.20 - $150.20 = $3,600 over three months.
+    expect(recentMonthlyPaydown(rows, "2026-11")).toBe(120_000);
+  });
+
+  it("is nothing when nothing was paid, or spending outpaced the payments", () => {
+    expect(recentMonthlyPaydown([], "2026-11")).toBeNull();
+    expect(recentMonthlyPaydown([{ date: "2026-11-02", amount: 1000, category: "transfer" }], "2026-11")).toBeNull();
+    expect(recentMonthlyPaydown([{ date: "2026-10-02", amount: 10_000, category: "transfer" }, { date: "2026-10-05", amount: -30_000, category: "food" }], "2026-11")).toBeNull();
   });
 });

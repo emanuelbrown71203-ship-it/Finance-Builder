@@ -101,14 +101,31 @@ export function payoffPlan(debts: Debt[], extra: number, strategy: Strategy, sta
 }
 
 /**
- * What someone has actually been paying toward a card lately: the payments of the last `months` whole
- * months before `month`, averaged (a month with no payment counts as $0). People rarely pay a big card
- * off in one go or pay the same amount every month, so this is a fairer starting point for a payoff
- * plan than the bank's minimum. Null when nothing was paid.
+ * What someone has actually been putting toward a card's balance lately: each of the last `months` whole
+ * months before `month`, what they paid the card less what they newly charged to it (refunds taken off;
+ * interest and fees aside, since the payoff plan adds interest itself), averaged. Paying back rent or the
+ * month's spending isn't paying down debt, so it cancels out; only what goes beyond new spending counts.
+ * A payment the bank sent back doesn't count either: banks file the return as a negative transfer or as a
+ * "fee" for the same amount a few days later. Null when that comes to nothing (the balance isn't going down).
  */
-export function recentMonthlyPayment(payments: { date: string; amount: number }[], month: string, months = 3): number | null {
+export function recentMonthlyPaydown(rows: { date: string; amount: number; category: string }[], month: string, months = 3): number | null {
   const [y, m] = month.split("-").map(Number);
   const first = new Date(Date.UTC(y, m - 1 - months, 1)).toISOString().slice(0, 7);
-  const total = payments.filter((p) => p.amount > 0 && p.date.slice(0, 7) >= first && p.date.slice(0, 7) < month).reduce((s, p) => s + p.amount, 0);
-  return total > 0 ? Math.round(total / months) : null;
+  const day = (d: string) => Date.parse(`${d}T00:00:00Z`) / 86_400_000;
+  // Returned payments: a payment, then the same amount back out within ten days. Neither one counts.
+  const sorted = [...rows].sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+  const returned = new Set<(typeof rows)[number]>();
+  for (const r of sorted) {
+    if (r.amount >= 0 || (r.category !== "transfer" && r.category !== "fees")) continue;
+    const paid = sorted.find((p) => !returned.has(p) && p.category === "transfer" && p.amount === -r.amount && day(r.date) - day(p.date) >= 0 && day(r.date) - day(p.date) <= 10);
+    if (paid) returned.add(paid).add(r);
+  }
+  let net = 0;
+  for (const r of rows) {
+    const mo = r.date.slice(0, 7);
+    if (mo < first || mo >= month || returned.has(r) || r.category === "fees") continue;
+    // Payments in; new charges out (refunds back in). Money sent to someone on the card is a charge too.
+    net += r.amount;
+  }
+  return net > 0 ? Math.round(net / months) : null;
 }

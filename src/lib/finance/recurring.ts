@@ -85,7 +85,8 @@ function median(values: number[]): number {
 export function detectRecurring(transactions: TxLike[], today: ISODate): RecurringSeries[] {
   const groups = new Map<string, TxLike[]>();
   for (const t of transactions) {
-    if (t.category === "transfer" || t.amount === 0) continue;
+    // Transfers aren't bills, and neither are interest and fees: they come and go with a balance.
+    if (t.category === "transfer" || t.category === "fees" || t.amount === 0) continue;
     const key = seriesKeyFor(t.name, t.amount);
     const list = groups.get(key);
     if (list) list.push(t);
@@ -99,7 +100,12 @@ export function detectRecurring(transactions: TxLike[], today: ISODate): Recurri
     const gaps = txs.slice(1).map((t, i) => diffDays(t.date, txs[i].date));
     const typicalGap = median(gaps);
     const freq = FREQUENCIES.find((f) => typicalGap >= f.min && typicalGap <= f.max);
-    if (!freq || txs.length < freq.minCount) continue;
+    if (!freq) continue;
+    // Rent, utilities, insurance or a loan paid two months running, about a month apart and about the same,
+    // is a bill already: banks often send only a few months of history at first.
+    const last2 = txs.slice(-2).map((t) => Math.abs(t.amount));
+    const billTwice = freq.frequency === "monthly" && txs.length === 2 && BILL_CATEGORIES.has(txs[1].category) && Math.abs(last2[0] - last2[1]) / Math.max(...last2) <= 0.2;
+    if (txs.length < freq.minCount && !billTwice) continue;
 
     // Most gaps must fit the schedule. One late or skipped payment is fine.
     const fitting = gaps.filter((g) => g >= freq.min - 2 && g <= freq.max + 2).length;

@@ -62,8 +62,17 @@ for it to be remembered and used whenever an app is built.
   the same amount every month). Paying a card is a transfer, so the amount never changes spending or
   "left to spend" (purchases count when they're made). "Coming up", its total and Nickel's purchase
   check set aside only a card's **minimum** due (shown with the balance beside it), never the whole
-  balance. A card's payoff plan starts from what was actually paid lately (`recentMonthlyPayment`: the
-  last three whole months, averaged), unless the person sets their own amount.
+  balance. A card's payoff plan starts from how fast it has actually gone down lately
+  (`recentMonthlyPaydown`: payments less new charges, the last three whole months, averaged), unless the
+  person sets their own amount. Paying back rent or the month's spending put on a card is not paying down
+  debt (the owner charges rent to a card and pays it back through the month), and a payment the bank
+  sent back (same amount back out within ten days, filed as a transfer or a "fee") never counts. A card
+  that charged interest or fees in the last 90 days is never "paid as you go". Each card says how much
+  of this month's bills went on it, since that's part of its balance until it's paid back.
+- **Bills seen twice count.** Rent, utilities, insurance or a loan charged two months running at about
+  the same amount is a bill (banks send only a few months at first); other charges need three. Interest
+  and fees are never bills. The Bills screen lists what bills and Extras charged this month and last
+  ("Paid lately"); card payments never appear there.
 - **Apple Card comes in from its statements** (Apple shares it only with App Store apps, so Plaid can't
   link it on the web). `src/lib/finance/card-import.ts` reads Wallet's CSV export, and only Apple's own
   columns (OFX is refused: no categories, different dates); `src/server/card-import.ts` keeps it as a

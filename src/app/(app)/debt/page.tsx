@@ -52,7 +52,7 @@ function EditDebt({ debt, onClose }: { debt: DebtView; onClose: () => void }) {
         You owe <span className="tabular font-bold text-ink">{dollars(debt.balance)}</span>. Both numbers are on your statement.
       </p>
       <Field label="Interest rate (APR), in percent">{(id) => <Input id={id} inputMode="decimal" enterKeyHint="next" value={apr} onChange={(e) => setApr(e.target.value)} placeholder="6.5" />}</Field>
-      <Field label="What you pay each month" hint={debt.type === "credit" ? "Roughly is fine: if it changes month to month, put about what you usually pay. Passbook starts from your average of the last three months." : undefined} error={error}>
+      <Field label="What you pay each month" hint={debt.type === "credit" ? "What goes toward the balance itself, beyond paying back new things you put on it (like rent). Roughly is fine. Passbook starts from the last three months." : undefined} error={error}>
         {(id) => <MoneyInput id={id} value={payment} onChange={(e) => setPayment(e.target.value)} placeholder="0" />}
       </Field>
       <div className="mt-2 flex gap-2">
@@ -221,15 +221,22 @@ export default function DebtPage() {
                     <span className="min-w-0 flex-1">
                       <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
                         <span className="font-bold">{d.name}</span>
-                        {d.paidInFull ? <Tag tone="mint">Paid as you go</Tag> : d.order === null ? <Tag tone="canary">Add details</Tag> : d.order === 1 && data.extra > 0 && inPlan.length > 1 ? <Tag tone="sky">Extra goes here first</Tag> : null}
+                        {d.paidInFull ? <Tag tone="mint">Paid as you go</Tag> : d.order === null ? <Tag tone="canary">{d.notShrinking ? "Not going down" : "Add details"}</Tag> : d.order === 1 && data.extra > 0 && inPlan.length > 1 ? <Tag tone="sky">Extra goes here first</Tag> : null}
                       </span>
                       <span className="block text-small text-ink-3">
                         {d.paidInFull
                           ? "Not costing interest, so it’s left out of the plan"
                           : d.order === null
-                            ? "Needs its interest rate and monthly payment"
-                            : `${d.aprPercent}% interest, ${d.type === "credit" && d.paymentSource === "history" ? `about ${dollars(d.payment!)} a month (your average lately)` : `${dollars(d.payment!)} a month`}${d.paidOffMonth ? `, done ${monthLabel(d.paidOffMonth)}` : ""}`}
+                            ? d.notShrinking
+                              ? "Lately your payments just cover what you put on it. Tap to set what you’ll pay toward it"
+                              : "Needs its interest rate and monthly payment"
+                            : `${d.aprPercent}% interest, ${d.type === "credit" && d.paymentSource === "history" ? `going down about ${dollars(d.payment!)} a month lately` : `${dollars(d.payment!)} a month`}${d.paidOffMonth ? `, done ${monthLabel(d.paidOffMonth)}` : ""}`}
                       </span>
+                      {d.billsThisMonth && (
+                        <span className="mt-0.5 block text-small text-ink-3">
+                          {dollars(d.billsThisMonth.total)} of bills went on it this month ({d.billsThisMonth.names.join(", ")})
+                        </span>
+                      )}
                     </span>
                     <span className="tabular whitespace-nowrap font-bold">{dollars(d.balance)}</span>
                   </button>

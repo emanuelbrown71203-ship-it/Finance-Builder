@@ -11,11 +11,11 @@ import { BankSays, RenameForm } from "@/components/names";
 import { Button, Dialog, EmptyState, ErrorNote, Fold, PageHeader, Sheet, SheetHeader, Skeleton, Tag, toast } from "@/components/ui";
 import { send, useApi } from "@/components/use-api";
 import { nickelReact } from "@/components/nickel/store";
-import { diffDays, formatDistance, formatMedium, formatShort } from "@/lib/dates";
+import { addMonthsToMonth, diffDays, formatDistance, formatMedium, formatShort, monthName, monthOf } from "@/lib/dates";
 import { FREQUENCY_LABEL } from "@/lib/finance/recurring";
 import type { CancelHelp } from "@/lib/finance/subscriptions";
 import { dollars, dollarsExact } from "@/lib/money";
-import type { RecurringPayload, RecurringView } from "@/lib/types";
+import type { PaidBill, RecurringPayload, RecurringView } from "@/lib/types";
 
 function Stat({ label, value, note, tone }: { label: string; value: string; note: string; tone: string }) {
   return (
@@ -59,6 +59,62 @@ function SeriesRow({ series, today, onOpen }: { series: RecurringView; today: st
         </span>
       </button>
     </li>
+  );
+}
+
+/**
+ * What bills and Extras charged this month and last: a total for each month, and each payment one tap
+ * away. Tapping a payment opens its bill, to move it between Bills and Extras or rename it.
+ */
+function PaidLately({ paid, today, onOpen }: { paid: PaidBill[]; today: string; onOpen: (key: string) => void }) {
+  const thisMonth = monthOf(today);
+  const months = [thisMonth, addMonthsToMonth(thisMonth, -1)].map((month) => {
+    const rows = paid.filter((p) => monthOf(p.date) === month);
+    return { month, rows, total: rows.reduce((s, p) => s - p.amount, 0), bills: rows.filter((p) => p.kind === "bill").reduce((s, p) => s - p.amount, 0) };
+  });
+  return (
+    <Sheet>
+      <SheetHeader title="Paid lately" hint="What your bills and extras charged this month and last. Card payments aren’t counted, so rent you put on a card shows once, as rent." />
+      <div className="grid grid-cols-2 gap-3">
+        {months.map((m, i) => (
+          <div key={m.month} className="min-w-0 rounded-2xl border border-line-soft px-3.5 py-3">
+            <p className="truncate text-small font-bold">{i === 0 ? `${monthName(m.month)} so far` : monthName(m.month)}</p>
+            <p className="figure mt-1.5 text-[1.5rem]">{dollars(m.total)}</p>
+            <p className="mt-1 truncate text-small text-ink-3">{m.rows.length === 0 ? "Nothing yet" : `${dollars(m.bills)} of it bills`}</p>
+          </div>
+        ))}
+      </div>
+      {paid.length > 0 ? (
+        <Fold title="Each payment" summary={`${paid.length} ${paid.length === 1 ? "payment" : "payments"}`} className="mt-2">
+          {months
+            .filter((m) => m.rows.length > 0)
+            .map((m) => (
+              <div key={m.month} className="pb-2">
+                <p className="px-2 pb-1 pt-2 text-small font-bold text-ink-2">{monthName(m.month)}</p>
+                <ul>
+                  {m.rows.map((p) => (
+                    <li key={p.id}>
+                      <button type="button" onClick={() => onOpen(p.seriesKey)} className="flex min-h-[56px] w-full items-center gap-3 rounded-2xl px-2 py-2 text-left transition-colors hover:bg-sunk active:bg-sunk">
+                        <CategoryIcon category={p.category} />
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate font-bold">{p.name}</span>
+                          <span className="block truncate text-small text-ink-3">
+                            {formatShort(p.date)}, {p.kind === "bill" ? "bill" : "extra"}
+                            {p.accountName ? `, ${p.accountName}` : ""}
+                          </span>
+                        </span>
+                        <span className="tabular whitespace-nowrap font-medium">{dollarsExact(-p.amount)}</span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+        </Fold>
+      ) : (
+        <p className="mt-3 text-small text-ink-3">Nothing from your bills or extras has gone out this month or last.</p>
+      )}
+    </Sheet>
   );
 }
 
@@ -313,7 +369,7 @@ export default function BillsPage() {
           ))}
         </ul>
       ) : (
-        <EmptyState title={empty}>Charges are recognized once they repeat on a schedule, usually by the third time.</EmptyState>
+        <EmptyState title={empty}>Charges are recognized once they repeat on a schedule: a bill like rent by its second month, others usually by the third time.</EmptyState>
       )}
     </Sheet>
   );
@@ -366,30 +422,34 @@ export default function BillsPage() {
       )}
 
       <div className="grid grid-cols-1 items-start gap-5 lg:grid-cols-[1fr_1.15fr]">
-        <Sheet>
-          <SheetHeader title="Coming up" hint="The next six weeks, in the order they’re due." />
-          {data.upcoming.length > 0 ? (
-            <>
-              <ul className="flex flex-col gap-2">
-                {data.upcoming.slice(0, 6).map((bill) => (
-                  <BillRow key={`${bill.key}-${bill.date}`} bill={bill} today={data.today} />
-                ))}
-              </ul>
-              {data.upcoming.length > 6 && (
-                // Keep the screen short: the later ones are one tap away.
-                <Fold title="Later on" summary={`${data.upcoming.length - 6} more`} className="mt-2">
-                  <ul className="flex flex-col gap-2 pb-1">
-                    {data.upcoming.slice(6).map((bill) => (
-                      <BillRow key={`${bill.key}-${bill.date}`} bill={bill} today={data.today} />
-                    ))}
-                  </ul>
-                </Fold>
-              )}
-            </>
-          ) : (
-            <EmptyState title="Nothing due soon" />
-          )}
-        </Sheet>
+        <div className="grid grid-cols-1 gap-5">
+          <Sheet>
+            <SheetHeader title="Coming up" hint="The next six weeks, in the order they’re due." />
+            {data.upcoming.length > 0 ? (
+              <>
+                <ul className="flex flex-col gap-2">
+                  {data.upcoming.slice(0, 6).map((bill) => (
+                    <BillRow key={`${bill.key}-${bill.date}`} bill={bill} today={data.today} />
+                  ))}
+                </ul>
+                {data.upcoming.length > 6 && (
+                  // Keep the screen short: the later ones are one tap away.
+                  <Fold title="Later on" summary={`${data.upcoming.length - 6} more`} className="mt-2">
+                    <ul className="flex flex-col gap-2 pb-1">
+                      {data.upcoming.slice(6).map((bill) => (
+                        <BillRow key={`${bill.key}-${bill.date}`} bill={bill} today={data.today} />
+                      ))}
+                    </ul>
+                  </Fold>
+                )}
+              </>
+            ) : (
+              <EmptyState title="Nothing due soon" />
+            )}
+          </Sheet>
+
+          <PaidLately paid={data.paid} today={data.today} onOpen={setOpenKey} />
+        </div>
 
         <div className="grid grid-cols-1 gap-5">
           {list("Bills", "What you must pay: rent, utilities, insurance, loans, your phone. Set aside each month.", bills, "No bills found yet")}
