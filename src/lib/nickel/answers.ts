@@ -20,7 +20,7 @@ export type Snapshot = {
   /** Bills and subscriptions that repeat (or were added by hand), with when each is next due. */
   bills: { name: string; nextDate: ISODate; amount: number; active: boolean; category: string }[];
   /** This month's everyday spending by category, its budget (with anything carried over), and bills paid from it. */
-  spending: { category: string; label: string; spent: number; limit: number | null; lastMonth?: number; bills?: number }[];
+  spending: { category: string; label: string; spent: number; limit: number | null; lastMonth?: number; bills?: number; status?: string }[];
   goals: { id: string; name: string; saved: number; target: number; status: string; perMonth: number | null; targetDate: ISODate | null; projectedDate: ISODate | null }[];
   netWorth: number;
   netWorthChange: number;
@@ -30,6 +30,12 @@ export type Snapshot = {
   savings: number;
   nextPayday: ISODate | null;
   priciestDebt: { name: string; apr: number } | null;
+  /** Balances: money in checking and savings, and what's owed on cards and loans (as a positive number). */
+  accounts?: { name: string; kind: "checking" | "savings" | "card" | "loan"; balance: number }[];
+  /** Spending (bills included, transfers not): today, this week from Monday, and all of last week. */
+  weeks?: { today: number; thisWeek: number; lastWeek: number };
+  /** Extras: subscriptions you could live without, and what each costs a month. */
+  extras?: { name: string; monthly: number }[];
 };
 
 export type Verdict = "yes" | "wait" | "no";
@@ -61,7 +67,7 @@ const CATEGORY_WORDS: Record<string, string[]> = {
   groceries: ["groceries", "grocery", "food shopping", "supermarket"],
   dining: ["dining", "restaurants", "restaurant", "eating out", "takeout", "take out", "coffee", "food", "lunch", "dinner"],
   transport: ["transport", "transportation", "gas", "fuel", "car", "uber", "lyft", "transit", "parking"],
-  shopping: ["shopping", "clothes", "amazon"],
+  shopping: ["shopping", "clothes"],
   entertainment: ["entertainment", "fun", "movies", "streaming", "games"],
   health: ["health", "doctor", "pharmacy", "medical", "gym", "fitness"],
   personal: ["personal care", "haircut", "beauty"],
@@ -214,7 +220,7 @@ export function answerQuestion(question: string, s: Snapshot, last?: LastVerdict
   }
   if (/\b(good (boy|dog|bot|nickel)|thank(s| you)|love you|cute)\b/.test(q)) return { text: "*happy beeps* Anytime! Woof!" };
   if (/\b(who are you|what can you do|what do you do|help|how do you work)\b/.test(q)) {
-    return { text: "I’m a robot dog who reads your numbers. Ask me what’s left to spend, what bills are coming up, what you’ve spent on something, or how a goal is doing. Or tell me to add a bill or a goal. I’m not a financial advisor, just a very good boy." };
+    return { text: "I’m a robot dog who reads your numbers. Ask me what’s left to spend, what’s due, what you spent on something or at a store (this week, this month or last), how much you owe or have, whether you’re over budget, or “can I afford…?”. Or tell me to add a bill or a goal. I’m not a financial advisor, just a very good boy." };
   }
 
   // Net worth ("is Netflix worth it" isn't about net worth).
@@ -224,9 +230,63 @@ export function answerQuestion(question: string, s: Snapshot, last?: LastVerdict
   }
 
   // The latest charge.
-  if (/\b(last|latest|recent|newest) (purchase|charge|transaction|payment|thing i bought)\b/.test(q) || /\bwhat did i (just )?(buy|spend)\b/.test(q)) {
+  // ("What did I spend at Amazon" or "last month" is about spending, below.)
+  const justNow = /\bwhat did i (just )?(buy|spend)\b/.test(q) && !/\b(at|on|for|in)\s+\w/.test(q.replace(/^.*?\b(buy|spend)\b/, "")) && !/\b(this|last) (month|week)\b|\btoday\b/.test(q);
+  if (/\b(last|latest|recent|newest) (purchase|charge|transaction|payment|thing i bought)\b/.test(q) || justNow) {
     if (!s.latest) return { text: "Nothing’s come through yet." };
     return { text: `The latest is ${money(s.latest.amount)} ${s.latest.amount < 0 ? "at" : "from"} ${s.latest.name} on ${formatShort(s.latest.date)}.`, href: "/transactions", link: "See transactions" };
+  }
+
+  // What's owed on cards and loans ("when is the card due" is about bills, below).
+  const cardsOnly = /\b(credit )?cards?\b/.test(q) && !/\bloans?\b/.test(q);
+  const loansOnly = /\bloans?\b/.test(q) && !/\bcards?\b/.test(q);
+  const owed = (s.accounts ?? []).filter((a) => (cardsOnly ? a.kind === "card" : loansOnly ? a.kind === "loan" : a.kind === "card" || a.kind === "loan") && a.balance > 0);
+  if (/\b(owe|owing|debts?|in debt|credit cards?|card balances?|loan balances?|balance on|how much (is|do i have) on)\b/.test(q) && !/\b(due|minimum|when)\b/.test(q)) {
+    const one = mentioned(q, owed);
+    if (one) return { text: `${one.name} has ${money(one.balance)} on it.`, href: "/debt", link: "See debt payoff" };
+    if (owed.length === 0) return { text: `You don’t owe anything on ${cardsOnly ? "a card" : "a card or loan"} that I can see. *proud wag*`, href: "/debt", link: "See debt payoff" };
+    const total = owed.reduce((sum, a) => sum + a.balance, 0);
+    const top = [...owed].sort((a, b) => b.balance - a.balance).slice(0, 3).map((a) => `${a.name} ${money(a.balance)}`);
+    const what = cardsOnly ? (owed.length === 1 ? "1 card" : `${owed.length} cards`) : loansOnly ? (owed.length === 1 ? "1 loan" : `${owed.length} loans`) : owed.length === 1 ? "1 card or loan" : `${owed.length} cards and loans`;
+    return { text: `You owe ${money(total)} across ${what}: ${top.join(", ")}${owed.length > 3 ? ", and more" : ""}.`, href: "/debt", link: "See debt payoff" };
+  }
+
+  // Money in the bank.
+  const banked = (s.accounts ?? []).filter((a) => a.kind === "checking" || a.kind === "savings");
+  if (/\b(how much (money|cash)|money (do|have) i (have|got)|cash (do|have) i (have|got)|in (my )?(checking|savings|bank|accounts?)|bank (balance|account)|account balances?|my balance|checking balance|savings balance)\b/.test(q)) {
+    if (banked.length === 0) return { text: "I can’t see a checking or savings account yet.", href: "/accounts", link: "See accounts" };
+    const checking = banked.filter((a) => a.kind === "checking").reduce((sum, a) => sum + a.balance, 0);
+    const savings = banked.filter((a) => a.kind === "savings").reduce((sum, a) => sum + a.balance, 0);
+    const one = /\bsavings\b/.test(q) && !/\bchecking\b/.test(q) ? "savings" : /\bchecking\b/.test(q) && !/\bsavings\b/.test(q) ? "checking" : null;
+    if (one === "savings") return { text: `${money(savings)} in savings.`, href: "/accounts", link: "See accounts" };
+    if (one === "checking") return { text: `${money(checking)} in checking.`, href: "/accounts", link: "See accounts" };
+    return { text: `${checking < 0 ? "−" : ""}${money(checking)} in checking${savings ? ` and ${money(savings)} in savings` : ""}.`, href: "/accounts", link: "See accounts" };
+  }
+
+  // Where the money goes.
+  if (/\b(where (is|does|did|has) (all )?(my|the) money (go|going|gone|went)|where'?s (all )?my money (going|gone)|biggest (expense|expenses|spending|category)|spend(ing)? (the )?most|most money (on|goes)|top (categories|spending|expenses))\b/.test(q)) {
+    const rows = s.spending.map((r) => ({ label: r.label, total: Math.max(0, r.spent) + (r.bills ?? 0) })).filter((r) => r.total > 0).sort((a, b) => b.total - a.total);
+    if (rows.length === 0) return { text: "Nothing’s been spent yet this month.", href: "/budget", link: "See budget" };
+    return { text: `This month the most has gone to ${rows.slice(0, 3).map((r) => `${r.label} (${money(r.total)})`).join(", ")}.`, href: "/budget", link: "See budget" };
+  }
+
+  // Budgets: over, heading over, or fine.
+  if (/\b(over (my |the )?budgets?|on budget|under budget|within (my |the )?budget|blown? (my |the )?budget|how'?s (my|the) budget|how is (my|the) budget|budgets? (doing|looking))\b/.test(q)) {
+    const limited = s.spending.filter((r) => r.limit !== null);
+    if (limited.length === 0) return { text: "You haven’t set any budgets yet. Spending, Budget has a one-tap suggestion.", href: "/budget", link: "See budget" };
+    const over = limited.filter((r) => r.spent > (r.limit ?? 0));
+    const heading = limited.filter((r) => r.status === "watch" && !over.includes(r)).map((r) => r.label);
+    const going = heading.length ? `${heading.join(" and ")} ${heading.length === 1 ? "is" : "are"} on pace to go over.` : "";
+    if (over.length) return { text: `${over.map((r) => `${r.label} is ${money(r.spent - (r.limit ?? 0))} over`).join(", ")}.${going ? ` ${going}` : ""}`, href: "/budget", link: "See budget" };
+    if (going) return { text: `Nothing’s over yet, but ${going.charAt(0).toLowerCase()}${going.slice(1)}`, href: "/budget", link: "See budget" };
+    return { text: `All ${limited.length} of your budgets are on track. *happy wag*`, href: "/budget", link: "See budget" };
+  }
+
+  // Saved so far.
+  if (/\b(how much (have i|i'?ve|did i) (saved|save)|my savings|total saved|saved up)\b/.test(q)) {
+    const inGoals = s.goals.reduce((sum, g) => sum + g.saved, 0);
+    const goals = s.goals.length ? ` Your goals have ${money(inGoals)} put toward them.` : " No savings goals yet: tell me “new goal” to start one.";
+    return { text: `${money(s.savings)} in savings accounts.${goals}`, href: "/savings", link: "See savings" };
   }
 
   // Payday.
@@ -237,7 +297,7 @@ export function answerQuestion(question: string, s: Snapshot, last?: LastVerdict
   }
 
   // Money in.
-  if (/\b(paycheck|pay check|salary|income|get paid|got paid|money in)\b/.test(q) && !/\bbefore\b/.test(q)) {
+  if (/\b(paycheck|pay check|salary|income|get paid|got paid|money in|how much (do|did) i (make|earn|bring in)|i earn(ed)?)\b/.test(q) && !/\bbefore\b/.test(q)) {
     return { text: `${money(s.incomeReceived)} has come in this month, of about ${money(s.incomeExpected)} expected.`, href: "/", link: "See the month" };
   }
 
@@ -275,10 +335,26 @@ export function answerQuestion(question: string, s: Snapshot, last?: LastVerdict
       const shown = row?.limit ? spent : spent + bills;
       return { text: `You’ve spent ${money(shown)} on ${label} this month${limit}${plus}.`, href: `/transactions?category=${cat[0]}`, link: "See them" };
     }
-    const place = /\b(?:at|on)\s+(.+?)(?:\s+(?:this|last)\s+(?:month|week|year))?$/.exec(q);
+    const place = /\b(?:at|on)\s+(.+?)(?:\s+(?:this|last)\s+(?:month|week|year)|\s+today)?$/.exec(q);
     if (place && place[1].length >= 2 && !/^(the )?(month|week|year|today|average|total)$/.test(place[1])) return { merchant: place[1] };
+    if (lastMonth) {
+      const before = s.spending.reduce((sum, r) => sum + (r.lastMonth ?? 0), 0);
+      return { text: `You spent ${money(before)} last month, bills included, not counting transfers.`, href: "/budget", link: "See budget" };
+    }
+    const w = s.weeks;
+    if (w && /\blast week\b/.test(q)) return { text: `You spent ${money(w.lastWeek)} last week, bills included.`, href: "/transactions", link: "See transactions" };
+    if (w && /\b(this week|week so far)\b/.test(q)) return { text: `${money(w.thisWeek)} spent so far this week, bills included.`, href: "/transactions", link: "See transactions" };
+    if (w && /\btoday\b/.test(q)) return { text: w.today > 0 ? `${money(w.today)} spent today.` : "Nothing spent today. *impressed tail wag*", href: "/transactions", link: "See transactions" };
     const total = s.spending.reduce((sum, r) => sum + r.spent + (r.bills ?? 0), 0);
-    return { text: `${money(total)} spent so far this month, not counting transfers.`, href: "/budget", link: "See budget" };
+    return { text: `${money(total)} spent so far this month, bills included, not counting transfers.`, href: "/budget", link: "See budget" };
+  }
+
+  // Extras: the subscriptions you could live without.
+  if (/\b(subscriptions?|extras|streaming services?)\b/.test(q) && !/\b(due|coming up|upcoming|next|when)\b/.test(q) && s.extras) {
+    if (s.extras.length === 0) return { text: "I don’t see any subscriptions repeating right now.", href: "/bills", link: "See bills" };
+    const total = s.extras.reduce((sum, e) => sum + e.monthly, 0);
+    const top = [...s.extras].sort((a, b) => b.monthly - a.monthly).slice(0, 4).map((e) => `${e.name} ${money(e.monthly)}`);
+    return { text: `${s.extras.length} extra${s.extras.length === 1 ? "" : "s"}, about ${money(total)} a month: ${top.join(", ")}${s.extras.length > 4 ? ", and more" : ""}.`, href: "/bills", link: "See bills" };
   }
 
   // Bills: one by name ("Netflix") or by what it is ("rent" for a landlord's name), or what's coming up.

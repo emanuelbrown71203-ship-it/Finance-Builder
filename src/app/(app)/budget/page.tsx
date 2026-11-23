@@ -13,6 +13,9 @@ import { Switch } from "@/components/settings-sections";
 import { Button, Dialog, EmptyState, ErrorNote, Field, Fold, IconButton, MoneyInput, PageHeader, Sheet, SheetHeader, Skeleton, Tag, cx, toast } from "@/components/ui";
 import { send, useApi } from "@/components/use-api";
 import { BUDGET_CATEGORIES, SPENDING_CATEGORIES, category } from "@/lib/categories";
+import { TxList } from "@/components/transactions";
+import { GoalDialog, type GoalSheet } from "@/components/goals";
+import { PixelIcon } from "@/components/pixel-icons";
 import { addMonthsToMonth, formatShort, monthEnd, monthName, monthOf } from "@/lib/dates";
 import { WINS } from "@/lib/game/progress";
 import { dollars, dollarsExact, parseDollarsToCents } from "@/lib/money";
@@ -140,6 +143,85 @@ function PlanCard({ data }: { data: BudgetPayload }) {
       {data.isCurrent && p.unplanned > 2000 && limited.length > 0 && <p className="mt-2 rounded-control bg-sunk px-3.5 py-3 text-small text-ink-2">{dollars(p.unplanned)} has no job yet. Raise a limit, or put it toward a goal in Wealth.</p>}
       {data.isCurrent && p.unplanned < 0 && <p className="mt-2 rounded-control bg-pink px-3.5 py-3 text-small text-pink-ink">Your plan asks for {dollars(-p.unplanned)} more than comes in this month. Lowering a limit or two would close the gap.</p>}
     </Sheet>
+  );
+}
+
+/**
+ * Savings, as the budget's first line: what the goals set aside each month (taken out before everyday
+ * budgets, like a bill) and what's gone toward them this month. With no goal yet, it's where to start one.
+ */
+function SavingsRow({ data, onOpen }: { data: BudgetPayload; onOpen: () => void }) {
+  const { goals, putAside } = data.savings;
+  const planned = data.plan.saving;
+  const share = planned > 0 ? Math.min(1, Math.max(0, putAside) / planned) : 0;
+  return (
+    <li>
+      <button type="button" onClick={onOpen} className="flex min-h-[64px] w-full items-center gap-3 rounded-2xl px-2 py-2 text-left transition-colors hover:bg-sunk active:bg-sunk">
+        <span aria-hidden className="inline-flex size-10 shrink-0 items-center justify-center rounded-xl bg-[var(--c-savings)] text-sheet">
+          <PixelIcon name="savings" size={20} />
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block font-bold">Savings</span>
+          <span className="block truncate text-small text-ink-3">
+            {goals.length === 0 ? "Put money aside each month for something" : planned > 0 ? `${dollars(Math.max(0, putAside))} of ${dollars(planned)} put toward your goals${data.isCurrent ? " so far" : ""}` : "Your goals have no monthly amount yet"}
+          </span>
+          {planned > 0 && (
+            <span aria-hidden className="mt-1.5 block h-1.5 overflow-hidden rounded-full bg-sunk">
+              <span className="block h-full rounded-full bg-[var(--c-savings)]" style={{ width: `${share * 100}%` }} />
+            </span>
+          )}
+        </span>
+        <span className="tabular shrink-0 font-bold">{goals.length === 0 ? <Tag tone="mint">Start</Tag> : `${dollars(planned)}/mo`}</span>
+        <ChevronRight size={16} aria-hidden className="shrink-0 text-ink-3" />
+      </button>
+    </li>
+  );
+}
+
+/** Each goal's monthly amount, ready to change or add to, and a new goal. */
+function SavingsDialog({ data, open, onClose, onGoal }: { data: BudgetPayload; open: boolean; onClose: () => void; onGoal: (sheet: GoalSheet) => void }) {
+  const { goals } = data.savings;
+  return (
+    <Dialog open={open} onClose={onClose} title="Savings">
+      <div className="flex flex-col gap-4">
+        <p className="text-ink-2">
+          {goals.length === 0
+            ? "Pick something to save for and how much to put aside each month. It comes out of your month first, before everyday budgets, so “left to spend” already allows for it."
+            : `${dollars(data.plan.saving)} a month goes to your goals first, before everyday budgets, so “left to spend” already allows for it. Change a goal’s monthly amount, or record money you put in.`}
+        </p>
+        {goals.length > 0 && (
+          <ul className="flex flex-col gap-2">
+            {goals.map((g) => (
+              <li key={g.id} className="rounded-2xl border border-line-soft p-3">
+                <div className="flex items-baseline justify-between gap-3">
+                  <span className="min-w-0 truncate font-bold">{g.name}</span>
+                  <span className="tabular shrink-0 font-bold">{g.monthlyContribution > 0 ? `${dollars(g.monthlyContribution)}/mo` : "No monthly amount"}</span>
+                </div>
+                <p className="text-small text-ink-3">
+                  {dollars(g.saved)} of {dollars(g.target)} saved
+                </p>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <Button size="sm" onClick={() => onGoal({ kind: "add", goal: g })}>
+                    Put money in
+                  </Button>
+                  <Button size="sm" variant="ghost" onClick={() => onGoal({ kind: "edit", goal: g })}>
+                    Change monthly amount
+                  </Button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+        <div className="flex flex-wrap justify-end gap-2">
+          <Link href="/savings" onClick={onClose} className="inline-flex min-h-11 items-center px-2 text-small font-bold text-accent-text">
+            See savings
+          </Link>
+          <Button variant="primary" onClick={() => onGoal({ kind: "new" })}>
+            {goals.length === 0 ? "Start a savings goal" : "New goal"}
+          </Button>
+        </div>
+      </div>
+    </Dialog>
   );
 }
 
@@ -377,17 +459,8 @@ function CategoryDetail({ row, data, onClose }: { row: BudgetRow; data: BudgetPa
         ) : charges.transactions.length === 0 ? (
           <p className="text-small text-ink-3">Nothing yet this month.</p>
         ) : (
-          <ul className="divide-y divide-line-soft">
-            {charges.transactions.map((t) => (
-              <li key={t.id} className="flex items-baseline justify-between gap-3 py-2">
-                <span className="min-w-0">
-                  <span className="block truncate">{t.name}</span>
-                  <span className="block text-small text-ink-3">{formatShort(t.date)}</span>
-                </span>
-                <span className="tabular shrink-0">{dollarsExact(-t.amount)}</span>
-              </li>
-            ))}
-          </ul>
+          // Tap one to change its category (to a bill, say), name or note, right here.
+          <TxList transactions={charges.transactions} today={data.today} grouped={false} />
         )}
       </div>
     </div>
@@ -411,6 +484,8 @@ function Budget() {
   const shown = month ?? current;
   const { data, error, mutate, isValidating } = useApi<BudgetPayload>(shown ? `/api/budget?month=${shown}` : null, { refreshInterval: 30_000 });
   const [setup, setSetup] = useState(false);
+  const [savingsOpen, setSavingsOpen] = useState(false);
+  const [goalSheet, setGoalSheet] = useState<GoalSheet>({ kind: "closed" });
   const [hidden, hide] = useSuggestionHidden(shown);
   const opened = params.get("category");
   const [adding, setAdding] = useState<string | null>(null);
@@ -510,7 +585,10 @@ function Budget() {
 
         <div className="flex flex-col gap-4">
           <Sheet>
-            <SheetHeader title="Budgets" hint={limited.length > 0 ? "Everyday spending. The tick on each bar is where you’d be today spending evenly." : undefined} />
+            <SheetHeader title="Budgets" hint={limited.length > 0 ? "Savings first, then everyday spending. The tick on each bar is where you’d be today spending evenly." : undefined} />
+            <ul className="mb-1 border-b border-line-soft pb-1">
+              <SavingsRow data={data} onOpen={() => setSavingsOpen(true)} />
+            </ul>
             {limited.length > 0 ? (
               <ul>
                 {limited.map((r) => (
@@ -577,6 +655,17 @@ function Budget() {
 
       <CategoryDialog row={openRow} data={data} onClose={() => open(null)} />
       <SetupDialog data={data} open={setup} onClose={() => setSetup(false)} />
+      <SavingsDialog
+        data={data}
+        open={savingsOpen}
+        onClose={() => setSavingsOpen(false)}
+        onGoal={(sheet) => {
+          // One sheet at a time: the savings list closes while a goal is open.
+          setSavingsOpen(false);
+          setGoalSheet(sheet);
+        }}
+      />
+      <GoalDialog sheet={goalSheet} today={data.today} onClose={() => setGoalSheet({ kind: "closed" })} />
     </>
   );
 }

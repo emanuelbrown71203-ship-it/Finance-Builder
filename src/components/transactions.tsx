@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { CATEGORIES, category } from "@/lib/categories";
+import { BUDGET_CATEGORIES, CATEGORIES, category, isNecessity } from "@/lib/categories";
 import { formatMedium, formatRelativeDay, type ISODate } from "@/lib/dates";
 import { dollarsExact, signedAmount } from "@/lib/money";
 import type { TxView } from "@/lib/types";
@@ -54,6 +54,13 @@ export async function changeCategory(tx: TxView, next: { category: string; note?
     },
   });
 }
+
+/** Categories as the owner thinks of them: bills, everyday spending, and money coming in or moving. */
+const CATEGORY_GROUPS = [
+  { title: "Bills", hint: "Must-pays, set aside first each month. Never counted in a budget.", categories: CATEGORIES.filter((c) => isNecessity(c.key)) },
+  { title: "Everyday spending", hint: "Counts in its category’s budget.", categories: BUDGET_CATEGORIES },
+  { title: "Money in and moving", hint: "Not spending.", categories: CATEGORIES.filter((c) => c.group !== "spending") },
+];
 
 /* ---------- slide a row left ---------- */
 
@@ -248,16 +255,22 @@ function CategoryPicker({ tx, onClose }: { tx: TxView | null; onClose: () => voi
       {tx && (
         <>
           <p className="mb-3 text-small text-ink-3">Every {tx.name} charge will go there from now on. You can Undo straight after.</p>
-          <ul className="grid grid-cols-2 gap-2">
-            {CATEGORIES.map((c) => (
-              <li key={c.key}>
-                <button type="button" disabled={busy} onClick={() => pick(c.key)} aria-pressed={c.key === tx.category} className={cx("flex min-h-[52px] w-full items-center gap-2.5 rounded-2xl border px-2.5 text-left text-small font-bold leading-tight active:scale-[0.98]", c.key === tx.category ? "border-transparent bg-accent-soft text-accent-text" : "border-line-soft bg-sheet")}>
-                  <CategoryIcon category={c.key} size="sm" />
-                  {c.label}
-                </button>
-              </li>
-            ))}
-          </ul>
+          {CATEGORY_GROUPS.map((group) => (
+            <div key={group.title} className="mb-3 last:mb-0">
+              <p className="mb-1.5 text-small font-bold text-ink-2">{group.title}</p>
+              <p className="mb-2 text-micro text-ink-3">{group.hint}</p>
+              <ul className="grid grid-cols-2 gap-2">
+                {group.categories.map((c) => (
+                  <li key={c.key}>
+                    <button type="button" disabled={busy} onClick={() => pick(c.key)} aria-pressed={c.key === tx.category} className={cx("flex min-h-[52px] w-full items-center gap-2.5 rounded-2xl border px-2.5 text-left text-small font-bold leading-tight active:scale-[0.98]", c.key === tx.category ? "border-transparent bg-accent-soft text-accent-text" : "border-line-soft bg-sheet")}>
+                      <CategoryIcon category={c.key} size="sm" />
+                      {c.label}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
         </>
       )}
     </Dialog>
@@ -395,13 +408,17 @@ function TxForm({ tx, onClose }: { tx: TxView; onClose: () => void }) {
           </div>
         )}
       </div>
-      <Field label="Category" hint={categoryKey === "transfer" ? "Transfers between your own accounts don’t count as income or spending." : undefined}>
+      <Field label="Category" hint={categoryKey === "transfer" ? "Transfers between your own accounts don’t count as income or spending." : isNecessity(categoryKey) ? "A bill: set aside first each month, not counted in a budget." : CATEGORIES.find((c) => c.key === categoryKey)?.group === "spending" ? "Everyday spending: counts in this category’s budget." : undefined}>
         {(id) => (
           <Select id={id} value={categoryKey} onChange={(e) => setCategoryKey(e.target.value)}>
-            {CATEGORIES.map((c) => (
-              <option key={c.key} value={c.key}>
-                {c.label}
-              </option>
+            {CATEGORY_GROUPS.map((group) => (
+              <optgroup key={group.title} label={group.title}>
+                {group.categories.map((c) => (
+                  <option key={c.key} value={c.key}>
+                    {c.label}
+                  </option>
+                ))}
+              </optgroup>
             ))}
           </Select>
         )}

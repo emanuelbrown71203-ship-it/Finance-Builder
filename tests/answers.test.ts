@@ -81,6 +81,66 @@ describe("answering everyday questions from the person's own numbers", () => {
   });
 });
 
+describe("the questions the owner asked that he couldn't answer", () => {
+  const more: Snapshot = {
+    ...snap,
+    spending: [
+      { category: "dining", label: "Restaurants & coffee", spent: 31_250, limit: 40_000, lastMonth: 35_000, status: "watch" },
+      { category: "groceries", label: "Groceries", spent: 52_010, limit: 50_000, lastMonth: 48_000, status: "over" },
+      { category: "housing", label: "Home & rent", spent: 0, limit: null, lastMonth: 215_000, bills: 215_000 },
+    ],
+    accounts: [
+      { name: "Everyday Checking", kind: "checking", balance: 420_000 },
+      { name: "High Yield Savings", kind: "savings", balance: 1_200_000 },
+      { name: "Cashback Visa", kind: "card", balance: 269_726 },
+      { name: "Auto Loan", kind: "loan", balance: 1_456_939 },
+    ],
+    weeks: { today: 0, thisWeek: 39_180, lastWeek: 70_342 },
+    extras: [
+      { name: "Netflix", monthly: 1_799 },
+      { name: "Spotify", monthly: 1_199 },
+    ],
+  };
+  const say = (q: string) => (answerQuestion(q, more) as Answer).text;
+
+  it("says what's owed, on cards, on loans, or on one card", () => {
+    expect(say("how much do I owe")).toBe("You owe $17,266.65 across 2 cards and loans: Auto Loan $14,569.39, Cashback Visa $2,697.26.");
+    expect(say("what's my credit card balance")).toBe("You owe $2,697.26 across 1 card: Cashback Visa $2,697.26.");
+    expect(say("how much do I owe on my loans")).toBe("You owe $14,569.39 across 1 loan: Auto Loan $14,569.39.");
+    expect(say("how much is on my cashback visa")).toBe("Cashback Visa has $2,697.26 on it.");
+    // When it's due is a bills question.
+    expect(say("when is my credit card due")).not.toMatch(/You owe/);
+  });
+
+  it("says what's in the bank", () => {
+    expect(say("how much money do I have")).toBe("$4,200 in checking and $12,000 in savings.");
+    expect(say("how much is in my checking")).toBe("$4,200 in checking.");
+    expect(say("how much is in savings")).toBe("$12,000 in savings.");
+  });
+
+  it("says what was spent this week, last week, today and last month", () => {
+    expect(say("how much did I spend this week")).toBe("$391.80 spent so far this week, bills included.");
+    expect(say("how much did I spend last week")).toBe("You spent $703.42 last week, bills included.");
+    expect(say("how much did I spend today")).toMatch(/Nothing spent today/);
+    expect(say("how much did I spend last month")).toBe("You spent $2,980 last month, bills included, not counting transfers.");
+    expect(say("what did I spend last month")).toMatch(/last month/);
+  });
+
+  it("looks up a store rather than the latest charge", () => {
+    expect(answerQuestion("what did I spend at amazon", more)).toEqual({ merchant: "amazon" });
+    expect(answerQuestion("how much did I spend at trader joe's this week", more)).toEqual({ merchant: "trader joe's" });
+    expect(say("what did I just buy")).toMatch(/Tartine Bakery/);
+  });
+
+  it("says where the money goes, how the budgets stand, what's saved, income and subscriptions", () => {
+    expect(say("where is my money going")).toBe("This month the most has gone to Home & rent ($2,150), Groceries ($520.10), Restaurants & coffee ($312.50).");
+    expect(say("am I over budget")).toBe("Groceries is $20.10 over. Restaurants & coffee is on pace to go over.");
+    expect(say("how much have I saved")).toBe("$12,000 in savings accounts. Your goals have $6,300 put toward them.");
+    expect(say("how much do I make")).toMatch(/has come in this month/);
+    expect(say("show me my subscriptions")).toBe("2 extras, about $29.98 a month: Netflix $17.99, Spotify $11.99.");
+  });
+});
+
 describe("a straight answer about a purchase, and he holds to it", () => {
   it("says yes, not yet or no from the numbers, with the reason", () => {
     const yes = ask("can I afford a $40 pizza night?");

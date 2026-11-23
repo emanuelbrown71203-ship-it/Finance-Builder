@@ -109,6 +109,8 @@ export type RecurringView = RecurringSeries & {
   ruleId: string | null;
   /** True when that rule only covers one exact amount. */
   ruleExact: boolean;
+  /** A shared bill (rent split with a partner): the part that's the person's, e.g. 0.5. Amounts are already that part. */
+  share: number | null;
   /** The latest charge without a name of its own, for renaming the bill. */
   sampleId: string;
   /** Set for a bill added by hand (by the owner, Nickel or Claude) rather than found in the history. */
@@ -124,7 +126,7 @@ export type RecurringView = RecurringSeries & {
 };
 
 /** A charge from a known subscription service that hasn't repeated yet: probably a new sign-up or a trial that converted. */
-export type PossibleSubscription = { name: string; amount: number; date: ISODate; help: CancelHelp };
+export type PossibleSubscription = { key: string; name: string; amount: number; date: ISODate; help: CancelHelp };
 
 export type UpcomingBill = {
   key: string;
@@ -136,6 +138,8 @@ export type UpcomingBill = {
   estimated: boolean;
   /** A card payment: the amount is the minimum due (paying more, or the whole balance, is up to the person); this is the whole balance. */
   owed?: number;
+  /** A shared bill (rent split with a partner): the part that's yours, e.g. 0.5. The amount is already your part. */
+  share?: number;
 };
 
 export type NetWorthPoint = { date: ISODate; assets: number; debts: number; net: number };
@@ -201,6 +205,8 @@ export type BudgetPayload = {
   monthPlan: MonthPlan | null;
   /** This month only, while some everyday spending has no limit: a starting budget from what's usually spent. */
   suggestion: { limits: { category: string; limit: number }[]; trimmed: boolean; room: number } | null;
+  /** Saving, as part of the budget: the goals (each with its monthly amount) and what's been put toward them this month. */
+  savings: { goals: GoalView[]; putAside: number };
 };
 
 export type TransactionsPayload = {
@@ -212,7 +218,7 @@ export type TransactionsPayload = {
 };
 
 /** One charge from a bill or an Extra that has gone out. Amount is signed (negative). */
-export type PaidBill = { id: string; seriesKey: string; date: ISODate; name: string; amount: number; kind: "bill" | "subscription"; category: string; accountName: string };
+export type PaidBill = { id: string; seriesKey: string; date: ISODate; name: string; amount: number; kind: "bill" | "subscription"; category: string; accountName: string; share?: number };
 
 export type RecurringPayload = {
   today: ISODate;

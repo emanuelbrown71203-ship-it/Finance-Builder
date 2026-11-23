@@ -82,8 +82,12 @@ describe("sample household", () => {
     const { attention } = await getOverview(ctx);
     await setBudget(ctx, "groceries", 65000);
     expect(attention.map((a) => a.kind)).toEqual(expect.arrayContaining(["due", "price", "budget"]));
-    expect(attention.find((a) => a.kind === "price")).toMatchObject({ title: "Netflix raised its price", href: "/bills" });
+    // Each one opens the thing it's about, not just the screen it's on.
+    const netflix = (await getRecurring(ctx)).series.find((s) => s.name === "Netflix")!;
+    expect(attention.find((a) => a.kind === "price")).toMatchObject({ title: "Netflix raised its price", href: `/bills?open=${encodeURIComponent(netflix.key)}` });
     expect(attention.find((a) => a.kind === "due")?.title).toMatch(/is due (today|tomorrow|in 2 days)$/);
+    expect(attention.filter((a) => a.kind === "due").every((a) => a.href.startsWith("/bills?open=") || a.href === "/debt")).toBe(true);
+    expect(attention.find((a) => a.kind === "new")?.href).toMatch(/^\/bills\?possible=/);
     expect(attention.find((a) => a.kind === "budget")).toMatchObject({ title: "Groceries is over budget", href: "/budget?category=groceries" });
     expect(attention.every((a) => a.href.startsWith("/") && a.detail.length > 0)).toBe(true);
     // Most urgent first: what's due comes before budget warnings.
@@ -241,6 +245,51 @@ describe("sample household", () => {
     // Paying a card is moving your own money, not a bill.
     const transfers = new Set((await db.select({ id: transactionsTable.id }).from(transactionsTable).where(eqOp(transactionsTable.category, "transfer"))).map((t) => t.id));
     expect(paid.some((p) => transfers.has(p.id))).toBe(false);
+  });
+
+  it("counts only your part of a shared bill: rent split with a partner", async () => {
+    const before = await getOverview(ctx);
+    const rent = (await getRecurring(ctx)).series.find((s) => s.name === "Parkview Apartments")!;
+    expect(rent.share).toBeNull();
+    await setRecurringOverride(ctx, rent.key, { share: 0.5 });
+    try {
+      const r = await getRecurring(ctx);
+      const half = r.series.find((s) => s.key === rent.key)!;
+      expect(half).toMatchObject({ share: 0.5, amount: Math.round(rent.amount / 2), monthly: Math.round(rent.monthly / 2) });
+      expect(half.history.every((h, i) => h.amount === Math.round(rent.history[i].amount / 2))).toBe(true);
+      expect(r.upcoming.find((u) => u.key === rent.key)).toMatchObject({ share: 0.5, amount: Math.round(rent.amount / 2) });
+      // Home's plan counts half of what's been paid this month and half of what's still to come.
+      const after = await getOverview(ctx);
+      const off = before.plan.billsExpected - after.plan.billsExpected;
+      const paid = rent.history.filter((h) => h.date.startsWith("2026-11")).reduce((t, h) => t - h.amount, 0);
+      const coming = (await getRecurring(ctx)).upcoming.filter((u) => u.key === rent.key && u.date.startsWith("2026-11")).length * -rent.amount;
+      expect(Math.abs(off - (paid + coming) / 2)).toBeLessThanOrEqual(2);
+      expect(off).toBeGreaterThan(0);
+      expect(after.plan.leftToSpend - before.plan.leftToSpend).toBe(off);
+      // The budget agrees with Home, and the bank's own record of the charge is untouched.
+      expect((await getBudget(ctx, "2026-11")).plan.leftToSpend).toBe(after.plan.leftToSpend);
+      const { transactions: charges } = await getTransactions(ctx, { q: "Parkview", limit: 5, offset: 0 });
+      expect(charges[0].amount).toBe(rent.history[rent.history.length - 1].amount);
+      // All of it again.
+      await setRecurringOverride(ctx, rent.key, { share: 1 });
+      expect((await getRecurring(ctx)).series.find((s) => s.key === rent.key)).toMatchObject({ share: null, amount: rent.amount });
+    } finally {
+      await setRecurringOverride(ctx, rent.key, { share: null });
+    }
+  });
+
+  it("puts savings in the budget from the goals, and lets a flagged charge be waved off", async () => {
+    const b = await getBudget(ctx, "2026-11");
+    expect(b.savings.goals.length).toBeGreaterThan(0);
+    expect(b.plan.saving).toBe(b.savings.goals.filter((g) => g.saved < g.target).reduce((t, g) => t + g.monthlyContribution, 0));
+    expect(typeof b.savings.putAside).toBe("number");
+
+    // "It's not a subscription" stops the flag; Undo brings it back.
+    const disney = (await getRecurring(ctx)).possible.find((p) => p.name === "Disney+")!;
+    await setRecurringOverride(ctx, disney.key, { kind: "ignore" });
+    expect((await getRecurring(ctx)).possible.some((p) => p.key === disney.key)).toBe(false);
+    await setRecurringOverride(ctx, disney.key, { kind: null });
+    expect((await getRecurring(ctx)).possible.some((p) => p.key === disney.key)).toBe(true);
   });
 
   it("recaps last week, Monday to Sunday", async () => {

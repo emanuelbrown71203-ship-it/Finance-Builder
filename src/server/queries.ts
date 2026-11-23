@@ -223,8 +223,16 @@ async function loadRecurring(ctx: Ctx): Promise<RecurringBundle> {
     const named = nameFor({ name: s.name, amount: latest?.amount ?? s.amount });
     // Renaming the bill starts from its newest charge that has no name of its own.
     const sample = [...s.history].reverse().find((h) => !ownName.get(h.id)) ?? latest;
+    // A shared bill (rent split with a partner) counts only the person's part, everywhere.
+    const share = kind !== "income" && o?.shareBp ? o.shareBp / 10_000 : null;
+    const part = (cents: number) => (share === null ? cents : Math.round(cents * share));
+    const mine = { ...s, amount: part(s.amount) };
     series.push({
       ...s,
+      amount: mine.amount,
+      history: share === null ? s.history : s.history.map((h) => ({ ...h, amount: part(h.amount) })),
+      priceChange: s.priceChange && share !== null ? { from: part(s.priceChange.from), to: part(s.priceChange.to) } : s.priceChange,
+      share,
       name: named.name,
       bankName: s.name,
       ruleId: named.ruleId,
@@ -236,7 +244,7 @@ async function loadRecurring(ctx: Ctx): Promise<RecurringBundle> {
       active,
       cancelled,
       accountName: accountName.get(s.accountId) ?? "",
-      monthly: Math.abs(monthlyEquivalent(s)),
+      monthly: Math.abs(monthlyEquivalent(mine)),
       help: helpFor(s.name, named.name),
       renewsSoon: active && kind !== "income" && (s.frequency === "yearly" || s.frequency === "quarterly") && untilNext >= 0 && untilNext <= 30,
       startedRecently: active && kind === "subscription" && diffDays(ctx.today, s.firstDate) <= 100,
@@ -258,10 +266,15 @@ async function loadRecurring(ctx: Ctx): Promise<RecurringBundle> {
     if (!isKnownSubscription(t.name) && !isKnownSubscription(shown)) continue;
     const key = seriesKeyFor(t.name, t.amount);
     if (known.has(key) || overrideByKey.get(key)?.kind === "ignore") continue;
-    possible.set(key, { name: shown, amount: t.amount, date: t.date, help: helpFor(t.name, shown) });
+    possible.set(key, { key, name: shown, amount: t.amount, date: t.date, help: helpFor(t.name, shown) });
   }
-  // Everything after this point shows names, so give each transaction the name the owner sees.
-  const history = raw.map((t) => ({ ...t, name: nameFor(t).name }));
+  // Everything after this point shows names, so give each transaction the name the owner sees, and each
+  // payment of a shared bill only the person's part (so the month plan, budget and recap count just that).
+  const shareFor = new Map(series.filter((s) => s.share !== null && !s.manual).map((s) => [s.key, s.share!]));
+  const history = raw.map((t) => {
+    const share = t.amount < 0 ? shareFor.get(seriesKeyFor(t.name, t.amount)) : undefined;
+    return { ...t, name: nameFor(t).name, ...(share !== undefined ? { amount: Math.round(t.amount * share) } : {}) };
+  });
   return { series, history, accounts: accountList, possible: [...possible.values()] };
 }
 
@@ -279,7 +292,7 @@ function paidLately(bundle: RecurringBundle, today: ISODate): PaidBill[] {
       // A bill added by hand can share its payment with the bank's own series: count it once.
       if (h.amount >= 0 || h.date < from || h.date > today || seen.has(h.id)) continue;
       seen.add(h.id);
-      out.push({ id: h.id, seriesKey: s.key, date: h.date, name: s.name, amount: h.amount, kind: s.kind, category: s.category, accountName: s.accountName });
+      out.push({ id: h.id, seriesKey: s.key, date: h.date, name: s.name, amount: h.amount, kind: s.kind, category: s.category, accountName: s.accountName, ...(s.share !== null ? { share: s.share } : {}) });
     }
   }
   return out.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : a.amount - b.amount));
@@ -292,7 +305,7 @@ function upcomingBills(bundle: RecurringBundle, today: ISODate, days: number): U
     if (s.kind === "income") continue;
     // Include bills that are a few days late: they are still owed.
     for (const date of upcomingBetween(s, addDays(today, -7), to)) {
-      out.push({ key: s.key, date: date < today ? today : date, name: s.name, amount: s.amount, kind: s.kind, estimated: !s.fixedAmount });
+      out.push({ key: s.key, date: date < today ? today : date, name: s.name, amount: s.amount, kind: s.kind, estimated: !s.fixedAmount, ...(s.share !== null ? { share: s.share } : {}) });
     }
   }
   // A card's payment is only what's required, the minimum: people pay a big balance down over time, and
@@ -363,7 +376,12 @@ function budgetFor(ctx: Ctx, bundle: RecurringBundle, limits: Limit[], goalList:
 }
 
 export async function getBudget(ctx: Ctx, month: string): Promise<BudgetPayload> {
-  const [bundle, limits, goalList] = await Promise.all([loadRecurring(ctx), loadLimits(ctx), listGoals(ctx)]);
+  const [bundle, limits, goalList, deposits] = await Promise.all([
+    loadRecurring(ctx),
+    loadLimits(ctx),
+    listGoals(ctx),
+    ctx.db.select({ amount: goalDeposits.amount, date: goalDeposits.date }).from(goalDeposits).where(and(eq(goalDeposits.userId, ctx.userId), gte(goalDeposits.date, `${month}-01`))),
+  ]);
   const { rows, monthPlan, plan } = budgetFor(ctx, bundle, limits, goalList, month);
   const months = Array.from({ length: 6 }, (_, i) => addMonthsToMonth(month, i - 5)).map((m) => {
     const txs = bundle.history.filter((t) => monthOf(t.date) === m);
@@ -392,6 +410,8 @@ export async function getBudget(ctx: Ctx, month: string): Promise<BudgetPayload>
     months,
     monthPlan: progress.isCurrent ? monthPlan : null,
     suggestion: suggested && missing.length > 0 ? { limits: suggested.limits, trimmed: suggested.trimmed, room } : null,
+    // Saving is part of the budget: the goals' monthly amounts are set aside first, and what's gone in this month.
+    savings: { goals: goalList, putAside: deposits.filter((d) => monthOf(d.date) === month).reduce((s, d) => s + d.amount, 0) },
   };
 }
 
@@ -664,20 +684,20 @@ export async function getOverview(ctx: Ctx): Promise<Overview> {
     attention.push({ kind: "bank", title: sync.needsAttention === 1 ? "A bank needs you to sign in again" : `${sync.needsAttention} banks need you to sign in again`, detail: "Until then, new transactions from it won’t show up.", href: "/accounts" });
   }
   for (const bill of due.filter((b) => diffDays(b.date, ctx.today) <= 2)) {
-    attention.push({ kind: "due", title: `${bill.name} is due ${formatDistance(bill.date, ctx.today)}`, detail: `${dollarsExact(-bill.amount)}${bill.estimated ? ", based on past bills" : ""}`, href: "/bills" });
+    attention.push({ kind: "due", title: `${bill.name} is due ${formatDistance(bill.date, ctx.today)}`, detail: `${dollarsExact(-bill.amount)}${bill.share ? ", your part" : bill.estimated ? ", based on past bills" : ""}`, href: bill.kind === "card" ? "/debt" : `/bills?open=${encodeURIComponent(bill.key)}` });
   }
   for (const s of bundle.series) {
     if (s.active && s.priceChange && s.priceChange.to < s.priceChange.from) {
-      attention.push({ kind: "price", title: `${s.name} raised its price`, detail: `${dollarsExact(-s.priceChange.from)} to ${dollarsExact(-s.priceChange.to)}, ${dollars((s.priceChange.from - s.priceChange.to) * 12)} more a year`, href: "/bills" });
+      attention.push({ kind: "price", title: `${s.name} raised its price`, detail: `${dollarsExact(-s.priceChange.from)} to ${dollarsExact(-s.priceChange.to)}, ${dollars((s.priceChange.from - s.priceChange.to) * 12)} more a year`, href: `/bills?open=${encodeURIComponent(s.key)}` });
     }
   }
   for (const s of bundle.series) {
     if (s.renewsSoon) {
-      attention.push({ kind: "renewal", title: `${s.name} renews ${formatDistance(s.nextDate, ctx.today)}`, detail: `${dollarsExact(-s.amount)}, ${s.frequency === "yearly" ? "once a year" : s.frequency === "semiannual" ? "every 6 months" : "every 3 months"}. Cancel before then if you don’t want it.`, href: "/bills" });
+      attention.push({ kind: "renewal", title: `${s.name} renews ${formatDistance(s.nextDate, ctx.today)}`, detail: `${dollarsExact(-s.amount)}, ${s.frequency === "yearly" ? "once a year" : s.frequency === "semiannual" ? "every 6 months" : "every 3 months"}. Cancel before then if you don’t want it.`, href: `/bills?open=${encodeURIComponent(s.key)}` });
     }
   }
   for (const p of bundle.possible) {
-    attention.push({ kind: "new", title: `${p.name} looks like a new subscription`, detail: `${dollarsExact(-p.amount)} on ${formatShort(p.date)}`, href: "/bills" });
+    attention.push({ kind: "new", title: `${p.name} looks like a new subscription`, detail: `${dollarsExact(-p.amount)} on ${formatShort(p.date)}`, href: `/bills?possible=${encodeURIComponent(p.key)}` });
   }
   for (const row of rows) {
     const name = category(row.category).label;
@@ -765,7 +785,8 @@ export async function getDebt(ctx: Ctx): Promise<DebtPayload> {
     const flow = cardFlow.get(a.id);
     const paidInFull = a.type === "credit" && own?.monthlyPayment == null && !!flow && flow.spent > 0 && !flow.interest && flow.paid >= flow.spent * 0.85;
     // Bills put on a card this month (rent, say) are part of its balance until they're paid back.
-    const billsOnCard = a.type === "credit" ? bundle.series.filter((s) => s.kind === "bill" && s.accountId === a.id).map((s) => ({ name: s.name, amount: s.history.filter((h) => h.amount < 0 && monthOf(h.date) === monthOf(ctx.today)).reduce((t, h) => t - h.amount, 0) })).filter((b) => b.amount > 0) : [];
+    // (The whole charge went on the card, even when only part of a shared bill is the person's.)
+    const billsOnCard = a.type === "credit" ? bundle.series.filter((s) => s.kind === "bill" && s.accountId === a.id).map((s) => ({ name: s.name, amount: Math.round(s.history.filter((h) => h.amount < 0 && monthOf(h.date) === monthOf(ctx.today)).reduce((t, h) => t - h.amount, 0) / (s.share ?? 1)) })).filter((b) => b.amount > 0) : [];
     return {
       id: a.id,
       name: a.name,

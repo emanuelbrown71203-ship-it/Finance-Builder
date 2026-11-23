@@ -181,6 +181,8 @@ export const recurringOverrides = pgTable(
     kind: text("kind"),
     /** True when the owner says they cancelled it. */
     cancelled: boolean("cancelled").notNull().default(false),
+    /** A shared bill (rent split with a partner): the owner's part in hundredths of a percent, 5000 = half. Null: all theirs. */
+    shareBp: integer("share_bp"),
   },
   (t) => [uniqueIndex("recurring_user_series_idx").on(t.userId, t.seriesKey)],
 );

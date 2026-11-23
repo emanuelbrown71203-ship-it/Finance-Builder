@@ -73,6 +73,19 @@ for it to be remembered and used whenever an app is built.
   sent back (same amount back out within ten days, filed as a transfer or a "fee") never counts. A card
   that charged interest or fees in the last 90 days is never "paid as you go". Each card says how much
   of this month's bills went on it, since that's part of its balance until it's paid back.
+- **Shared bills count only the owner's part.** The owner pays half the rent and their partner sends the
+  other half (it arrives as a transfer, not income). A bill's share (`recurring_overrides.share_bp`, 5000 =
+  half, set on the bill's sheet: All mine / I pay half / Other %) scales that bill everywhere it's planned or
+  totalled: its amounts, Coming up, Paid lately, Home's plan, the budget and Nickel (`loadRecurring` scales
+  the bundle's history). The bank's own transaction is never changed, and a card's balance still has the
+  whole charge.
+- **Everything that asks for attention opens the thing itself.** "Needs a look" links straight to the bill
+  (`/bills?open=<key>`), the budget category, or the flagged first charge (`/bills?possible=<key>`, with
+  "It's not a subscription"); Coming up rows open their bill (a card's minimum opens Debt payoff); a budget
+  category's charges open the transaction editor. The category picker groups Bills (necessities) apart
+  from Everyday spending.
+- **Savings is the budget's first line**: the goals' monthly amounts (set aside before everyday budgets),
+  what's gone toward them this month, and a sheet to change a goal's monthly amount, add money, or start one.
 - **Bills seen twice count.** Rent, utilities, insurance or a loan charged two months running at about
   the same amount is a bill (banks send only a few months at first); other charges need three. Interest
   and fees are never bills. The Bills screen lists what bills and Extras charged this month and last
@@ -92,6 +105,10 @@ for it to be remembered and used whenever an app is built.
   switches itself off after 180 days unused. A statement confirms each tap (same amount, within 3 days),
   keeping a category the person picked, and drops taps it shows never went through. The sample
   household has a test button instead of a link.
+- **Asking Nickel is one tap**: every bubble has "Ask me something". He answers what's left, what's due,
+  spending by category, store, today, this week, last week or last month, what's owed (cards, loans, one
+  card), what's in the bank, where the money goes, which budgets are over, what's saved, income and
+  Extras.
 - **Nickel (the robo dog) points things out** from the person's own numbers, and never gives
   investment advice (no stock, fund or crypto picks); he says he isn't a financial advisor. His wording
   lives in `src/lib/nickel/brain.ts` and tests check for advice-like phrasing.

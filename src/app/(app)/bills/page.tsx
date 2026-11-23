@@ -3,12 +3,13 @@
 import { XpTag } from "@/components/game/level";
 import { WINS } from "@/lib/game/progress";
 import { ExternalLink, PencilLine, Plus } from "lucide-react";
-import { useState } from "react";
+import { Suspense, useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { BillForm, type SavedBill } from "@/components/bill-form";
-import { BillRow } from "@/components/bills";
+import { BillRow, shareLabel } from "@/components/bills";
 import { CategoryIcon } from "@/components/category-icon";
 import { BankSays, RenameForm } from "@/components/names";
-import { Button, Dialog, EmptyState, ErrorNote, Fold, PageHeader, Sheet, SheetHeader, Skeleton, Tag, toast } from "@/components/ui";
+import { Button, Dialog, EmptyState, ErrorNote, Fold, Input, PageHeader, Segmented, Sheet, SheetHeader, Skeleton, Tag, cx, toast } from "@/components/ui";
 import { send, useApi } from "@/components/use-api";
 import { nickelReact } from "@/components/nickel/store";
 import { addMonthsToMonth, diffDays, formatDistance, formatMedium, formatShort, monthName, monthOf } from "@/lib/dates";
@@ -100,6 +101,7 @@ function PaidLately({ paid, today, onOpen }: { paid: PaidBill[]; today: string; 
                           <span className="block truncate font-bold">{p.name}</span>
                           <span className="block truncate text-small text-ink-3">
                             {formatShort(p.date)}, {p.kind === "bill" ? "bill" : "extra"}
+                            {p.share ? `, your ${shareLabel(p.share)}` : ""}
                             {p.accountName ? `, ${p.accountName}` : ""}
                           </span>
                         </span>
@@ -130,6 +132,85 @@ function CancelHelpBox({ name, help }: { name: string; help: CancelHelp }) {
         </a>
       )}
       <p className="mt-1 text-small text-ink-3">Once it’s done, come back and tap “I cancelled this” so it stops counting.</p>
+    </div>
+  );
+}
+
+/**
+ * A bill shared with someone (rent split with a partner): how much of it is yours. Only your part counts
+ * in Home, the budget, Coming up and Nickel; what your partner sends you is a transfer, not income.
+ */
+function ShareControl({ series }: { series: RecurringView }) {
+  const share = series.share ?? 1;
+  const choice = share === 1 ? "all" : share === 0.5 ? "half" : "other";
+  const [other, setOther] = useState(choice === "other");
+  const [percent, setPercent] = useState(choice === "other" ? String(Math.round(share * 100)) : "");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const whole = Math.abs(series.amount) / share;
+
+  const save = async (next: number) => {
+    if (next === share) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await send("PATCH", "/api/recurring", { key: series.key, share: next >= 1 ? null : next });
+      toast(next >= 1 ? `${series.name}: all of it counts as yours again` : `${series.name}: only your ${shareLabel(next)} counts now`, {
+        action: { label: "Undo", run: () => send("PATCH", "/api/recurring", { key: series.key, share: share >= 1 ? null : share }) },
+      });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Couldn’t save. Try again.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="rounded-control border border-line-soft px-3.5 py-3">
+      <p className="font-bold">Do you split this with someone?</p>
+      <p className="mb-2.5 text-small text-ink-3">Only your part counts in your plan. What they send you is a transfer, not income.</p>
+      <Segmented
+        full
+        label="How much of it is yours"
+        value={other ? "other" : choice}
+        onChange={(v) => {
+          if (busy) return;
+          if (v === "other") return setOther(true);
+          setOther(false);
+          void save(v === "half" ? 0.5 : 1);
+        }}
+        options={[
+          { value: "all", label: "All mine" },
+          { value: "half", label: "I pay half" },
+          { value: "other", label: "Other" },
+        ]}
+      />
+      {other && (
+        <form
+          className="mt-2.5 flex items-center gap-2"
+          onSubmit={(e) => {
+            e.preventDefault();
+            const n = Number(percent);
+            if (!Number.isFinite(n) || n < 5 || n > 100) return setError("Put a percent from 5 to 100.");
+            void save(Math.round(n) / 100);
+          }}
+        >
+          <label className="flex min-w-0 flex-1 items-center gap-2 text-small">
+            <span className="shrink-0">I pay</span>
+            <Input inputMode="numeric" value={percent} onChange={(e) => setPercent(e.target.value.replace(/[^0-9]/g, "").slice(0, 3))} aria-label="Your percent" placeholder="60" className="w-20" />
+            <span className="shrink-0">%</span>
+          </label>
+          <Button size="sm" type="submit" disabled={busy}>
+            Save
+          </Button>
+        </form>
+      )}
+      {share < 1 && (
+        <p className="mt-2.5 text-small text-ink-2">
+          Your {shareLabel(share)}: <span className="tabular font-bold">{dollarsExact(Math.abs(series.amount))}</span> of about <span className="tabular">{dollarsExact(Math.round(whole))}</span>.
+        </p>
+      )}
+      {error && <p className="mt-2 text-small text-bad">{error}</p>}
     </div>
   );
 }
@@ -181,7 +262,7 @@ function SeriesDialog({ series, today, onClose: close }: { series: RecurringView
         <div className="flex flex-col gap-5">
           <div className="grid grid-cols-2 gap-3 text-small">
             <div className="rounded-control bg-sunk px-3 py-2">
-              <p className="text-ink-3">{series.fixedAmount ? "Each charge" : "Typical charge"}</p>
+              <p className="text-ink-3">{series.share ? `Your ${shareLabel(series.share)}` : series.fixedAmount ? "Each charge" : "Typical charge"}</p>
               <p className="tabular text-lead font-semibold">{dollarsExact(Math.abs(series.amount))}</p>
             </div>
             <div className="rounded-control bg-sunk px-3 py-2">
@@ -208,7 +289,7 @@ function SeriesDialog({ series, today, onClose: close }: { series: RecurringView
           </p>
 
           <div>
-            <h3 className="mb-1 text-small font-medium text-ink-2">Past charges</h3>
+            <h3 className="mb-1 text-small font-medium text-ink-2">Past charges{series.share ? ` (your ${shareLabel(series.share)})` : ""}</h3>
             <ul className="max-h-48 divide-y divide-line-soft overflow-y-auto text-small">
               {[...series.history].reverse().map((h) => (
                 <li key={h.id} className="flex justify-between gap-4 py-1.5">
@@ -218,6 +299,8 @@ function SeriesDialog({ series, today, onClose: close }: { series: RecurringView
               ))}
             </ul>
           </div>
+
+          {series.kind === "bill" && <ShareControl key={`${series.key}:${series.share}`} series={series} />}
 
           {series.kind === "subscription" && !series.cancelled && <CancelHelpBox name={series.name} help={series.help} />}
 
@@ -337,8 +420,26 @@ function ManualBillDialog({ series, today, onClose }: { series: RecurringView; t
 }
 
 export default function BillsPage() {
+  return (
+    <Suspense fallback={<Skeleton className="h-96 rounded-sheet" />}>
+      <Bills />
+    </Suspense>
+  );
+}
+
+function Bills() {
   const { data, error, mutate } = useApi<RecurringPayload>("/api/recurring", { refreshInterval: 30_000 });
-  const [openKey, setOpenKey] = useState<string | null>(null);
+  // The open bill lives in the address, so "Needs a look" and Home can link straight to one.
+  const params = useSearchParams();
+  const router = useRouter();
+  const openKey = params.get("open");
+  const setOpenKey = (key: string | null) => router.replace(key ? `/bills?open=${encodeURIComponent(key)}` : "/bills", { scroll: false });
+  // Arriving from "Needs a look" about a possible new subscription: bring it into view once it's loaded.
+  const loaded = data !== undefined;
+  const flagged = params.get("possible");
+  useEffect(() => {
+    if (loaded && flagged) document.getElementById("might-be-new")?.scrollIntoView({ block: "center", behavior: "smooth" });
+  }, [loaded, flagged]);
   const [adding, setAdding] = useState(false);
 
   if (error && !data) return <ErrorNote message={error.message} onRetry={() => mutate()} />;
@@ -351,6 +452,18 @@ export default function BillsPage() {
     );
   }
 
+  // "Needs a look" can point at a first charge that might be a new subscription.
+  const possibleKey = params.get("possible");
+  const notASubscription = async (key: string, name: string) => {
+    try {
+      await send("PATCH", "/api/recurring", { key, kind: "ignore" });
+      toast(`${name} won’t be flagged again`, { action: { label: "Undo", run: () => send("PATCH", "/api/recurring", { key, kind: null }) } });
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Couldn’t save. Try again.", { tone: "error" });
+    }
+  };
+  // A card's minimum is changed on Debt payoff; anything else opens its bill here.
+  const openUpcoming = (key: string, kind: string) => (kind === "card" ? router.push("/debt") : setOpenKey(key));
   const bills = data.series.filter((s) => s.kind === "bill" && s.active);
   const subscriptions = data.series.filter((s) => s.kind === "subscription" && s.active);
   const income = data.series.filter((s) => s.kind === "income" && s.active);
@@ -429,7 +542,7 @@ export default function BillsPage() {
               <>
                 <ul className="flex flex-col gap-2">
                   {data.upcoming.slice(0, 6).map((bill) => (
-                    <BillRow key={`${bill.key}-${bill.date}`} bill={bill} today={data.today} />
+                    <BillRow key={`${bill.key}-${bill.date}`} bill={bill} today={data.today} onOpen={() => openUpcoming(bill.key, bill.kind)} />
                   ))}
                 </ul>
                 {data.upcoming.length > 6 && (
@@ -437,7 +550,7 @@ export default function BillsPage() {
                   <Fold title="Later on" summary={`${data.upcoming.length - 6} more`} className="mt-2">
                     <ul className="flex flex-col gap-2 pb-1">
                       {data.upcoming.slice(6).map((bill) => (
-                        <BillRow key={`${bill.key}-${bill.date}`} bill={bill} today={data.today} />
+                        <BillRow key={`${bill.key}-${bill.date}`} bill={bill} today={data.today} onOpen={() => openUpcoming(bill.key, bill.kind)} />
                       ))}
                     </ul>
                   </Fold>
@@ -455,21 +568,26 @@ export default function BillsPage() {
           {list("Bills", "What you must pay: rent, utilities, insurance, loans, your phone. Set aside each month.", bills, "No bills found yet")}
           {list("Extras", "Subscriptions you could live without. They count against your budget, like Netflix in Entertainment.", subscriptions, "No extras found yet")}
           {data.possible.length > 0 && (
-            <Sheet>
+            <Sheet id="might-be-new">
               <SheetHeader title="Might be new" hint="A first charge from a service that usually renews. If you started a free trial, this is it turning into a paid plan." />
               <ul className="flex flex-col gap-2">
                 {data.possible.map((p) => (
-                  <li key={p.name} className="rounded-2xl border border-line-soft p-3">
+                  <li key={p.key} className={cx("rounded-2xl border p-3", p.key === possibleKey ? "border-accent" : "border-line-soft")}>
                     <div className="flex items-baseline justify-between gap-3">
                       <span className="font-bold">{p.name}</span>
                       <span className="tabular font-bold">{dollarsExact(-p.amount)}</span>
                     </div>
                     <p className="text-small text-ink-3">First charged {formatShort(p.date)}</p>
-                    {p.help.url && (
-                      <a href={p.help.url} target="_blank" rel="noopener noreferrer" className="mt-1 inline-flex min-h-11 items-center gap-1.5 text-small font-bold text-accent-text">
-                        Don’t want it? {p.help.label} <ExternalLink size={14} />
-                      </a>
-                    )}
+                    <div className="mt-1 flex flex-wrap items-center gap-x-4">
+                      {p.help.url && (
+                        <a href={p.help.url} target="_blank" rel="noopener noreferrer" className="inline-flex min-h-11 items-center gap-1.5 text-small font-bold text-accent-text">
+                          Don’t want it? {p.help.label} <ExternalLink size={14} />
+                        </a>
+                      )}
+                      <button type="button" onClick={() => notASubscription(p.key, p.name)} className="inline-flex min-h-11 items-center text-small font-bold text-ink-2">
+                        It’s not a subscription
+                      </button>
+                    </div>
                   </li>
                 ))}
               </ul>

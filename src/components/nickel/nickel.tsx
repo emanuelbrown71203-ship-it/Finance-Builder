@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronRight, Mic, X } from "lucide-react";
+import { ChevronRight, MessageCircle, Mic, X } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { INTRO, SMALL_TALK, cheerFor, type Mood, type Tip } from "@/lib/nickel/brain";
@@ -753,7 +753,7 @@ export function Nickel() {
                 />
               ) : menu ? (
                 <ul className="-mx-1 mt-1 flex flex-col">
-                  <MenuItem onClick={() => setDoing(true)}>Talk to me</MenuItem>
+                  <MenuItem onClick={() => setDoing(true)}>Ask me something</MenuItem>
                   <MenuItem onClick={() => (setMenu(false), act("bark"), say(nextLine()))}>Tell me something</MenuItem>
                   <MenuItem onClick={() => setAsking(true)}>Chat with Claude about my money</MenuItem>
                   <MenuItem onClick={() => (setMenu(false), nickelSettings.napFor(60 * 60_000))}>Nap for an hour</MenuItem>
@@ -795,6 +795,12 @@ export function Nickel() {
                               className="inline-flex min-h-10 items-center rounded-control px-3 text-small font-bold text-ink-2 underline underline-offset-2 active:bg-sunk"
                             >
                               Undo
+                            </button>
+                          )}
+                          {/* Asking is always one tap away, not hidden behind holding him. */}
+                          {data && (
+                            <button type="button" onClick={() => (setBubble(null), setMenu(true), setDoing(true))} className="inline-flex min-h-10 items-center gap-1.5 rounded-control bg-accent px-3.5 text-small font-bold text-on-accent active:scale-[0.97]">
+                              <MessageCircle size={15} aria-hidden /> Ask me something
                             </button>
                           )}
                           {bubble.kind === "tip" && (
@@ -1160,7 +1166,7 @@ function NickelDo({ today, goals, loans, talksBack, onDone, onBill, onGoal, onLe
           )}
         </div>
       ) : (
-        <p className="leading-relaxed">Tap the mic and talk, or type. Ask what’s left, what’s due, “can I afford…?”, or tell me to add something.</p>
+        <p className="leading-relaxed">Tap the mic and talk, or type. Ask what’s left, what’s due, what you spent this week, how much you owe or have, or “can I afford…?”. Or tell me to add something.</p>
       )}
       <form onSubmit={submit} className="mt-2 flex gap-2">
         <Input ref={input} value={text} onChange={(e) => setText(e.target.value)} enterKeyHint="go" maxLength={300} aria-label="What should Nickel do?" placeholder={listening ? "Listening…" : "Ask or tell me…"} className="min-w-0 flex-1" />
@@ -1199,7 +1205,7 @@ function NickelDo({ today, goals, loans, talksBack, onDone, onBill, onGoal, onLe
               What’s left?
             </button>
           </div>
-          <p className="mt-2.5 text-micro text-ink-3">Like: “{EXAMPLES[1]}”, “can I afford a $300 jacket?”, “when is rent due?”. Changes I make show under Settings, Activity, with Undo.</p>
+          <p className="mt-2.5 text-micro text-ink-3">Like: “how much did I spend this week?”, “how much do I owe?”, “can I afford a $300 jacket?”, “{EXAMPLES[1]}”. Changes I make show under Settings, Activity, with Undo.</p>
         </>
       )}
     </div>

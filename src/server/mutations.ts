@@ -105,13 +105,18 @@ export async function deleteRule(ctx: Ctx, id: string) {
   await ctx.db.delete(categoryRules).where(and(eq(categoryRules.id, id), eq(categoryRules.userId, ctx.userId)));
 }
 
-export async function setRecurringOverride(ctx: Ctx, key: string, patch: { kind?: "bill" | "subscription" | "ignore"; cancelled?: boolean }) {
+/**
+ * The person's own choices about a bill: Bills or Extras (or not repeating at all), cancelled, and for a
+ * shared bill (rent split with a partner) the part that's theirs, 0.5 for half. A share of 1 or null is all theirs.
+ */
+export async function setRecurringOverride(ctx: Ctx, key: string, patch: { kind?: "bill" | "subscription" | "ignore" | null; cancelled?: boolean; share?: number | null }) {
+  const shareBp = patch.share === undefined ? undefined : patch.share === null || patch.share >= 1 ? null : Math.round(patch.share * 10_000);
   await ctx.db
     .insert(recurringOverrides)
-    .values({ id: crypto.randomUUID(), userId: ctx.userId, seriesKey: key, kind: patch.kind ?? null, cancelled: patch.cancelled ?? false })
+    .values({ id: crypto.randomUUID(), userId: ctx.userId, seriesKey: key, kind: patch.kind ?? null, cancelled: patch.cancelled ?? false, shareBp: shareBp ?? null })
     .onConflictDoUpdate({
       target: [recurringOverrides.userId, recurringOverrides.seriesKey],
-      set: { ...(patch.kind !== undefined ? { kind: patch.kind } : {}), ...(patch.cancelled !== undefined ? { cancelled: patch.cancelled } : {}) },
+      set: { ...(patch.kind !== undefined ? { kind: patch.kind } : {}), ...(patch.cancelled !== undefined ? { cancelled: patch.cancelled } : {}), ...(shareBp !== undefined ? { shareBp } : {}) },
     });
   // Cancelling something you pay for is the biggest small win there is; Undo the same day takes it back.
   // Only for a bill or subscription that's really in the person's charges, never a made-up key.

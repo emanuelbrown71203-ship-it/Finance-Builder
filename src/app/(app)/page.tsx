@@ -3,7 +3,7 @@
 import { CalendarCheck, CalendarClock, ChevronRight, CircleCheck, Gauge, Landmark, PieChart, RefreshCcw, Sparkles, Tag as TagIcon, type LucideIcon } from "lucide-react";
 import Link from "next/link";
 import { useSyncExternalStore, type ReactNode } from "react";
-import { BillRow } from "@/components/bills";
+import { BillRow, billHref } from "@/components/bills";
 import { BudgetBar, available } from "@/components/budget";
 import { CategoryIcon } from "@/components/category-icon";
 import { GAME_URL } from "@/components/game/game";
@@ -313,7 +313,7 @@ export default function HomePage() {
             {data.upcoming.length > 0 ? (
               <ul className="flex flex-col gap-2">
                 {data.upcoming.slice(0, 3).map((bill) => (
-                  <BillRow key={`${bill.key}-${bill.date}`} bill={bill} today={data.today} />
+                  <BillRow key={`${bill.key}-${bill.date}`} bill={bill} today={data.today} href={billHref(bill)} />
                 ))}
               </ul>
             ) : (

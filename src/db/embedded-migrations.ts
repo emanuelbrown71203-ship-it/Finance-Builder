@@ -90,5 +90,6 @@ export const MIGRATION_STATEMENTS: string[] = [
   "ALTER TABLE \"budgets\" ADD COLUMN \"rollover_carry\" bigint DEFAULT 0 NOT NULL;",
   "ALTER TABLE \"budgets\" ADD COLUMN \"removed_at\" timestamp with time zone;",
   "CREATE TABLE \"tap_keys\" (\n\t\"user_id\" text PRIMARY KEY NOT NULL,\n\t\"token_hash\" text NOT NULL,\n\t\"last_used_at\" timestamp with time zone,\n\t\"created_at\" timestamp with time zone DEFAULT now() NOT NULL,\n\tCONSTRAINT \"tap_keys_token_hash_unique\" UNIQUE(\"token_hash\")\n);",
-  "ALTER TABLE \"tap_keys\" ADD CONSTRAINT \"tap_keys_user_id_users_id_fk\" FOREIGN KEY (\"user_id\") REFERENCES \"public\".\"users\"(\"id\") ON DELETE cascade ON UPDATE no action;"
+  "ALTER TABLE \"tap_keys\" ADD CONSTRAINT \"tap_keys_user_id_users_id_fk\" FOREIGN KEY (\"user_id\") REFERENCES \"public\".\"users\"(\"id\") ON DELETE cascade ON UPDATE no action;",
+  "ALTER TABLE \"recurring_overrides\" ADD COLUMN \"share_bp\" integer;"
 ];
