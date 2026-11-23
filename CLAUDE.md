@@ -54,6 +54,12 @@ for it to be remembered and used whenever an app is built.
 - **The app has five places** (`src/components/nav.tsx`): Home, Spending, Bills, Wealth, You. No "More"
   menu. A new screen joins a place (as a tab under its title, or a row on You), and Home stays short.
 - Bank access tokens are stored encrypted. The app can read accounts and can never move money.
+- **Card payments vary and needn't be in full** (the owner pays big balances down over time, and not
+  the same amount every month). Paying a card is a transfer, so the amount never changes spending or
+  "left to spend" (purchases count when they're made). "Coming up", its total and Nickel's purchase
+  check set aside only a card's **minimum** due (shown with the balance beside it), never the whole
+  balance. A card's payoff plan starts from what was actually paid lately (`recentMonthlyPayment`: the
+  last three whole months, averaged), unless the person sets their own amount.
 - **Apple Card comes in from its statements** (Apple shares it only with App Store apps, so Plaid can't
   link it on the web). `src/lib/finance/card-import.ts` reads Wallet's CSV export, and only Apple's own
   columns (OFX is refused: no categories, different dates); `src/server/card-import.ts` keeps it as a

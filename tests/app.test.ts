@@ -53,6 +53,16 @@ describe("sample household", () => {
     expect(r.monthlyBills).toBeGreaterThan(280000);
   });
 
+  it("counts only a card's minimum as due, never the whole balance: big balances get paid down over time", async () => {
+    const card = (await getRecurring(ctx)).upcoming.find((u) => u.kind === "card")!;
+    const visa = (await getAccounts(ctx)).institutions.flatMap((i) => i.accounts).find((a) => a.name === "Cashback Visa")!;
+    expect(card).toMatchObject({ name: "Cashback Visa minimum payment", amount: -Math.min(visa.minimumPayment!, -visa.balance), owed: -visa.balance, estimated: false });
+    // Home's "due in the next 30 days" adds the minimum, not what's owed.
+    const overview = await getOverview(ctx);
+    expect(overview.upcoming.find((u) => u.kind === "card")?.amount).toBe(card.amount);
+    // (Nickel's "can I afford it?" takes card payments from this same list, so he sets aside only the minimum too.)
+  });
+
   it("builds a month plan whose parts add up", async () => {
     const { plan } = await getOverview(ctx);
     expect(plan.days).toHaveLength(30);

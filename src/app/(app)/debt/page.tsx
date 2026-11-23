@@ -53,7 +53,7 @@ function EditDebt({ debt, onClose }: { debt: DebtView; onClose: () => void }) {
         You owe <span className="tabular font-bold text-ink">{dollars(debt.balance)}</span>. Both numbers are on your statement.
       </p>
       <Field label="Interest rate (APR), in percent">{(id) => <Input id={id} inputMode="decimal" enterKeyHint="next" value={apr} onChange={(e) => setApr(e.target.value)} placeholder="6.5" />}</Field>
-      <Field label="What you pay each month" error={error}>
+      <Field label="What you pay each month" hint={debt.type === "credit" ? "Roughly is fine: if it changes month to month, put about what you usually pay. Passbook starts from your average of the last three months." : undefined} error={error}>
         {(id) => <MoneyInput id={id} value={payment} onChange={(e) => setPayment(e.target.value)} placeholder="0" />}
       </Field>
       <div className="mt-2 flex gap-2">
@@ -233,7 +233,7 @@ export default function DebtPage() {
                           ? "Not costing interest, so it’s left out of the plan"
                           : d.order === null
                             ? "Needs its interest rate and monthly payment"
-                            : `${d.aprPercent}% interest, ${dollars(d.payment!)} a month${d.paidOffMonth ? `, done ${monthLabel(d.paidOffMonth)}` : ""}`}
+                            : `${d.aprPercent}% interest, ${d.type === "credit" && d.paymentSource === "history" ? `about ${dollars(d.payment!)} a month (your average lately)` : `${dollars(d.payment!)} a month`}${d.paidOffMonth ? `, done ${monthLabel(d.paidOffMonth)}` : ""}`}
                       </span>
                     </span>
                     <span className="tabular whitespace-nowrap font-bold">{dollars(d.balance)}</span>

@@ -1,7 +1,7 @@
 "use client";
 
 import { dayOfMonth, diffDays, formatDistance, monthName, type ISODate } from "@/lib/dates";
-import { dollarsExact } from "@/lib/money";
+import { dollars, dollarsExact } from "@/lib/money";
 import type { UpcomingBill } from "@/lib/types";
 import { cx } from "./ui";
 
@@ -19,9 +19,9 @@ export function BillRow({ bill, today }: { bill: UpcomingBill; today: ISODate })
       </div>
       <div className="min-w-0 flex-1">
         <p className="line-clamp-2 font-bold leading-snug">{bill.name}</p>
-        <p className="truncate text-small text-ink-3">
+        <p className={cx("text-small text-ink-3", bill.kind === "card" ? "line-clamp-2" : "truncate")}>
           Due {formatDistance(bill.date, today)}
-          {bill.estimated && bill.kind !== "card" ? ", estimate" : ""}
+          {bill.kind === "card" && bill.owed ? `, ${dollars(bill.owed)} owed` : bill.estimated ? ", estimate" : ""}
         </p>
       </div>
       <span className="tabular whitespace-nowrap pr-1 font-bold">{dollarsExact(-bill.amount)}</span>

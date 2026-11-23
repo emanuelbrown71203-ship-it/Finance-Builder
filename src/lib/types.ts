@@ -134,6 +134,8 @@ export type UpcomingBill = {
   kind: "bill" | "subscription" | "card";
   /** True when the amount is an estimate from past charges. */
   estimated: boolean;
+  /** A card payment: the amount is the minimum due (paying more, or the whole balance, is up to the person); this is the whole balance. */
+  owed?: number;
 };
 
 export type NetWorthPoint = { date: ISODate; assets: number; debts: number; net: number };

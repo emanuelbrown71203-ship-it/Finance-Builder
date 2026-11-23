@@ -99,3 +99,16 @@ export function payoffPlan(debts: Debt[], extra: number, strategy: Strategy, sta
     stuck,
   };
 }
+
+/**
+ * What someone has actually been paying toward a card lately: the payments of the last `months` whole
+ * months before `month`, averaged (a month with no payment counts as $0). People rarely pay a big card
+ * off in one go or pay the same amount every month, so this is a fairer starting point for a payoff
+ * plan than the bank's minimum. Null when nothing was paid.
+ */
+export function recentMonthlyPayment(payments: { date: string; amount: number }[], month: string, months = 3): number | null {
+  const [y, m] = month.split("-").map(Number);
+  const first = new Date(Date.UTC(y, m - 1 - months, 1)).toISOString().slice(0, 7);
+  const total = payments.filter((p) => p.amount > 0 && p.date.slice(0, 7) >= first && p.date.slice(0, 7) < month).reduce((s, p) => s + p.amount, 0);
+  return total > 0 ? Math.round(total / months) : null;
+}

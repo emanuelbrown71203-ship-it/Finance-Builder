@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gte, ilike, inArray, isNull, lte, ne, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, gte, ilike, inArray, isNull, lte, ne, or, sql } from "drizzle-orm";
 import { accounts, balanceSnapshots, budgets, debtPlans, goalDeposits, goals, holdings, items, recurringOverrides, transactions, userSettings, type Account } from "@/db/schema";
 import { category } from "@/lib/categories";
 import { DEFAULT_TIMEZONE } from "@/lib/config";
@@ -7,7 +7,7 @@ import { goalIdeas, goalPlan } from "@/lib/finance/goalplan";
 import { dollars, dollarsExact } from "@/lib/money";
 import { buildMonthPlan, spendingByCategory } from "@/lib/finance/plan";
 import { budgetPlan, categoryBudgets, monthProgress, suggestLimits, type Limit } from "@/lib/finance/budget";
-import { payoffPlan, payoffOrder, type Debt, type Strategy } from "@/lib/finance/payoff";
+import { payoffPlan, payoffOrder, recentMonthlyPayment, type Debt, type Strategy } from "@/lib/finance/payoff";
 import { FREQUENCY_LABEL, detectRecurring, monthlyEquivalent, seriesKeyFor, upcomingBetween, type RecurringKind } from "@/lib/finance/recurring";
 import { cancelHelp, isKnownSubscription } from "@/lib/finance/subscriptions";
 import type { Namer } from "@/lib/finance/names";
@@ -274,9 +274,11 @@ function upcomingBills(bundle: RecurringBundle, today: ISODate, days: number): U
       out.push({ key: s.key, date: date < today ? today : date, name: s.name, amount: s.amount, kind: s.kind, estimated: !s.fixedAmount });
     }
   }
+  // A card's payment is only what's required, the minimum: people pay a big balance down over time, and
+  // rarely the same amount each month. Without a known minimum there's no amount to set aside.
   for (const a of bundle.accounts) {
-    if (a.type === "credit" && a.nextPaymentDueDate && a.nextPaymentDueDate >= today && a.nextPaymentDueDate <= to && a.balance < 0) {
-      out.push({ key: `card:${a.id}`, date: a.nextPaymentDueDate, name: `${a.name} payment`, amount: a.balance, kind: "card", estimated: true });
+    if (a.type === "credit" && a.nextPaymentDueDate && a.nextPaymentDueDate >= today && a.nextPaymentDueDate <= to && a.balance < 0 && a.minimumPayment && a.minimumPayment > 0) {
+      out.push({ key: `card:${a.id}`, date: a.nextPaymentDueDate, name: `${a.name} minimum payment`, amount: -Math.min(a.minimumPayment, -a.balance), kind: "card", estimated: false, owed: -a.balance });
     }
   }
   return out.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : a.amount - b.amount));
@@ -700,9 +702,11 @@ export async function getDebt(ctx: Ctx): Promise<DebtPayload> {
   const strategy: Strategy = settings?.debtStrategy === "snowball" ? "snowball" : "avalanche";
   const extra = settings?.debtExtra ?? 0;
 
-  // For cards: have the payments over the last 90 days kept up with the spending?
+  // For cards: have the payments over the last 90 days kept up with the spending? And what has actually
+  // been paid lately (it varies, and a big balance is paid down over time, not all at once).
   const cardIds = owed.filter((a) => a.type === "credit").map((a) => a.id);
   const cardFlow = new Map<string, { paid: number; spent: number }>();
+  const cardPaid = new Map<string, number>();
   if (cardIds.length > 0) {
     const rows = await ctx.db
       .select({ accountId: transactions.accountId, paid: sql<number>`coalesce(sum(case when ${transactions.amount} > 0 then ${transactions.amount} else 0 end), 0)::float8`, spent: sql<number>`coalesce(sum(case when ${transactions.amount} < 0 then -${transactions.amount} else 0 end), 0)::float8` })
@@ -710,13 +714,22 @@ export async function getDebt(ctx: Ctx): Promise<DebtPayload> {
       .where(and(eq(transactions.userId, ctx.userId), inArray(transactions.accountId, cardIds), gte(transactions.date, addDays(ctx.today, -90))))
       .groupBy(transactions.accountId);
     for (const r of rows) cardFlow.set(r.accountId, { paid: Number(r.paid), spent: Number(r.spent) });
+    const payments = await ctx.db
+      .select({ accountId: transactions.accountId, date: transactions.date, amount: transactions.amount })
+      .from(transactions)
+      .where(and(eq(transactions.userId, ctx.userId), inArray(transactions.accountId, cardIds), eq(transactions.category, "transfer"), gt(transactions.amount, 0), gte(transactions.date, addDays(ctx.today, -100))));
+    for (const id of cardIds) {
+      const paid = recentMonthlyPayment(payments.filter((p) => p.accountId === id), monthOf(ctx.today));
+      if (paid) cardPaid.set(id, paid);
+    }
   }
 
   const views: DebtView[] = owed.map((a) => {
     const own = planFor.get(a.id);
     // A loan's regular payment usually shows up as a repeating charge named after it.
     const series = bundle.series.find((s) => s.active && s.kind !== "income" && s.category === "loans" && `${s.bankName} ${s.name}`.toLowerCase().includes(a.name.toLowerCase()));
-    const payment = own?.monthlyPayment ?? (series ? Math.abs(monthlyEquivalent(series)) : a.minimumPayment);
+    const paidLately = cardPaid.get(a.id) ?? null;
+    const payment = own?.monthlyPayment ?? (series ? Math.abs(monthlyEquivalent(series)) : (paidLately ?? a.minimumPayment));
     const flow = cardFlow.get(a.id);
     return {
       id: a.id,
@@ -726,7 +739,7 @@ export async function getDebt(ctx: Ctx): Promise<DebtPayload> {
       balance: -a.balance,
       aprPercent: own?.aprPercent ?? a.aprPercent,
       payment,
-      paymentSource: own?.monthlyPayment != null ? "yours" : series ? "history" : a.minimumPayment != null ? "bank" : null,
+      paymentSource: own?.monthlyPayment != null ? "yours" : series || paidLately ? "history" : a.minimumPayment != null ? "bank" : null,
       paidInFull: a.type === "credit" && own?.monthlyPayment == null && !!flow && flow.spent > 0 && flow.paid >= flow.spent * 0.85,
       paidOffMonth: null,
       interest: 0,

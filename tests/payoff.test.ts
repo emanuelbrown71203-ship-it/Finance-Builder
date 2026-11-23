@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { payoffOrder, payoffPlan, type Debt } from "@/lib/finance/payoff";
+import { payoffOrder, payoffPlan, recentMonthlyPayment, type Debt } from "@/lib/finance/payoff";
 import { cancelHelp, isKnownSubscription } from "@/lib/finance/subscriptions";
 
 const debt = (id: string, dollars: number, aprPercent: number, payment: number): Debt => ({ id, name: id, balance: dollars * 100, aprPercent, payment: payment * 100 });
@@ -78,5 +78,26 @@ describe("subscription help", () => {
     expect(isKnownSubscription("Disney+")).toBe(true);
     expect(isKnownSubscription("Trader Joe’s")).toBe(false);
     expect(isKnownSubscription("Anytime Fitness")).toBe(false);
+  });
+});
+
+describe("what's actually been paid toward a card lately", () => {
+  it("averages the last three whole months, counting a month with no payment as $0, whatever the amounts", () => {
+    const payments = [
+      { date: "2026-07-20", amount: 99_999 }, // too long ago
+      { date: "2026-09-05", amount: 50_000 },
+      { date: "2026-09-25", amount: 10_000 },
+      { date: "2026-10-12", amount: 30_000 },
+      { date: "2026-11-02", amount: 80_000 }, // this month: not over yet
+      { date: "2026-10-03", amount: -5_000 }, // a charge, not a payment
+    ];
+    // August $0, September $600, October $300 (November isnt over): (0 + 600 + 300) / 3.
+    expect(recentMonthlyPayment(payments, "2026-11")).toBe(30_000);
+    expect(recentMonthlyPayment(payments, "2026-11", 2)).toBe(45_000);
+  });
+
+  it("is nothing when nothing was paid", () => {
+    expect(recentMonthlyPayment([], "2026-11")).toBeNull();
+    expect(recentMonthlyPayment([{ date: "2026-11-02", amount: 1000 }], "2026-11")).toBeNull();
   });
 });
