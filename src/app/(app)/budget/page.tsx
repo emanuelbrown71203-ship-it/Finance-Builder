@@ -10,7 +10,7 @@ import { Columns, Runway } from "@/components/charts";
 import { SectionTabs } from "@/components/nav";
 import { nickelReact } from "@/components/nickel/store";
 import { Switch } from "@/components/settings-sections";
-import { Button, Dialog, EmptyState, ErrorNote, Field, Fold, IconButton, MoneyInput, PageHeader, Sheet, SheetHeader, Skeleton, Tag, cx, toast } from "@/components/ui";
+import { Blocks, Button, Dialog, EmptyState, ErrorNote, Field, Fold, IconButton, MoneyInput, PageHeader, Sheet, SheetHeader, Skeleton, Tag, cx, toast } from "@/components/ui";
 import { send, useApi } from "@/components/use-api";
 import { BUDGET_CATEGORIES, SPENDING_CATEGORIES, category } from "@/lib/categories";
 import { TxList } from "@/components/transactions";
@@ -162,12 +162,12 @@ function SavingsRow({ data, onOpen }: { data: BudgetPayload; onOpen: () => void 
         </span>
         <span className="min-w-0 flex-1">
           <span className="block font-bold">Savings</span>
-          <span className="block truncate text-small text-ink-3">
-            {goals.length === 0 ? "Put money aside each month for something" : planned > 0 ? `${dollars(Math.max(0, putAside))} of ${dollars(planned)} put toward your goals${data.isCurrent ? " so far" : ""}` : "Your goals have no monthly amount yet"}
+          <span className="block text-small text-ink-3">
+            {goals.length === 0 ? "Put money aside each month" : planned > 0 ? `${dollars(Math.max(0, putAside))} of ${dollars(planned)} in${data.isCurrent ? " so far" : ""}` : "No monthly amount yet"}
           </span>
           {planned > 0 && (
-            <span aria-hidden className="mt-1.5 block h-1.5 overflow-hidden rounded-full bg-sunk">
-              <span className="block h-full rounded-full bg-[var(--c-savings)]" style={{ width: `${share * 100}%` }} />
+            <span className="mt-1.5 block">
+              <Blocks share={share} color="var(--c-savings)" label="Saved toward goals this month" height={8} />
             </span>
           )}
         </span>
