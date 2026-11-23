@@ -368,10 +368,20 @@ export async function carriedNow(ctx: Ctx, categoryKey: string): Promise<number>
 const savingPlanned = (goalList: GoalView[]) => goalList.filter((g) => g.saved < g.target).reduce((s, g) => s + g.monthlyContribution, 0);
 
 /** Everything the budget screen and Home need for one month, from one load. */
+/** What usually comes in a month: the middle of the last three months' income (months with any). */
+function usualIncome(history: { date: string; amount: number; category: string }[], month: string): number {
+  const totals = [1, 2, 3]
+    .map((n) => addMonthsToMonth(month, -n))
+    .map((m) => history.filter((t) => t.category === "income" && t.amount > 0 && monthOf(t.date) === m).reduce((s, t) => s + t.amount, 0))
+    .filter((t) => t > 0)
+    .sort((a, b) => a - b);
+  return totals.length === 0 ? 0 : totals[Math.floor((totals.length - 1) / 2)];
+}
+
 function budgetFor(ctx: Ctx, bundle: RecurringBundle, limits: Limit[], goalList: GoalView[], month: string) {
   const billIds = billIdsOf(bundle);
   const rows = categoryBudgets({ month, today: ctx.today, history: bundle.history, billIds, limits });
-  const monthPlan = buildMonthPlan({ month, today: ctx.today, transactions: bundle.history.filter((t) => monthOf(t.date) === month), recurring: plannedSeries(bundle), savingsPlanned: savingPlanned(goalList), billIds });
+  const monthPlan = buildMonthPlan({ month, today: ctx.today, transactions: bundle.history.filter((t) => monthOf(t.date) === month), recurring: plannedSeries(bundle), savingsPlanned: savingPlanned(goalList), billIds, usualIncome: usualIncome(bundle.history, month) });
   const plan = { ...budgetPlan({ income: monthPlan.incomeExpected, bills: monthPlan.billsExpected, saving: monthPlan.savingsPlanned, rows }), everydaySpent: monthPlan.everydaySpent, leftToSpend: monthPlan.leftToSpend };
   return { rows, monthPlan, plan };
 }

@@ -55,6 +55,11 @@ for it to be remembered and used whenever an app is built.
   Worked out on read (`src/lib/finance/budget.ts`); only limits and rollover are stored. The budget's plan must always add up to Home's "left to spend" (what rollover
   carried in from earlier months is shown separately). Removed budgets stay as rows with `removed_at`:
   read them through `loadLimits` / `budgetState`, never straight from the table.
+- **A month is planned on the money expected that month, not only what's arrived** (the owner's rule):
+  paychecks still to come count (projected from the recognised paycheck), and with no regular paycheck
+  recognised the plan expects the usual (middle of the last three months' income) by month's end
+  (`usualIncome`, `buildMonthPlan`). The owner is paid every two weeks ("TEAM MEMBERS" is always pay; a
+  remember rule files it as Income).
 - **The app has five places** (`src/components/nav.tsx`): Home, Spending, Bills, Wealth, You. No "More"
   menu. Spending switches Budget / Transactions with tabs under the title. **Wealth's four screens (Net
   worth, Savings, Investing, Debt payoff) each stand on their own**, with their own title and no tabs, as

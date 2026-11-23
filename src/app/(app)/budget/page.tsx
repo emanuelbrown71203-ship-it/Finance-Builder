@@ -118,7 +118,10 @@ function PlanCard({ data }: { data: BudgetPayload }) {
       </div>
       <dl className="mt-3 divide-y divide-line-soft">
         <div className="flex items-baseline justify-between gap-4 py-2.5">
-          <dt className="font-bold">Money in{data.isCurrent ? " this month" : ""}</dt>
+          <dt className="font-bold">
+            {data.isCurrent ? "Expected in this month" : "Money in"}
+            {data.isCurrent && p.income > data.income && <span className="block text-small font-normal text-ink-3">{dollars(data.income)} in so far; the rest is paychecks still to come</span>}
+          </dt>
           <dd className="tabular font-bold">{dollars(p.income)}</dd>
         </div>
         {parts.map((x) => (

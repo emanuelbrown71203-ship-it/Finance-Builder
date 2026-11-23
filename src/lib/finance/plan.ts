@@ -56,8 +56,14 @@ export function buildMonthPlan(args: {
   savingsPlanned: number;
   /** Every bill payment: repeating bills, and anything else spent on a necessity (rent, insurance…). */
   billIds?: ReadonlySet<string>;
+  /**
+   * What usually comes in a month (recent months' income). A budget goes by what's expected this month,
+   * not only what's arrived: with no regular paycheck recognised, the rest of the usual is expected by
+   * the month's end.
+   */
+  usualIncome?: number;
 }): MonthPlan {
-  const { month, today, transactions, recurring, savingsPlanned, billIds } = args;
+  const { month, today, transactions, recurring, savingsPlanned, billIds, usualIncome = 0 } = args;
   const start = monthStart(month);
   const end = monthEnd(month);
 
@@ -116,6 +122,16 @@ export function buildMonthPlan(args: {
     }
   }
 
+  // No regular paycheck recognised (yet), but money usually comes in: the rest of the usual is expected.
+  if (today <= end && usualIncome > incomeReceived + incomeUpcoming && !recurring.some((s) => s.kind === "income" && s.active)) {
+    const rest = usualIncome - incomeReceived - incomeUpcoming;
+    const day = days.get(end);
+    if (day) {
+      incomeUpcoming += rest;
+      day.income += rest;
+      day.events.push({ name: "Usual income", amount: rest, type: "income", settled: false });
+    }
+  }
   const incomeExpected = incomeReceived + incomeUpcoming;
   const billsExpected = billsPaid + billsUpcoming;
   const leftToSpend = incomeExpected - billsExpected - savingsPlanned - everydaySpent;

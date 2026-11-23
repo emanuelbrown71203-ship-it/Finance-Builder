@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { budgetPlan, categoryBudgets, monthProgress, suggestLimits, type BudgetTx } from "@/lib/finance/budget";
 import { BUDGET_CATEGORIES, isReturnedPayment } from "@/lib/categories";
+import { buildMonthPlan } from "@/lib/finance/plan";
 
 /** The budget engine: everyday spending against limits, rollover, pace, forecast, and a starting budget. */
 
@@ -164,5 +165,24 @@ describe("the month's plan", () => {
     expect(plan.unplanned).toBe(dollars(4000 - 2000 - 500 - 300));
     expect(plan.budgetedSpent).toBe(dollars(120));
     expect(plan.unbudgetedSpent).toBe(dollars(80));
+  });
+});
+
+describe("money expected this month", () => {
+  const tx = (id: string, date: string, amount: number, category: string) => ({ id, date, name: id, amount, category, accountId: "a" });
+  const base = { month: "2026-11", today: "2026-11-23", recurring: [], savingsPlanned: 0 };
+
+  it("expects the usual income when no regular paycheck is recognised, not only what's arrived", () => {
+    const plan = buildMonthPlan({ ...base, transactions: [tx("pay", "2026-11-10", 105_384, "income"), tx("food", "2026-11-12", -5_000, "groceries")], usualIncome: 210_000 });
+    expect(plan.incomeReceived).toBe(105_384);
+    expect(plan.incomeExpected).toBe(210_000);
+    expect(plan.leftToSpend).toBe(210_000 - 5_000);
+    // The days still add up to what's expected.
+    expect(plan.days.reduce((s, d) => s + d.income, 0)).toBe(210_000);
+  });
+
+  it("never expects less than what's arrived, and a finished month is just what happened", () => {
+    expect(buildMonthPlan({ ...base, transactions: [tx("pay", "2026-11-10", 300_000, "income")], usualIncome: 210_000 }).incomeExpected).toBe(300_000);
+    expect(buildMonthPlan({ ...base, today: "2026-12-05", transactions: [tx("pay", "2026-11-10", 105_384, "income")], usualIncome: 210_000 }).incomeExpected).toBe(105_384);
   });
 });
