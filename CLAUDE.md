@@ -52,7 +52,11 @@ for it to be remembered and used whenever an app is built.
   carried in from earlier months is shown separately). Removed budgets stay as rows with `removed_at`:
   read them through `loadLimits` / `budgetState`, never straight from the table.
 - **The app has five places** (`src/components/nav.tsx`): Home, Spending, Bills, Wealth, You. No "More"
-  menu. A new screen joins a place (as a tab under its title, or a row on You), and Home stays short.
+  menu. Spending switches Budget / Transactions with tabs under the title. **Wealth's four screens (Net
+  worth, Savings, Investing, Debt payoff) each stand on their own**, with their own title and no tabs, as
+  the owner prefers: on a phone the Wealth button opens a sheet to pick one, and the side menu on a wide
+  screen lists them separately. A new screen joins a place (as a tab, a screen in Wealth's sheet, or a
+  row on You), and Home stays short.
 - Bank access tokens are stored encrypted. The app can read accounts and can never move money.
 - **Card payments vary and needn't be in full** (the owner pays big balances down over time, and not
   the same amount every month). Paying a card is a transfer, so the amount never changes spending or

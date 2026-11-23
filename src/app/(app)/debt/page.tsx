@@ -1,6 +1,5 @@
 "use client";
 
-import { SectionTabs } from "@/components/nav";
 import { nickelReact } from "@/components/nickel/store";
 import { Minus, Plus } from "lucide-react";
 import Link from "next/link";
@@ -76,8 +75,7 @@ export default function DebtPage() {
   if (error && !data) {
     return (
       <>
-        <PageHeader title="Wealth" />
-        <SectionTabs />
+        <PageHeader title="Debt payoff" />
         <ErrorNote message={error.message} onRetry={() => mutate()} />
       </>
     );
@@ -85,8 +83,7 @@ export default function DebtPage() {
   if (!data) {
     return (
       <>
-        <PageHeader title="Wealth" />
-        <SectionTabs />
+        <PageHeader title="Debt payoff" />
         <div className="grid grid-cols-1 gap-4">
           <Skeleton className="h-64 rounded-sheet" />
           <Skeleton className="h-64 rounded-sheet" />
@@ -98,8 +95,7 @@ export default function DebtPage() {
   if (data.debts.length === 0) {
     return (
       <>
-        <PageHeader title="Wealth" />
-        <SectionTabs />
+        <PageHeader title="Debt payoff" />
         <Sheet>
           <p className="rounded-2xl bg-mint px-4 py-3 font-bold text-mint-ink">Nothing owed. Every linked card and loan is at zero.</p>
           <p className="mt-3 text-ink-2">
@@ -120,8 +116,7 @@ export default function DebtPage() {
 
   return (
     <>
-      <PageHeader title="Wealth" lead="When you’ll be debt-free at today’s payments, and what a little extra each month would change." />
-      <SectionTabs />
+      <PageHeader title="Debt payoff" lead="When you’ll be debt-free at today’s payments, and what a little extra each month would change." />
 
       <div className={`grid grid-cols-1 items-start gap-4 lg:grid-cols-[1.25fr_1fr] lg:gap-5 ${isValidating ? "opacity-80" : ""}`}>
         <div className="grid grid-cols-1 gap-4 lg:gap-5">

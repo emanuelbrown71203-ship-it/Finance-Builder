@@ -23,9 +23,11 @@ Passbook follows the same house style as the owner's other apps (written down in
 `docs/house-style.md`):
 
 - Five places, all in the bar along the bottom on a phone (a menu down the side on a wide screen):
-  **Home**, **Spending** (Budget and Transactions), **Bills**, **Wealth** (Net worth, Savings,
-  Investing, Debt) and **You** (your level and badges, the weekly recap, accounts, names, activity and
-  Settings). No "More" menu. Places with several screens switch with tabs under the title.
+  **Home**, **Spending** (Budget and Transactions, switched with tabs under the title), **Bills**,
+  **Wealth** and **You** (your level and badges, the weekly recap, accounts, names, activity and
+  Settings). No "More" menu. Wealth's four screens (Net worth, Savings, Investing, Debt payoff) each
+  stand on their own: on a phone the Wealth button opens a sheet to pick one; on a wide screen the side
+  menu lists them separately.
 - **Pull down at the top of any screen to refresh.** It checks the banks, reloads every number and
   loads a newer version of the app if one is out.
 - Pop-ups slide up from the bottom and can be dragged down to close.

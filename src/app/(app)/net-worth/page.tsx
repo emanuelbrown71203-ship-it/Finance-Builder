@@ -1,6 +1,5 @@
 "use client";
 
-import { SectionTabs } from "@/components/nav";
 import { ChevronRight, Plus } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
@@ -147,7 +146,7 @@ export default function NetWorthPage() {
   return (
     <>
       <PageHeader
-        title="Wealth"
+        title="Net worth"
         lead="Everything you own minus everything you owe, tracked day by day."
         action={
           <Button onClick={() => setDialog({ open: true, account: null })}>
@@ -155,7 +154,6 @@ export default function NetWorthPage() {
           </Button>
         }
       />
-      <SectionTabs />
 
       <div className="grid grid-cols-1 gap-5">
         <Sheet>

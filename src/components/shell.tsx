@@ -11,13 +11,13 @@ import { Celebrations } from "./celebrate";
 import { GAME_URL, GameWatcher } from "./game/game";
 import { LevelChip } from "./game/level";
 import type { GamePayload } from "@/lib/game/progress";
-import { SECTIONS, sectionFor } from "./nav";
+import { SECTIONS, sectionFor, under } from "./nav";
 import { NickelMark } from "./nickel/mark";
 import { Nickel } from "./nickel/nickel";
 import { PixelIcon, type PixelName } from "./pixel-icons";
 import { ReauthHost } from "./reauth";
 import { PullToRefresh } from "./pull-to-refresh";
-import { ConfirmHost, IconButton, Tag, Toaster, cx } from "./ui";
+import { ConfirmHost, Dialog, IconButton, Tag, Toaster, cx } from "./ui";
 import { send, useApi, useNow } from "./use-api";
 
 /** The mark: Nickel on his arcade tile. */
@@ -96,6 +96,8 @@ export function Shell({ children }: { children: ReactNode }) {
   // Bills due in the next three days show as a count on the Bills tab.
   const dueSoon = Array.isArray(overview?.upcoming) ? overview.upcoming.filter((b) => diffDays(b.date, overview.today) <= 3).length : 0;
   const level = game?.level ?? null;
+  const [wealthOpen, setWealthOpen] = useState(false);
+  const wealth = SECTIONS.find((s) => s.key === "wealth")!;
 
   return (
     <div className="mx-auto flex min-h-dvh w-full max-w-[1320px]">
@@ -103,7 +105,7 @@ export function Shell({ children }: { children: ReactNode }) {
         Skip to content
       </a>
 
-      {/* Wide screens: the same five places down the side, each with its screens under it. */}
+      {/* Wide screens: the places down the side, with Wealth's four screens listed on their own. */}
       <aside className="sticky top-0 hidden h-dvh w-[252px] shrink-0 flex-col gap-5 px-4 py-6 lg:flex">
         <Link href="/" className="flex items-center gap-2.5 px-2">
           <Logo size={34} />
@@ -112,6 +114,17 @@ export function Shell({ children }: { children: ReactNode }) {
         <nav aria-label="Main" className="no-scrollbar flex flex-1 flex-col gap-1 overflow-y-auto">
           {SECTIONS.map((section) => {
             const active = current.key === section.key;
+            if (section.key === "wealth") {
+              return section.pages.map((page) => {
+                const on = under(pathname, page.href);
+                return (
+                  <Link key={page.href} href={page.href} aria-current={on ? "page" : undefined} className={cx(page.color, "flex min-h-12 items-center gap-3 rounded-[12px] border-2 px-2.5 font-bold transition-colors", on ? "edge bg-sheet text-ink shadow-card" : "border-transparent text-ink-2 hover:bg-sheet/60 hover:text-ink")}>
+                    <IconTile icon={page.icon!} active={on} />
+                    {page.label}
+                  </Link>
+                );
+              });
+            }
             return (
               <div key={section.key} className={cx(section.key === "you" && "mt-auto")}>
                 <Link href={section.href} aria-current={active ? "page" : undefined} className={cx(section.color, "flex min-h-12 items-center gap-3 rounded-[12px] border-2 px-2.5 font-bold transition-colors", active ? "edge bg-sheet text-ink shadow-card" : "border-transparent text-ink-2 hover:bg-sheet/60 hover:text-ink")}>
@@ -137,11 +150,26 @@ export function Shell({ children }: { children: ReactNode }) {
         </main>
       </div>
 
-      {/* Phones and upright tablets: all five places along the bottom. Nothing hides under "More". */}
+      {/* Phones and upright tablets: all five places along the bottom. Wealth opens a sheet of its four screens. */}
       <nav aria-label="Main" className="tab-bar fixed inset-x-0 bottom-0 z-40 grid grid-cols-5 gap-1 bg-sheet/95 px-2 pb-[max(6px,env(safe-area-inset-bottom))] pt-1.5 backdrop-blur-xl lg:hidden">
         {SECTIONS.map((section) => {
           const active = current.key === section.key;
           const Icon = section.icon;
+          if (section.key === "wealth") {
+            return (
+              <button
+                key={section.key}
+                type="button"
+                onClick={() => setWealthOpen(true)}
+                aria-haspopup="dialog"
+                aria-current={active ? "page" : undefined}
+                className={cx(section.color, "relative flex min-h-14 flex-col items-center justify-center gap-1 rounded-[10px] border-2 text-[11px] font-bold transition-transform active:scale-95", active ? "tab-on" : "border-transparent text-ink-3")}
+              >
+                {Icon && <PixelIcon name={Icon} size={22} />}
+                {section.label}
+              </button>
+            );
+          }
           return (
             <Link
               key={section.key}
@@ -161,6 +189,25 @@ export function Shell({ children }: { children: ReactNode }) {
           );
         })}
       </nav>
+
+      <Dialog open={wealthOpen} onClose={() => setWealthOpen(false)} title="Wealth">
+        <ul className="flex flex-col gap-2 pb-2">
+          {wealth.pages.map((page) => {
+            const on = under(pathname, page.href);
+            return (
+              <li key={page.href}>
+                <Link href={page.href} onClick={() => setWealthOpen(false)} aria-current={on ? "page" : undefined} className={cx(page.color, "edge flex min-h-[68px] items-center gap-3 rounded-[14px] bg-sheet px-3 py-2.5 shadow-card active:translate-x-[2px] active:translate-y-[2px] active:shadow-none")}>
+                  <IconTile icon={page.icon!} active={on} />
+                  <span className="min-w-0 flex-1">
+                    <span className="block font-bold">{page.label}</span>
+                    <span className="block text-small text-ink-3">{page.hint}</span>
+                  </span>
+                </Link>
+              </li>
+            );
+          })}
+        </ul>
+      </Dialog>
 
       <PullToRefresh />
       <Celebrations />

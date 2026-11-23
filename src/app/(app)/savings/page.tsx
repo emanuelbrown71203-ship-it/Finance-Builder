@@ -2,7 +2,6 @@
 
 import { XpTag } from "@/components/game/level";
 import { WINS } from "@/lib/game/progress";
-import { SectionTabs } from "@/components/nav";
 import { ChevronRight, Plus } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
@@ -70,7 +69,7 @@ export default function SavingsPage() {
   return (
     <>
       <PageHeader
-        title="Wealth"
+        title="Savings"
         lead="What you’ve put away, and what it’s for."
         action={
           <Button variant="primary" onClick={() => setSheet({ kind: "new" })}>
@@ -78,7 +77,6 @@ export default function SavingsPage() {
           </Button>
         }
       />
-      <SectionTabs />
 
       <div className="grid grid-cols-1 gap-5">
         <Sheet className="grid grid-cols-1 gap-x-10 gap-y-6 lg:grid-cols-[minmax(15rem,20rem)_1fr]">

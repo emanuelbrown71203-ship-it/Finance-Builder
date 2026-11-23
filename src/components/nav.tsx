@@ -7,9 +7,10 @@ import { cx } from "./ui";
 
 /*
  * How the app is laid out: five places, each one tap away in the bar along
- * the bottom (or down the side on a wide screen). Places with more than one
- * screen switch between them with tabs under the title, so there's never a
- * "More" menu to dig through.
+ * the bottom of a phone. Spending switches between its two screens with tabs
+ * under the title. Wealth's four screens (net worth, savings, investing, debt)
+ * each stand on their own, as the owner prefers: on a phone, Wealth opens a
+ * sheet to pick one; down the side of a wide screen they're listed separately.
  */
 
 export type SectionKey = "home" | "spending" | "bills" | "wealth" | "you";
@@ -25,13 +26,15 @@ export type Section = {
   /** The colour class for this place (see globals.css). */
   color: string;
   /** Its screens, when there's more than one. */
-  pages: { href: string; label: string }[];
+  pages: { href: string; label: string; icon?: PixelName; color?: string; hint?: string }[];
+  /** Whether its screens switch with tabs under the title (Spending), or each stands on its own (Wealth). */
+  tabs: boolean;
   /** Other screens that belong here (reached from inside it). */
   also: string[];
 };
 
 export const SECTIONS: Section[] = [
-  { key: "home", label: "Home", href: "/", hint: "What’s left, what needs a look, what’s next", icon: "home", color: "sec-home", pages: [], also: [] },
+  { key: "home", label: "Home", href: "/", hint: "What’s left, what needs a look, what’s next", icon: "home", color: "sec-home", pages: [], tabs: false, also: [] },
   {
     key: "spending",
     label: "Spending",
@@ -43,9 +46,10 @@ export const SECTIONS: Section[] = [
       { href: "/budget", label: "Budget" },
       { href: "/transactions", label: "Transactions" },
     ],
+    tabs: true,
     also: [],
   },
-  { key: "bills", label: "Bills", href: "/bills", hint: "Bills you must pay, extras you could cut, and when they’re due", icon: "bills", color: "sec-bills", pages: [], also: [] },
+  { key: "bills", label: "Bills", href: "/bills", hint: "Bills you must pay, extras you could cut, and when they’re due", icon: "bills", color: "sec-bills", pages: [], tabs: false, also: [] },
   {
     key: "wealth",
     label: "Wealth",
@@ -54,18 +58,19 @@ export const SECTIONS: Section[] = [
     icon: "wealth",
     color: "sec-worth",
     pages: [
-      { href: "/net-worth", label: "Net worth" },
-      { href: "/savings", label: "Savings" },
-      { href: "/investing", label: "Investing" },
-      { href: "/debt", label: "Debt" },
+      { href: "/net-worth", label: "Net worth", icon: "wealth", color: "sec-worth", hint: "Everything you own minus everything you owe" },
+      { href: "/savings", label: "Savings", icon: "savings", color: "sec-savings", hint: "What you’ve put away, and your goals" },
+      { href: "/investing", label: "Investing", icon: "investing", color: "sec-investing", hint: "Brokerage and retirement accounts together" },
+      { href: "/debt", label: "Debt payoff", icon: "debt", color: "sec-bills", hint: "When you’ll be debt-free, and how to get there sooner" },
     ],
+    tabs: false,
     also: [],
   },
   // Its tab shows your level instead of an icon.
-  { key: "you", label: "You", href: "/you", hint: "Your level and badges, accounts and settings", icon: null, color: "sec-investing", pages: [], also: ["/progress", "/settings", "/accounts", "/recap"] },
+  { key: "you", label: "You", href: "/you", hint: "Your level and badges, accounts and settings", icon: null, color: "sec-investing", pages: [], tabs: false, also: ["/progress", "/settings", "/accounts", "/recap"] },
 ];
 
-const under = (path: string, href: string) => path === href || path.startsWith(`${href}/`);
+export const under = (path: string, href: string) => path === href || path.startsWith(`${href}/`);
 
 export function sectionFor(path: string): Section {
   if (path === "/") return SECTIONS[0];
@@ -76,7 +81,7 @@ export function sectionFor(path: string): Section {
 export function SectionTabs({ className }: { className?: string }) {
   const path = usePathname();
   const section = sectionFor(path);
-  if (section.pages.length < 2) return null;
+  if (!section.tabs || section.pages.length < 2) return null;
   // The deepest matching screen is the one you're on (Names lives under Transactions).
   const current = [...section.pages].sort((a, b) => b.href.length - a.href.length).find((p) => under(path, p.href));
   return (

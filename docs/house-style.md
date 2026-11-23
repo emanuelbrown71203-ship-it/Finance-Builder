@@ -32,9 +32,12 @@ If a rule here and an app's own existing look disagree, the app's existing look 
 - **Phone and upright tablet: a bar along the bottom with every place in it, at most five.** No "More"
   menu: when an app grows, group its screens into places instead of hiding them. Icon above a short
   label. The active one is tinted with its section's colour. A count badge when something is waiting.
-- **A place with several screens switches between them with tabs under its title** (like Budget /
-  Transactions), one tap each. Never more than four tabs.
-- **Wide screens: a menu down the left side** (about 230–260px) with the same places.
+- **A place with two or three closely related screens switches between them with tabs under its title**
+  (like Budget / Transactions), one tap each. Screens that are each their own thing (net worth, savings,
+  investing, debt) stand on their own, with their own title: the owner found them harder to use as tabs.
+  On a phone, that place's button opens a sheet to pick one.
+- **Wide screens: a menu down the left side** (about 230–260px) with the same places, and screens that
+  stand on their own listed separately.
 - **The last place is "You"**: the person's level and badges up top (in apps with the game layer), then
   one-tap rows to the recap, accounts, history and Settings. Its tab shows the level instead of an icon.
 - **Settings is not a tab.** It opens from You (or a gear) and holds Appearance, the account and the
