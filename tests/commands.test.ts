@@ -4,6 +4,16 @@ import { parseCommand, type CommandContext } from "@/lib/nickel/commands";
 const ctx: CommandContext = { today: "2026-11-21", goals: ["Emergency fund", "Down payment", "Two weeks in Japan"], loans: ["Auto Loan", "Student Loan", "Cashback Visa"] };
 const parse = (s: string) => parseCommand(s, ctx);
 
+describe("a question is never taken for an instruction", () => {
+  it.each(["how much is my rent", "when is my rent due", "what's my rent", "rent", "what bills are due", "what's my biggest bill", "is my phone bill paid", "how much is my car insurance bill", "what is due next", "what's my credit card bill", "when is my credit card bill due", "netflix", "how much is rent this month?"])("“%s” is a question", (q) => {
+    expect(parse(q)).toBeNull();
+  });
+  it("still does what it's told, even when asked nicely", () => {
+    expect(parse("add rent $2,150 on the 1st")).toMatchObject({ kind: "bill", amount: 215_000 });
+    expect(parse("can you add Netflix $15.99 on the 5th?")).toMatchObject({ kind: "bill", amount: 1599 });
+  });
+});
+
 describe("telling Nickel to add a bill", () => {
   it.each([
     ["add Netflix $15.99 on the 5th", { kind: "bill", name: "Netflix", amount: 1599, frequency: "monthly", date: "2026-12-05" }],

@@ -907,6 +907,30 @@ export function Nickel() {
 
 type Done = { activityId: string; summary: string; href: string };
 
+/** The question being typed to Nickel, kept until it's sent: in memory, and for this tab in case the page reloads. */
+const DRAFT_KEY = "passbook-nickel-draft";
+let draft: string | null = null;
+function readDraft(): string {
+  if (draft !== null) return draft;
+  try {
+    draft = sessionStorage.getItem(DRAFT_KEY) ?? "";
+  } catch {
+    draft = "";
+  }
+  return draft;
+}
+function saveDraft(value: string) {
+  draft = value;
+  try {
+    if (value) sessionStorage.setItem(DRAFT_KEY, value);
+    else sessionStorage.removeItem(DRAFT_KEY);
+  } catch {
+    // Private browsing: kept in memory only.
+  }
+}
+/** The last thing asked and his answer, shown again when the panel reopens soon after. */
+let lastTalk: { youSaid: string; reply: Answer | null; at: number } | null = null;
+
 const EXAMPLES = ["add rent $2,150 on the 1st", "upcoming vet bill $250 next friday", "new goal Japan $4,500 by June", "add $200 to the emergency fund", "student loan rate 4.5%"];
 
 const usd = (cents: number) => `$${(cents / 100).toLocaleString("en-US", { minimumFractionDigits: cents % 100 ? 2 : 0, maximumFractionDigits: 2 })}`;
@@ -969,13 +993,19 @@ const VERDICT_CHIP: Record<LastVerdict["verdict"], { label: string; className: s
  * and he answers in the phone's own voice: no AI service, no keys, no cost.
  */
 function NickelDo({ today, goals, loans, talksBack, onDone, onBill, onGoal, onLeave }: { today: string; goals: { name: string }[]; loans: { name: string }[]; talksBack: boolean; onDone: (d: Done) => void; onBill: (draft: Partial<BillDraft>) => void; onGoal: () => void; onLeave: () => void }) {
-  const [text, setText] = useState("");
+  // What's typed survives the panel closing (a stray tap on the X, nudging him) and is there when it opens again.
+  const [text, setTextState] = useState(readDraft);
+  const setText = (value: string) => {
+    setTextState(value);
+    saveDraft(value);
+  };
   const [hint, setHint] = useState<string | null>(null);
   const [pending, setPending] = useState<{ body: Record<string, unknown>; read: string; form?: Partial<BillDraft>; byVoice: boolean } | null>(null);
   const [busy, setBusy] = useState(false);
   const [listening, setListening] = useState(false);
-  const [youSaid, setYouSaid] = useState<string | null>(null);
-  const [reply, setReply] = useState<Answer | null>(null);
+  // So is the last question and his answer, for a few minutes.
+  const [youSaid, setYouSaid] = useState<string | null>(() => (lastTalk && Date.now() - lastTalk.at < 10 * 60_000 ? lastTalk.youSaid : null));
+  const [reply, setReply] = useState<Answer | null>(() => (lastTalk && Date.now() - lastTalk.at < 10 * 60_000 ? lastTalk.reply : null));
   const stop = useRef<() => void>(() => {});
   const quiet = useRef<() => void>(() => {});
   const input = useRef<HTMLInputElement>(null);
@@ -1078,6 +1108,7 @@ function NickelDo({ today, goals, loans, talksBack, onDone, onBill, onGoal, onLe
         answer("I didn’t catch that. Try asking what’s left to spend, or tell me to add a bill.", byVoice);
       } else {
         setReply(a);
+        lastTalk = { youSaid: said, reply: a, at: Date.now() };
         if (a.verdict) lastVerdict = { verdict: a.verdict, at: Date.now() };
         answer(a.text, byVoice);
       }

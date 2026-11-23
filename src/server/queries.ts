@@ -8,6 +8,7 @@ import { dollars, dollarsExact } from "@/lib/money";
 import { buildMonthPlan, spendingByCategory } from "@/lib/finance/plan";
 import { budgetPlan, categoryBudgets, monthProgress, suggestLimits, type Limit } from "@/lib/finance/budget";
 import { payoffPlan, payoffOrder, recentMonthlyPaydown, type Debt, type Strategy } from "@/lib/finance/payoff";
+import { noSpendWeek } from "@/lib/finance/nospend";
 import { FREQUENCY_LABEL, detectRecurring, monthlyEquivalent, seriesKeyFor, upcomingBetween, type RecurringKind } from "@/lib/finance/recurring";
 import { cancelHelp, isKnownSubscription } from "@/lib/finance/subscriptions";
 import type { Namer } from "@/lib/finance/names";
@@ -415,6 +416,12 @@ export async function getBudget(ctx: Ctx, month: string): Promise<BudgetPayload>
   };
 }
 
+/** A month's no-spend week as it stands today (for last month's, once it's over: how many days were clear). */
+export async function noSpendWeekFor(ctx: Ctx, month: string) {
+  const [bundle, limits, goalList] = await Promise.all([loadRecurring(ctx), loadLimits(ctx), listGoals(ctx)]);
+  return noSpendWeek(month, ctx.today, budgetFor(ctx, bundle, limits, goalList, month).monthPlan.days);
+}
+
 /**
  * Last month's budgets, judged once it's over: which limits held. Only limits
  * that were set by the 8th of that month count, and only when the bank
@@ -676,6 +683,17 @@ export async function getOverview(ctx: Ctx): Promise<Overview> {
 
   const { rows, monthPlan: plan, plan: budget } = budgetFor(ctx, bundle, limits, goalList, month);
   const due = upcomingBills(bundle, ctx.today, 30);
+  // The no-spend week (the month's last seven days): this month's from a few days before, or last month's
+  // for a week after it, with what was left over to put in savings.
+  let noSpend: Overview["noSpend"] = null;
+  const thisWeek = noSpendWeek(month, ctx.today, plan.days);
+  if (thisWeek) noSpend = { ...thisWeek, leftover: plan.leftToSpend, goals: goalList };
+  else if (dayOfMonth(ctx.today) <= 7) {
+    const before = addMonthsToMonth(month, -1);
+    const lastPlan = budgetFor(ctx, bundle, limits, goalList, before).monthPlan;
+    const lastWeek = noSpendWeek(before, ctx.today, lastPlan.days);
+    if (lastWeek) noSpend = { ...lastWeek, leftover: lastPlan.leftToSpend, goals: goalList };
+  }
   const end = worth.series[worth.series.length - 1] ?? { assets: 0, debts: 0, net: 0 };
 
   // What needs a look, most urgent first.
@@ -711,6 +729,7 @@ export async function getOverview(ctx: Ctx): Promise<Overview> {
   return {
     today: ctx.today,
     attention,
+    noSpend,
     firstName: ctx.user.name.split(" ")[0],
     plan,
     netWorth: { net: end.net, assets: end.assets, debts: end.debts, change: changeOver(worth.series, 30), series: worth.series },

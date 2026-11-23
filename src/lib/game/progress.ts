@@ -6,7 +6,7 @@ import { addDays, type ISODate } from "../dates";
  * come from what's been won. Pure, so it's tested and works on sample data.
  */
 
-export type WinKind = "sort" | "rename" | "note" | "bill" | "cancel" | "goal" | "save" | "milestone" | "budget" | "under" | "allunder" | "plan" | "checkin" | "nospend" | "import";
+export type WinKind = "sort" | "rename" | "note" | "bill" | "cancel" | "goal" | "save" | "milestone" | "budget" | "under" | "allunder" | "plan" | "checkin" | "nospend" | "nospendweek" | "import";
 
 /** XP for each kind of win, and how many of that kind count in a day (so busywork doesn't farm XP). */
 export const WINS: Record<WinKind, { xp: number; perDay: number; label: string }> = {
@@ -24,6 +24,7 @@ export const WINS: Record<WinKind, { xp: number; perDay: number; label: string }
   plan: { xp: 15, perDay: 3, label: "Tuned the debt plan" },
   checkin: { xp: 5, perDay: 1, label: "Checked in" },
   nospend: { xp: 15, perDay: 1, label: "A no-spend day" },
+  nospendweek: { xp: 75, perDay: 1, label: "Kept a whole no-spend week" },
   import: { xp: 20, perDay: 3, label: "Brought in a card statement" },
 };
 
@@ -65,6 +66,7 @@ export type BadgeId =
   | "streak-7"
   | "streak-30"
   | "no-spend-ninja"
+  | "clean-week"
   | "level-5"
   | "level-10";
 
@@ -87,6 +89,7 @@ const BADGES: { id: BadgeId; name: string; how: string; test: (c: Counts, best: 
   { id: "streak-7", name: "7-Day Streak", how: "Check in 7 days in a row", test: (_c, best) => best >= 7 },
   { id: "streak-30", name: "30-Day Streak", how: "Check in 30 days in a row", test: (_c, best) => best >= 30 },
   { id: "no-spend-ninja", name: "No-Spend Ninja", how: "Have 5 no-spend days", test: (c) => (c.nospend ?? 0) >= 5 },
+  { id: "clean-week", name: "Clean Week", how: "Spend nothing but bills for a month’s last 7 days", test: (c) => (c.nospendweek ?? 0) >= 1 },
   { id: "level-5", name: "Level 5", how: "Reach level 5", test: (_c, _b, level) => level >= 5 },
   { id: "level-10", name: "Level 10", how: "Reach level 10", test: (_c, _b, level) => level >= 10 },
 ];

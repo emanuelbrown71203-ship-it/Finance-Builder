@@ -44,6 +44,8 @@ export type NickelInput = {
   latest: { name: string; amount: number; date: ISODate } | null;
   /** Places in the last three months still going by bank code, like "SQ *TARTINE 0423". */
   unclearNames: { count: number; example: string | null };
+  /** The no-spend week (the month's last seven days), when it's near, on or just over. */
+  noSpend?: { phase: "soon" | "on" | "done"; clear: number; day: number; spentToday: boolean; leftover: number } | null;
 };
 
 const money = (cents: number) => {
@@ -114,6 +116,12 @@ export function thinkAbout(input: NickelInput): { mood: Mood; tips: Tip[] } {
     say({ key: "week-bills", priority: 4, mood: "curious", text: `${soon.length} payments come out in the next week, ${money(total)} in all.`, href: "/bills", link: "See bills" });
   }
 
+  // The no-spend week: the month's last seven days, spending nothing but bills, so what's left goes to savings.
+  const ns = input.noSpend;
+  if (ns?.phase === "soon") say({ key: "nospend-soon", priority: 2, mood: "excited", text: s("nospend-soon", ["No-spend week is almost here! The last 7 days of the month: bills only, then whatever’s left goes to savings.", "Get ready: no-spend week starts soon. Bills get paid, everything else waits. I believe in you!"]), href: "/", link: "See the week" });
+  else if (ns?.phase === "on" && ns.spentToday) say({ key: "nospend-today", priority: 2, mood: "curious", text: `No-spend week, day ${ns.day}: something got spent today. No biggie, tomorrow’s a fresh start!`, href: "/", link: "See the week" });
+  else if (ns?.phase === "on") say({ key: "nospend-on", priority: 2, mood: "proud", text: `${s("nospend-on", ["It’s no-spend week!", "No-spend week, woof!", "Day " + ns.day + " of no-spend week!"])} ${ns.clear > 0 ? `${ns.clear} clean ${ns.clear === 1 ? "day" : "days"} so far.` : "Let’s make today a clean one."}${ns.leftover > 0 ? ` That’s about ${money(ns.leftover)} headed for savings.` : ""} *proud wag*`, href: "/", link: "See the week" });
+  else if (ns?.phase === "done" && ns.leftover > 0) say({ key: "nospend-done", priority: 2, mood: "excited", text: `Last month left ${money(ns.leftover)} over${ns.clear === 7 ? " and you kept a whole no-spend week!" : "."} Want to put it in savings?`, href: "/", link: "Put it in savings" });
   if (input.noSpendStreak >= 2) say({ key: "streak", priority: 3, mood: "proud", text: s("streak", [`${input.noSpendStreak} no-spend days in a row. I’m so proud of you.`, `That’s ${input.noSpendStreak} days in a row without everyday spending. Good human!`]) });
 
   if (input.leftToSpend > 0 && input.perDay > 0) say({ key: "pace", priority: 4, mood: "happy", text: s("pace", [`After bills and goals there’s ${money(input.leftToSpend)} left this month: about ${money(input.perDay)} a day.`, `${money(input.perDay)} a day left to spend through the end of the month. Nice and steady.`]), href: "/", link: "See the month" });

@@ -5,7 +5,7 @@ import { addDays, addMonthsToMonth, dayOfMonth, formatShort, monthName, monthOf,
 import { badgesFor, bestStreak, levelFor, streak, WINS, isWinKind, type GamePayload, type WinKind } from "@/lib/game/progress";
 import type { Ctx } from "./auth";
 import { describeError } from "./errors";
-import { lastMonthBudgets } from "./queries";
+import { lastMonthBudgets, noSpendWeekFor } from "./queries";
 
 /*
  * The game layer on the server: small wins are written down where they happen
@@ -115,6 +115,17 @@ export async function budgetWins(ctx: Ctx): Promise<void> {
   if (result.judged >= 2 && result.kept.length === result.judged) await win(ctx, "allunder", `${month}:all`, monthName(month));
 }
 
+/**
+ * Last month's no-spend week (its last seven days), once it's over: nothing spent but bills on every one
+ * of them is a big win. Looked at in the first ten days of the month; the win counts once.
+ */
+async function noSpendWeekWin(ctx: Ctx): Promise<void> {
+  if (dayOfMonth(ctx.today) > 10) return;
+  const month = addMonthsToMonth(monthOf(ctx.today), -1);
+  const week = await noSpendWeekFor(ctx, month);
+  if (week && week.phase === "done" && week.clear === week.days.length) await win(ctx, "nospendweek", month, monthName(month));
+}
+
 /** The note that a month's budgets have been judged. Not a win: it's never shown or counted. */
 const JUDGED = "budgets-judged";
 
@@ -125,6 +136,11 @@ export async function checkIn(ctx: Ctx): Promise<void> {
     await budgetWins(ctx);
   } catch (error) {
     console.error("game: last month's budgets weren't checked:", describeError(error));
+  }
+  try {
+    await noSpendWeekWin(ctx);
+  } catch (error) {
+    console.error("game: last month's no-spend week wasn't checked:", describeError(error));
   }
   try {
     // Counted today (so it shows in today's XP), and once for that day however late it's noticed.

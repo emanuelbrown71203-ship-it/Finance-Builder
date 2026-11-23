@@ -59,6 +59,15 @@ export async function getNickel(ctx: Ctx): Promise<NickelPayload> {
     priciestDebt: debts[0] ? { name: debts[0].name, apr: debts[0].aprPercent! } : null,
     latest: latest ? { name: latest.name, amount: latest.amount, date: latest.date } : null,
     unclearNames,
+    noSpend: overview.noSpend
+      ? {
+          phase: overview.noSpend.phase,
+          clear: overview.noSpend.clear,
+          day: overview.noSpend.days.findIndex((d) => d.date === ctx.today) + 1,
+          spentToday: overview.noSpend.days.some((d) => d.date === ctx.today && d.state === "spent"),
+          leftover: Math.max(0, overview.noSpend.leftover),
+        }
+      : null,
   });
   return {
     mood,

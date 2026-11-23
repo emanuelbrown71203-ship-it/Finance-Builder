@@ -241,7 +241,7 @@ export function answerQuestion(question: string, s: Snapshot, last?: LastVerdict
   const cardsOnly = /\b(credit )?cards?\b/.test(q) && !/\bloans?\b/.test(q);
   const loansOnly = /\bloans?\b/.test(q) && !/\bcards?\b/.test(q);
   const owed = (s.accounts ?? []).filter((a) => (cardsOnly ? a.kind === "card" : loansOnly ? a.kind === "loan" : a.kind === "card" || a.kind === "loan") && a.balance > 0);
-  if (/\b(owe|owing|debts?|in debt|credit cards?|card balances?|loan balances?|balance on|how much (is|do i have) on)\b/.test(q) && !/\b(due|minimum|when)\b/.test(q)) {
+  if ((/\b(owe|owing|debts?|in debt|credit cards?|card balances?|loan balances?|balance on|how much (is|do i have) on)\b/.test(q) || (/\bbill\b/.test(q) && mentioned(q, owed))) && !/\b(due|minimum|when)\b/.test(q)) {
     const one = mentioned(q, owed);
     if (one) return { text: `${one.name} has ${money(one.balance)} on it.`, href: "/debt", link: "See debt payoff" };
     if (owed.length === 0) return { text: `You don’t owe anything on ${cardsOnly ? "a card" : "a card or loan"} that I can see. *proud wag*`, href: "/debt", link: "See debt payoff" };
@@ -361,7 +361,14 @@ export function answerQuestion(question: string, s: Snapshot, last?: LastVerdict
   const live = s.bills.filter((b) => b.active);
   const kind = Object.entries(CATEGORY_WORDS).find(([key, words]) => ["housing", "utilities", "insurance", "loans"].includes(key) && words.some((w) => ` ${q} `.includes(` ${w} `)));
   const bill = mentioned(q, live) ?? (kind ? ([...live].filter((b) => b.category === kind[0]).sort((a, b) => (a.nextDate < b.nextDate ? -1 : 1))[0] ?? null) : null);
-  if (bill && /\b(due|when|next|bill|pay|cost|how much)\b/.test(q)) {
+  // The biggest one.
+  if (/\b(biggest|largest|most expensive|highest) (bill|payment)s?\b/.test(q)) {
+    const top = [...live].filter((b) => b.category !== "card").sort((a, b) => a.amount - b.amount)[0];
+    if (!top) return { text: "I don’t see any regular bills yet.", href: "/bills", link: "See bills" };
+    return { text: `Your biggest bill is ${top.name}, ${money(top.amount)}, next due ${formatShort(top.nextDate)}.`, href: "/bills", link: "See bills" };
+  }
+  // Asked about one bill, or just named it ("rent").
+  if (bill && (/\b(due|when|next|bill|pay|paid|cost|how much)\b/.test(q) || q.split(" ").length <= 3)) {
     const days = diffDays(bill.nextDate, s.today);
     const when = days <= 0 ? "today" : days === 1 ? "tomorrow" : `on ${formatShort(bill.nextDate)}`;
     return { text: `${bill.name} (${money(bill.amount)}) is next due ${when}.`, href: "/bills", link: "See bills" };

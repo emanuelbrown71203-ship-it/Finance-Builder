@@ -132,6 +132,12 @@ describe("the questions the owner asked that he couldn't answer", () => {
     expect(say("what did I just buy")).toMatch(/Tartine Bakery/);
   });
 
+  it("answers about a bill asked by name, the biggest bill, and a card's bill", () => {
+    expect(say("rent")).toBe("Parkview Apartments ($2,150) is next due on Dec 1.");
+    expect(say("what's my biggest bill")).toBe("Your biggest bill is Parkview Apartments, $2,150, next due Dec 1.");
+    expect(say("how much is my cashback visa bill")).toBe("Cashback Visa has $2,697.26 on it.");
+  });
+
   it("says where the money goes, how the budgets stand, what's saved, income and subscriptions", () => {
     expect(say("where is my money going")).toBe("This month the most has gone to Home & rent ($2,150), Groceries ($520.10), Restaurants & coffee ($312.50).");
     expect(say("am I over budget")).toBe("Groceries is $20.10 over. Restaurants & coffee is on pace to go over.");

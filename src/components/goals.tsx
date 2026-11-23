@@ -57,24 +57,25 @@ export function goalSentence(goal: GoalView): string {
 
 /* ---------- the sheet for making, changing and adding to a goal ---------- */
 
-export type GoalSheet = { kind: "closed" } | { kind: "new" } | { kind: "edit"; goal: GoalView } | { kind: "add"; goal: GoalView } | { kind: "withdraw"; goal: GoalView };
+export type GoalSheet = { kind: "closed" } | { kind: "new" } | { kind: "edit"; goal: GoalView } | { kind: "add"; goal: GoalView; amount?: number } | { kind: "withdraw"; goal: GoalView };
 
-export function GoalDialog({ sheet, today, onClose, onDeleted }: { sheet: GoalSheet; today: ISODate; onClose: () => void; onDeleted?: () => void }) {
+/** `onSaved` hears when money actually went in (or a goal was made), as opposed to the sheet just closing. */
+export function GoalDialog({ sheet, today, onClose, onDeleted, onSaved }: { sheet: GoalSheet; today: ISODate; onClose: () => void; onDeleted?: () => void; onSaved?: () => void }) {
   const goal = sheet.kind === "closed" || sheet.kind === "new" ? null : sheet.goal;
   const title = { closed: "", new: "New savings goal", edit: "Change goal", add: `Add to ${goal?.name}`, withdraw: `Take out of ${goal?.name}` }[sheet.kind];
   return (
     <Dialog open={sheet.kind !== "closed"} onClose={onClose} title={title}>
       {sheet.kind === "add" || sheet.kind === "withdraw" ? (
-        <MoneyForm key={`${sheet.kind}-${sheet.goal.id}`} kind={sheet.kind} goal={sheet.goal} onClose={onClose} />
+        <MoneyForm key={`${sheet.kind}-${sheet.goal.id}`} kind={sheet.kind} goal={sheet.goal} start={sheet.kind === "add" ? sheet.amount : undefined} onClose={onClose} onSaved={onSaved} />
       ) : sheet.kind !== "closed" ? (
-        <GoalForm key={`${sheet.kind}-${goal?.id ?? "new"}`} goal={goal} today={today} onClose={onClose} onDeleted={onDeleted} />
+        <GoalForm key={`${sheet.kind}-${goal?.id ?? "new"}`} goal={goal} today={today} onClose={onClose} onDeleted={onDeleted} onSaved={onSaved} />
       ) : null}
     </Dialog>
   );
 }
 
-function MoneyForm({ kind, goal, onClose }: { kind: "add" | "withdraw"; goal: GoalView; onClose: () => void }) {
-  const [amount, setAmount] = useState(kind === "add" && goal.perMonth ? String(goal.perMonth / 100) : "");
+function MoneyForm({ kind, goal, start, onClose, onSaved }: { kind: "add" | "withdraw"; goal: GoalView; start?: number; onClose: () => void; onSaved?: () => void }) {
+  const [amount, setAmount] = useState(start ? String(start / 100) : kind === "add" && goal.perMonth ? String(goal.perMonth / 100) : "");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const submit = async (e: React.FormEvent) => {
@@ -96,6 +97,7 @@ function MoneyForm({ kind, goal, onClose }: { kind: "add" | "withdraw"; goal: Go
         if (after > before && after < 4) nickelReact({ type: "task", task: "milestone", name: goal.name, percent: after * 25 });
         else nickelReact({ type: "task", task: "deposit", name: goal.name, amount: cents });
       }
+      onSaved?.();
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Couldn’t save. Try again.");
@@ -121,7 +123,7 @@ function MoneyForm({ kind, goal, onClose }: { kind: "add" | "withdraw"; goal: Go
   );
 }
 
-function GoalForm({ goal, today, onClose, onDeleted }: { goal: GoalView | null; today: ISODate; onClose: () => void; onDeleted?: () => void }) {
+function GoalForm({ goal, today, onClose, onDeleted, onSaved }: { goal: GoalView | null; today: ISODate; onClose: () => void; onDeleted?: () => void; onSaved?: () => void }) {
   const [name, setName] = useState(goal?.name ?? "");
   const [target, setTarget] = useState(goal ? String(goal.target / 100) : "");
   const [saved, setSaved] = useState("");
@@ -149,6 +151,7 @@ function GoalForm({ goal, today, onClose, onDeleted }: { goal: GoalView | null; 
       else await send("POST", "/api/goals", { ...body, saved: startCents });
       toast(goal ? "Goal saved" : `“${name.trim()}” added to your goals`);
       if (!goal) nickelReact({ type: "task", task: "goal", name: name.trim() });
+      if (!goal) onSaved?.();
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Couldn’t save. Try again.");

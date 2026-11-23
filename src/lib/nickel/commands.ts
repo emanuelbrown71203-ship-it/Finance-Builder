@@ -211,10 +211,28 @@ function aimedAt(text: string, goal: string): boolean {
 /** Words that mean a bill is being talked about, not money into a goal. */
 const BILL_WORDS = /\b(?:bill|bills|subscription|insurance|payment|rent|membership|due|every|monthly|weekly|yearly|annually|quarterly|upcoming|one[- ]time|one[- ]off)\b/i;
 
+/** How questions start: these are asked, not told. */
+const QUESTION = /^(how|what|what'?s|whats|when|when'?s|where|which|who|why|is|isn'?t|are|am|do|does|did|can|could|should|would|will|have|has|was|were|any|show|tell|list|give)\b/;
+
 export function parseCommand(input: string, ctx: CommandContext): Command | null {
+  // "Can you add Netflix $15.99 on the 5th?" is "add Netflix $15.99 on the 5th".
+  const polite = /^(?:(?:can|could|would|will) you\s+|please\s+)+(?=(?:add|put|make|create|rename|change|record|set up)\b)/i.exec(input.trim());
+  if (polite) input = input.trim().slice(polite[0].length).replace(/\?+\s*$/, "");
+  const command = parseInstruction(input, ctx);
+  // Just a name ("rent", "netflix") with no amount, date or "add" is asking about it, not adding it.
+  if (command && (command.kind === "bill" || command.kind === "upcoming") && command.amount === null && command.date === null && !/\b(add|new|create|remind|set up|track|upcoming)\b/i.test(input)) return null;
+  return command;
+}
+
+function parseInstruction(input: string, ctx: CommandContext): Command | null {
   const text = input.replace(/\s+/g, " ").trim().slice(0, 300);
   if (!text) return null;
   const lower = text.toLowerCase();
+
+  // A question is never an instruction: "how much is my rent?" or "when is rent due" asks, and gets an
+  // answer; "add rent $2,150 on the 1st" tells. (Only a question that plainly asks him to add or make
+  // something, like "can you add rent $2,150?", is taken as one.)
+  if ((QUESTION.test(lower) || text.endsWith("?")) && !/\b(add|new|create|make|set up|put|record|rename|change)\b/.test(lower)) return null;
 
   // Rename: "rename SQ *TARTINE to Tartine", "rename Venmo to Rent only at $1,200".
   const m = /^(?:please\s+)?(?:rename|change the name of)\s+(.+?)\s+(?:to|as|into)\s+(.+)$/i.exec(text) ?? /^(?:please\s+)?call\s+(.+?)\s+(?:instead\s+)?["“](.+)["”]$/i.exec(text);

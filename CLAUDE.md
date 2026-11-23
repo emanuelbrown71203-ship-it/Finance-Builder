@@ -84,6 +84,11 @@ for it to be remembered and used whenever an app is built.
   "It's not a subscription"); Coming up rows open their bill (a card's minimum opens Debt payoff); a budget
   category's charges open the transaction editor. The category picker groups Bills (necessities) apart
   from Everyday spending.
+- **The no-spend week** is the last seven days of every month, the owner's own goal: nothing spent but
+  bills (Extras count as spending), so what's left of the month goes to savings (`src/lib/finance/nospend.ts`,
+  worked out from the month plan's days). Home shows a card from three days before (one block per day,
+  green when clear) and for a week after, with "Put $X in savings" (a goal deposit; it can't move money).
+  A whole clean week is a win (`nospendweek`, 75 XP, the Clean Week badge); Nickel cheers it on.
 - **Savings is the budget's first line**: the goals' monthly amounts (set aside before everyday budgets),
   what's gone toward them this month, and a sheet to change a goal's monthly amount, add money, or start one.
 - **Bills seen twice count.** Rent, utilities, insurance or a loan charged two months running at about
@@ -105,7 +110,9 @@ for it to be remembered and used whenever an app is built.
   switches itself off after 180 days unused. A statement confirms each tap (same amount, within 3 days),
   keeping a category the person picked, and drops taps it shows never went through. The sample
   household has a test button instead of a link.
-- **Asking Nickel is one tap**: every bubble has "Ask me something". He answers what's left, what's due,
+- **Asking Nickel is one tap**: every bubble has "Ask me something". Anything worded as a question
+  ("how much is my rent?", "rent") is answered, never taken for an instruction (`parseCommand` only acts
+  on "add…", "new…", "can you add…" and the like), and what's typed survives the panel closing. He answers what's left, what's due,
   spending by category, store, today, this week, last week or last month, what's owed (cards, loans, one
   card), what's in the bank, where the money goes, which budgets are over, what's saved, income and
   Extras.

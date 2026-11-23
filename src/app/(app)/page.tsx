@@ -12,6 +12,7 @@ import { LinkBankButton } from "@/components/link-bank";
 import { LiveStatus } from "@/components/shell";
 import { markRecapSeen, weekId } from "@/components/recap";
 import { TxList } from "@/components/transactions";
+import { NoSpendCard } from "@/components/no-spend";
 import { Blocks, Button, EmptyState, ErrorNote, Fold, PageHeader, Sheet, SheetHeader, Skeleton, Tag, cx } from "@/components/ui";
 import { LIVE_INTERVAL, useApi, useNow } from "@/components/use-api";
 import { category } from "@/lib/categories";
@@ -296,6 +297,8 @@ export default function HomePage() {
       <div className="flex flex-col gap-4 xl:grid xl:grid-cols-[1.3fr_1fr] xl:items-start xl:gap-5">
         <div className="contents xl:flex xl:flex-col xl:gap-5">
           <Hero data={data} />
+
+          {data.noSpend && <NoSpendCard week={data.noSpend} today={data.today} className="order-2" />}
 
           <Budgets data={data} />
 

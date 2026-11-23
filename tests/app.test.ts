@@ -10,6 +10,7 @@ import { accounts as accountsTable, budgets as budgetsTable, categoryRules as ca
 import { importAppleCard, previewAppleCard, undoAppleCardImport } from "@/server/card-import";
 import { contextForTapKey, createTapKey, recordTap, revokeTapKey, tapStatus } from "@/server/card-taps";
 import { signOutEverywhere } from "@/server/auth";
+import { checkIn } from "@/server/game";
 import { POST as tapRoute } from "@/app/api/tap/[key]/route";
 import { and, eq as eqOp, inArray as inArrayOp } from "drizzle-orm";
 import { addBill, addGoal, addToGoal, changeGoal, changeLoan, findCharge, findDebt, findGoal, listActivity, renameCharges, undoActivity } from "@/server/actions";
@@ -290,6 +291,28 @@ describe("sample household", () => {
     expect((await getRecurring(ctx)).possible.some((p) => p.key === disney.key)).toBe(false);
     await setRecurringOverride(ctx, disney.key, { kind: null });
     expect((await getRecurring(ctx)).possible.some((p) => p.key === disney.key)).toBe(true);
+  });
+
+  it("runs the no-spend week at the end of the month, then offers what was left over to savings", async () => {
+    // A few days off: not yet.
+    expect((await getOverview(ctx)).noSpend).toBeNull();
+    // During it (the sample's charges stop on the 19th, so the 24th and 25th were clean).
+    const during = (await getOverview({ ...ctx, today: "2026-11-26" })).noSpend!;
+    expect(during).toMatchObject({ phase: "on", month: "2026-11", start: "2026-11-24", end: "2026-11-30", clear: 2 });
+    expect(during.days.map((d) => d.state)).toEqual(["clear", "clear", "today", "ahead", "ahead", "ahead", "ahead"]);
+    expect(during.leftover).toBe((await getOverview({ ...ctx, today: "2026-11-26" })).plan.leftToSpend);
+    // After: last month's week and what it left over, with the goals it could go to.
+    const after = (await getOverview({ ...ctx, today: "2026-12-03" })).noSpend!;
+    expect(after).toMatchObject({ phase: "done", month: "2026-11", clear: 7 });
+    expect(after.goals.length).toBeGreaterThan(0);
+    // A whole clean week is a win, once.
+    const december = { ...ctx, today: "2026-12-03" };
+    await checkIn(december);
+    await checkIn(december);
+    const wins = await db.select().from(playerWinsTable).where(and(eqOp(playerWinsTable.userId, DEMO_USER_ID), eqOp(playerWinsTable.kind, "nospendweek")));
+    expect(wins).toHaveLength(1);
+    expect(wins[0]).toMatchObject({ ref: "2026-11", xp: 75 });
+    await db.delete(playerWinsTable).where(and(eqOp(playerWinsTable.userId, DEMO_USER_ID), inArrayOp(playerWinsTable.day, ["2026-12-03"])));
   });
 
   it("recaps last week, Monday to Sunday", async () => {

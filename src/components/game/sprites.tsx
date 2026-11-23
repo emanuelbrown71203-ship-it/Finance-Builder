@@ -216,6 +216,24 @@ const ART: Record<BadgeId | "flame" | "coin", Art> = {
   "streak-7": { rows: FLAME, colors: { a: "var(--c-budget)", b: "var(--series-4)", c: WHITE, e: "var(--c-bills)" } },
   // Hotter: the same flame, burning blue with a white-hot middle.
   "streak-30": { rows: FLAME, colors: { a: "var(--c-activity)", b: WHITE, c: "var(--c-activity)", e: "var(--c-worth)" } },
+  // A calendar page with a big tick: a whole no-spend week.
+  "clean-week": {
+    rows: [
+      "..b......b..",
+      ".aaaaaaaaaa.",
+      ".aaaaaaaaaa.",
+      ".cccccccccc.",
+      ".ccccccccdc.",
+      ".cccccccddc.",
+      ".cdcccccdcc.",
+      ".cddcccddcc.",
+      ".ccddcddccc.",
+      ".cccdddcccc.",
+      ".cccccccccc.",
+      "............",
+    ],
+    colors: { a: "var(--c-bills)", b: "var(--ink)", c: WHITE, d: "var(--c-savings)" },
+  },
   "no-spend-ninja": {
     rows: [
       "...aaaaaa...",

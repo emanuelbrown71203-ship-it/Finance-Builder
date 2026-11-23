@@ -1,5 +1,6 @@
 import type { NameSource } from "./finance/names";
 import type { ISODate } from "./dates";
+import type { NoSpendWeek } from "./finance/nospend";
 import type { MonthPlan } from "./finance/plan";
 import type { CategoryBudget } from "./finance/budget";
 import type { RecurringSeries } from "./finance/recurring";
@@ -150,6 +151,8 @@ export type AttentionItem = { kind: "bank" | "due" | "price" | "budget" | "pace"
 export type Overview = {
   today: ISODate;
   attention: AttentionItem[];
+  /** The no-spend week (the month's last seven days), when it's near, on, or just over; with what's left over and the goals it can go to. */
+  noSpend: (NoSpendWeek & { leftover: number; goals: GoalView[] }) | null;
   firstName: string;
   plan: MonthPlan;
   netWorth: { net: number; assets: number; debts: number; change: number; series: NetWorthPoint[] };
