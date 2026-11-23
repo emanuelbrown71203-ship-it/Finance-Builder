@@ -27,11 +27,13 @@ async function connect(): Promise<DB> {
     // asks for many things together, and the transaction pooler loses track of the answers: the
     // connection then hangs and every later request on it waits until the host gives up.
     //
-    // A small pool whose idle connections close quickly suits a host that freezes and thaws
-    // server copies at will: no connection is left open for long enough to go stale, and a
-    // household's few users never need more than a handful at once.
+    // One connection per server copy. The host freezes copies between requests, and a frozen copy
+    // keeps its connections open; Supabase's session pooler allows only 15 in all (shared by every
+    // copy, old ones included, right after a deploy). With three each, five copies used it up and
+    // every request after that failed ("max clients reached"). One is plenty: the driver sends a
+    // screen's queries down it together. Idle connections still close quickly.
     // Encrypted in transit whatever the address says: the driver's own default is plain text.
-    const client = postgres(url, { prepare: false, max: 3, idle_timeout: 20, max_lifetime: 15 * 60, connect_timeout: 10, ...databaseTls(url) });
+    const client = postgres(url, { prepare: false, max: 1, idle_timeout: 20, max_lifetime: 15 * 60, connect_timeout: 10, ...databaseTls(url) });
     return drizzle(client, { schema }) as unknown as DB;
   }
 

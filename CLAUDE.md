@@ -164,7 +164,9 @@ for it to be remembered and used whenever an app is built.
 - New accounts need the invite code (`SIGNUP_CODE`). Don’t reopen sign-up.
 - With real data the site’s address is `APP_URL` and nothing else: never read it from a request header.
 - On Supabase, `DATABASE_URL` uses the **session** pooler (port 5432). The transaction pooler (6543)
-  hangs on the driver's pipelined queries, which takes the whole live site down. Tests against a
+  hangs on the driver's pipelined queries, which takes the whole live site down. The session pooler
+  allows 15 connections in all, and frozen server copies keep theirs, so each copy gets **one**
+  (`max: 1` in `src/db/index.ts`); more ran it out ("max clients reached") after deploys. Tests against a
   direct Postgres can't show this; after a deploy check `/api/health` reports `"pool":"ok"`.
 - If a change touches sign-in, sessions, the connectors or the headers in `next.config.ts`, run the
   security checks again and get an independent review before publishing.
