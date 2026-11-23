@@ -48,6 +48,10 @@ for it to be remembered and used whenever an app is built.
   phone): their payments are planned separately and never counted against a category's budget.
   Subscriptions you could live without are **Extras**: everyday spending that counts in its category
   (Netflix in Entertainment). The Bills screen lists both, and one tap moves a charge between them.
+  **Home & rent, Utilities, Insurance and Loan payments are necessity categories** (`isNecessity` in
+  `src/lib/categories.ts`): everything spent in them is a bill, repeating or not (unless it's an Extra),
+  so they're never offered a budget; moving a charge to another category makes it everyday spending. A $0
+  budget is allowed ("nothing on this"). A bounced payment ("RETURNED … PAYMENT") is a transfer.
   Worked out on read (`src/lib/finance/budget.ts`); only limits and rollover are stored. The budget's plan must always add up to Home's "left to spend" (what rollover
   carried in from earlier months is shown separately). Removed budgets stay as rows with `removed_at`:
   read them through `loadLimits` / `budgetState`, never straight from the table.

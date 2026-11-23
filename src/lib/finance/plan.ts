@@ -54,8 +54,10 @@ export function buildMonthPlan(args: {
   transactions: TxLike[];
   recurring: RecurringSeries[];
   savingsPlanned: number;
+  /** Every bill payment: repeating bills, and anything else spent on a necessity (rent, insurance…). */
+  billIds?: ReadonlySet<string>;
 }): MonthPlan {
-  const { month, today, transactions, recurring, savingsPlanned } = args;
+  const { month, today, transactions, recurring, savingsPlanned, billIds } = args;
   const start = monthStart(month);
   const end = monthEnd(month);
 
@@ -78,7 +80,7 @@ export function buildMonthPlan(args: {
       incomeReceived += t.amount;
       day.income += t.amount;
       day.events.push({ name: t.name, amount: t.amount, type: "income", settled: true });
-    } else if (series && series.kind !== "income") {
+    } else if ((series && series.kind !== "income") || billIds?.has(t.id)) {
       billsPaid += -t.amount;
       day.bills += -t.amount;
       day.events.push({ name: t.name, amount: t.amount, type: "bill", settled: true });

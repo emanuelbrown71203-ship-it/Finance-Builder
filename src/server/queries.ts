@@ -1,6 +1,6 @@
 import { and, asc, desc, eq, gte, ilike, inArray, isNull, lte, ne, or, sql } from "drizzle-orm";
 import { accounts, balanceSnapshots, budgets, debtPlans, goalDeposits, goals, holdings, items, recurringOverrides, transactions, userSettings, type Account } from "@/db/schema";
-import { category } from "@/lib/categories";
+import { category, isNecessity } from "@/lib/categories";
 import { DEFAULT_TIMEZONE } from "@/lib/config";
 import { addDays, addMonths, addMonthsToMonth, dayOfMonth, daysInMonth, diffDays, eachDay, formatDistance, formatShort, monthEnd, monthOf, monthStart, todayIn, weekday, type ISODate } from "@/lib/dates";
 import { goalIdeas, goalPlan } from "@/lib/finance/goalplan";
@@ -323,11 +323,15 @@ export async function getRecurring(ctx: Ctx): Promise<RecurringPayload> {
 
 /**
  * The ids of every bill payment. Bills are necessities (rent, power, insurance, loans, and anything the
- * person moves to Bills): planned on their own, never counted against a budget. Subscriptions are
+ * person moves to Bills): planned on their own, never counted against a budget. Everything spent on a
+ * necessity is a bill, repeating or not, unless the person moved that charge to Extras. Subscriptions are
  * "Extras" (Netflix): they come out of their category's budget like any other spending.
  */
 function billIdsOf(bundle: RecurringBundle): Set<string> {
-  return new Set(bundle.series.filter((s) => s.kind === "bill").flatMap((s) => s.history.map((h) => h.id)));
+  const ids = new Set(bundle.series.filter((s) => s.kind === "bill").flatMap((s) => s.history.map((h) => h.id)));
+  const extras = new Set(bundle.series.filter((s) => s.kind === "subscription").flatMap((s) => s.history.map((h) => h.id)));
+  for (const t of bundle.history) if (isNecessity(t.category) && t.amount !== 0 && !extras.has(t.id)) ids.add(t.id);
+  return ids;
 }
 
 /** What the month plan reserves ahead of time: bills and income, not Extras. */
@@ -351,8 +355,9 @@ const savingPlanned = (goalList: GoalView[]) => goalList.filter((g) => g.saved <
 
 /** Everything the budget screen and Home need for one month, from one load. */
 function budgetFor(ctx: Ctx, bundle: RecurringBundle, limits: Limit[], goalList: GoalView[], month: string) {
-  const rows = categoryBudgets({ month, today: ctx.today, history: bundle.history, billIds: billIdsOf(bundle), limits });
-  const monthPlan = buildMonthPlan({ month, today: ctx.today, transactions: bundle.history.filter((t) => monthOf(t.date) === month), recurring: plannedSeries(bundle), savingsPlanned: savingPlanned(goalList) });
+  const billIds = billIdsOf(bundle);
+  const rows = categoryBudgets({ month, today: ctx.today, history: bundle.history, billIds, limits });
+  const monthPlan = buildMonthPlan({ month, today: ctx.today, transactions: bundle.history.filter((t) => monthOf(t.date) === month), recurring: plannedSeries(bundle), savingsPlanned: savingPlanned(goalList), billIds });
   const plan = { ...budgetPlan({ income: monthPlan.incomeExpected, bills: monthPlan.billsExpected, saving: monthPlan.savingsPlanned, rows }), everydaySpent: monthPlan.everydaySpent, leftToSpend: monthPlan.leftToSpend };
   return { rows, monthPlan, plan };
 }

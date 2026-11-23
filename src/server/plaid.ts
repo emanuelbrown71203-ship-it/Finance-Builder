@@ -4,7 +4,7 @@ import { decodeProtectedHeader, importJWK, jwtVerify, type JWK } from "jose";
 import { Configuration, CountryCode, PlaidApi, PlaidEnvironments, Products, type AccountBase, type Transaction as PlaidTransaction } from "plaid/legacy";
 import type { DB } from "@/db";
 import { accounts, balanceSnapshots, holdings, items, transactions } from "@/db/schema";
-import { categoryFromPlaid } from "@/lib/categories";
+import { categoryFromPlaid, isReturnedPayment } from "@/lib/categories";
 import { APP_NAME, DEFAULT_TIMEZONE, plaidConfig } from "@/lib/config";
 import { addDays, todayIn, type ISODate } from "@/lib/dates";
 import { merchantKey } from "@/lib/finance/recurring";
@@ -343,7 +343,8 @@ async function syncTransactions(db: DB, item: typeof items.$inferSelect, accessT
   for (const t of incoming) {
     const accountId = accountMap.get(t.account_id);
     if (!accountId) continue;
-    const category = rules.get(merchantKey(t.merchant_name || t.name)) ?? categoryFromPlaid(t.personal_finance_category?.primary, t.personal_finance_category?.detailed);
+    // A bounced payment isn't spending, whatever the bank files it under.
+    const category = isReturnedPayment(t.name) ? "transfer" : (rules.get(merchantKey(t.merchant_name || t.name)) ?? categoryFromPlaid(t.personal_finance_category?.primary, t.personal_finance_category?.detailed));
     // When a pending charge posts, Plaid sends a new transaction that points at
     // the pending one. Updating that row keeps the person’s category and note.
     const match = existing.get(t.transaction_id) ?? (t.pending_transaction_id ? existing.get(t.pending_transaction_id) : undefined);

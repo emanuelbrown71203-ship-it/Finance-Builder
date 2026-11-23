@@ -446,6 +446,31 @@ describe("sample household", () => {
     await expect(setBudget(ctx, "dining", 28000, { rolloverSince: "2030-01" })).rejects.toThrow();
   });
 
+  it("counts anything spent on a necessity as a bill, never as everyday spending or a budget", async () => {
+    const before = await getBudget(ctx, "2026-11");
+    const home = (b: typeof before) => b.rows.find((r) => r.category === "housing");
+    // A one-off hardware-store run the bank files under Home & rent.
+    await db.insert(transactionsTable).values({ id: "home-depot", userId: DEMO_USER_ID, accountId: "demo-card", date: today, name: "THE HOME DEPOT #4410", rawName: "THE HOME DEPOT #4410", amount: -2_029, category: "housing" });
+    try {
+      const after = await getBudget(ctx, "2026-11");
+      expect(home(after)!.spent).toBe(home(before)?.spent ?? 0);
+      expect(home(after)!.bills).toBe((home(before)?.bills ?? 0) + 2_029);
+      expect(after.plan.bills).toBe(before.plan.bills + 2_029);
+      expect(after.plan.everydaySpent).toBe(before.plan.everydaySpent);
+      // Home and the budget still agree.
+      expect(after.plan.leftToSpend).toBe((await getOverview(ctx)).plan.leftToSpend);
+      // Necessities are never offered a budget.
+      expect(after.suggestion?.limits.some((l) => ["housing", "utilities", "insurance", "loans"].includes(l.category))).toBe(false);
+      // Moved to Shopping, it's everyday spending again.
+      await db.update(transactionsTable).set({ category: "shopping" }).where(eqOp(transactionsTable.id, "home-depot"));
+      const moved = await getBudget(ctx, "2026-11");
+      expect(moved.plan.bills).toBe(before.plan.bills);
+      expect(moved.plan.everydaySpent).toBe(before.plan.everydaySpent + 2_029);
+    } finally {
+      await db.delete(transactionsTable).where(eqOp(transactionsTable.id, "home-depot"));
+    }
+  });
+
   it("moving a subscription to Bills sets it aside each month; moving it back makes it an Extra again", async () => {
     const before = await getBudget(ctx, "2026-11");
     const netflix = (await getRecurring(ctx)).series.find((s) => s.name === "Netflix")!;

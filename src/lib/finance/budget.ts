@@ -1,3 +1,4 @@
+import { isNecessity } from "../categories";
 import { addMonthsToMonth, dayOfMonth, monthEnd, monthOf, type ISODate } from "../dates";
 
 /*
@@ -169,7 +170,7 @@ export function categoryBudgets(args: { month: string; today: ISODate; history: 
  * saving), they're all trimmed by the same share so the plan fits.
  */
 export function suggestLimits(rows: CategoryBudget[], room: number | null): { limits: { category: string; limit: number }[]; trimmed: boolean } {
-  const picks = rows.filter((r) => r.average >= 1500 && r.category !== "fees").map((r) => ({ category: r.category, limit: Math.ceil(r.average / 1000) * 1000 }));
+  const picks = rows.filter((r) => r.average >= 1500 && r.category !== "fees" && !isNecessity(r.category)).map((r) => ({ category: r.category, limit: Math.ceil(r.average / 1000) * 1000 }));
   const total = picks.reduce((s, p) => s + p.limit, 0);
   if (room === null || room <= 0 || total <= room) return { limits: picks.sort((a, b) => b.limit - a.limit), trimmed: false };
   const share = room / total;

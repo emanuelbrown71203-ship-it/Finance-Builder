@@ -12,7 +12,7 @@ import { nickelReact } from "@/components/nickel/store";
 import { Switch } from "@/components/settings-sections";
 import { Button, Dialog, EmptyState, ErrorNote, Field, Fold, IconButton, MoneyInput, PageHeader, Sheet, SheetHeader, Skeleton, Tag, cx, toast } from "@/components/ui";
 import { send, useApi } from "@/components/use-api";
-import { SPENDING_CATEGORIES, category } from "@/lib/categories";
+import { BUDGET_CATEGORIES, SPENDING_CATEGORIES, category } from "@/lib/categories";
 import { addMonthsToMonth, formatShort, monthEnd, monthName, monthOf } from "@/lib/dates";
 import { WINS } from "@/lib/game/progress";
 import { dollars, dollarsExact, parseDollarsToCents } from "@/lib/money";
@@ -161,7 +161,9 @@ function SetupForm({ data, onClose }: { data: BudgetPayload; onClose: () => void
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const chosen = rows.filter((r) => on[r.category]).map((r) => ({ category: r.category, monthlyLimit: parseDollarsToCents(values[r.category] ?? "") }));
-  const valid = chosen.every((c) => c.monthlyLimit !== null && c.monthlyLimit > 0);
+  // $0 is a budget too: nothing on it this month.
+  const missing = rows.filter((r) => on[r.category] && parseDollarsToCents(values[r.category] ?? "") === null).map((r) => category(r.category).label);
+  const valid = missing.length === 0;
   const total = chosen.reduce((s, c) => s + (c.monthlyLimit ?? 0), 0) + data.rows.reduce((s, r) => s + (r.limit ?? 0), 0);
   const average = (cat: string) => data.rows.find((r) => r.category === cat)?.average ?? 0;
 
@@ -183,7 +185,7 @@ function SetupForm({ data, onClose }: { data: BudgetPayload; onClose: () => void
   return (
     <div className="flex flex-col gap-4">
       <p className="text-ink-2">
-        What you usually spend on each, from the last three months, rounded up.
+        What you usually spend on each, from the last three months, rounded up. Rent, utilities, insurance and loans aren’t here: they’re bills, set aside first.
         {suggestion.trimmed ? " Trimmed a little so everything fits what’s left after bills and saving." : ""} Change any amount, or untick ones you don’t want a limit on.
       </p>
       <ul className="flex flex-col gap-2">
@@ -214,6 +216,12 @@ function SetupForm({ data, onClose }: { data: BudgetPayload; onClose: () => void
         Each new limit earns {WINS.budget.xp} XP (up to {WINS.budget.perDay} a day).
       </p>
       {error && <p className="rounded-control bg-pink px-3.5 py-3 text-small text-pink-ink">{error}</p>}
+      {/* Say why the button won't go, right beside it. */}
+      {(!valid || chosen.length === 0) && (
+        <p className="rounded-control bg-canary px-3.5 py-3 text-small text-canary-ink" aria-live="polite">
+          {chosen.length === 0 ? "Tick at least one to set a budget." : `Put an amount for ${missing.join(", ")} (0 is fine), or untick it.`}
+        </p>
+      )}
       <div className="flex justify-end gap-2">
         <Button onClick={onClose}>Not now</Button>
         <Button variant="primary" disabled={busy || !valid || chosen.length === 0} onClick={save}>
@@ -256,7 +264,7 @@ function CategoryDetail({ row, data, onClose }: { row: BudgetRow; data: BudgetPa
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
     const cents = parseDollarsToCents(value);
-    if (cents === null || cents <= 0) return setError("Enter an amount, like 250.");
+    if (cents === null || cents < 0) return setError("Enter an amount, like 250 (or 0 for nothing this month).");
     void saveLimit(cents);
   };
   // The switch shows the change and flips straight back, so it needs no message (one would sit behind this sheet anyway).
@@ -459,7 +467,8 @@ function Budget() {
   // No budget yet: everyday spending this month or usually. Categories that only ever pay bills sit with the rest.
   const everyday = (r: BudgetRow) => r.spent > 0 || r.average > 0;
   const loose = data.rows.filter((r) => r.limit === null && everyday(r));
-  const nothingYet = SPENDING_CATEGORIES.filter((c) => !data.rows.some((r) => r.category === c.key && (r.limit !== null || everyday(r))));
+  // Necessities (rent, insurance…) are bills, so they're never offered a budget.
+  const nothingYet = BUDGET_CATEGORIES.filter((c) => !data.rows.some((r) => r.category === c.key && (r.limit !== null || everyday(r))));
   const openRow = opened ? (data.rows.find((r) => r.category === opened) ?? (adding === opened || SPENDING_CATEGORIES.some((c) => c.key === opened) ? blankRow(opened, data) : null)) : null;
 
   return (

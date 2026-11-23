@@ -102,6 +102,9 @@ describe("bank sync", () => {
             tx("t-groc", "p-card", "2026-11-17", "Safeway", 82.4, "FOOD_AND_DRINK", "FOOD_AND_DRINK_GROCERIES"),
             tx("t-coffee-pending", "p-card", "2026-11-18", "Blue Bottle Coffee", 6.5, "FOOD_AND_DRINK", "FOOD_AND_DRINK_COFFEE", { pending: true }),
             tx("t-cardpay", "p-checking", "2026-11-10", "Credit Card Payment", 300, "LOAN_PAYMENTS", "LOAN_PAYMENTS_CREDIT_CARD_PAYMENT"),
+            // A card payment that bounced, which the bank files as a loan payment, and the fee for it.
+            tx("t-returned", "p-card", "2026-11-12", "Returned Mobile ACH Payment - CONA", 300, "LOAN_PAYMENTS", "LOAN_PAYMENTS_OTHER_PAYMENT"),
+            tx("t-returned-fee", "p-card", "2026-11-12", "Returned Payment Fee", 30, "BANK_FEES", "BANK_FEES_OTHER_BANK_FEES"),
           ],
         },
       ],
@@ -127,6 +130,8 @@ describe("bank sync", () => {
     expect(byId["t-groc"]).toMatchObject({ amount: -8240, category: "groceries" });
     expect(byId["t-coffee-pending"]).toMatchObject({ amount: -650, category: "dining", pending: true });
     expect(byId["t-cardpay"]).toMatchObject({ category: "transfer" });
+    expect(byId["t-returned"]).toMatchObject({ amount: -30000, category: "transfer" });
+    expect(byId["t-returned-fee"]).toMatchObject({ amount: -3000, category: "fees" });
 
     const held = await db.select().from(holdings).where(eq(holdings.userId, USER));
     expect(held).toHaveLength(1);
@@ -171,7 +176,7 @@ describe("bank sync", () => {
 
     const txs = await db.select().from(transactions).where(eq(transactions.userId, USER));
     const byId = Object.fromEntries(txs.map((t) => [t.plaidTransactionId, t]));
-    expect(txs).toHaveLength(4);
+    expect(txs).toHaveLength(6);
     expect(byId["t-rent"]).toBeUndefined();
     expect(byId["t-coffee-pending"]).toBeUndefined();
     // Same row as the pending charge: the owner's category and note survive.

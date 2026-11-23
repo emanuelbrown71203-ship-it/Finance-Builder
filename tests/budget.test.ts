@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { budgetPlan, categoryBudgets, monthProgress, suggestLimits, type BudgetTx } from "@/lib/finance/budget";
+import { BUDGET_CATEGORIES, isReturnedPayment } from "@/lib/categories";
 
 /** The budget engine: everyday spending against limits, rollover, pace, forecast, and a starting budget. */
 
@@ -124,6 +125,19 @@ describe("a starting budget", () => {
       { category: "groceries", limit: dollars(620) },
       { category: "dining", limit: dollars(290) },
     ]);
+  });
+
+  it("never suggests a budget for a necessity: rent, utilities, insurance and loans are bills", () => {
+    const { limits } = suggestLimits([row("housing", dollars(26)), row("insurance", dollars(55)), row("utilities", dollars(90)), row("loans", dollars(40)), row("dining", dollars(194))], dollars(5000));
+    expect(limits.map((l) => l.category)).toEqual(["dining"]);
+    expect(BUDGET_CATEGORIES.map((c) => c.key)).not.toContain("housing");
+    expect(BUDGET_CATEGORIES.map((c) => c.key)).not.toContain("insurance");
+    expect(BUDGET_CATEGORIES.map((c) => c.key)).toContain("shopping");
+  });
+
+  it("knows a bounced payment from the fee for it", () => {
+    for (const name of ["Returned Mobile ACH Payme nt - CONA", "RETURNED INTERNET PMT", "Returned ACH Card Payment - CONA"]) expect(isReturnedPayment(name)).toBe(true);
+    for (const name of ["RETURNED PAYMENT FEE", "RETURNED CHECK CHARGE", "INTERNET PAYMENT - THANKYOU", "Returned item: Nike shoes"]) expect(isReturnedPayment(name)).toBe(false);
   });
 
   it("trims them all by the same share when they'd add up to more than the month has room for", () => {

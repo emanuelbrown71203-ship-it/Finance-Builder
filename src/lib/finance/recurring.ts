@@ -1,3 +1,4 @@
+import { NECESSITY_CATEGORIES as BILL_CATEGORIES } from "../categories";
 import { addDays, addMonths, dayOfMonth, daysInMonth, diffDays, type ISODate } from "../dates";
 
 /**
@@ -57,7 +58,6 @@ const FREQUENCIES: { frequency: Frequency; days: number; min: number; max: numbe
 
 /** Categories where repeat visits are habits, not subscriptions. */
 const HABIT_CATEGORIES = new Set(["groceries", "dining", "shopping", "transport", "travel"]);
-const BILL_CATEGORIES = new Set(["housing", "utilities", "insurance", "loans"]);
 
 /**
  * A merchant's name boiled down so "CHIPOTLE #2041" and "Chipotle" count as

@@ -59,6 +59,24 @@ export function isCategoryKey(key: string): key is CategoryKey {
 export const SPENDING_CATEGORIES = CATEGORIES.filter((c) => c.group === "spending");
 
 /**
+ * Necessities: rent, power and phone, insurance, loans. Everything spent on them is a bill, set aside each
+ * month on its own and never counted in (or offered as) an everyday budget.
+ */
+export const NECESSITY_CATEGORIES: ReadonlySet<string> = new Set<CategoryKey>(["housing", "utilities", "insurance", "loans"]);
+export const isNecessity = (key: string) => NECESSITY_CATEGORIES.has(key);
+
+/** The kinds of everyday spending a budget can be set for. */
+export const BUDGET_CATEGORIES = SPENDING_CATEGORIES.filter((c) => !NECESSITY_CATEGORIES.has(c.key));
+
+/**
+ * A card or loan payment the bank sent back (it bounced): what's owed goes back up, but nothing was bought,
+ * so it's a transfer, not spending. The fee for it ("RETURNED PAYMENT FEE") is a fee.
+ */
+export function isReturnedPayment(name: string): boolean {
+  return /\breturned\b/i.test(name) && /\b(payment|payme|pymt|pmt|ach)\b/i.test(name) && !/\b(fee|charge)\b/i.test(name);
+}
+
+/**
  * Maps Plaid’s personal_finance_category onto ours.
  * https://plaid.com/documents/transactions-personal-finance-category-taxonomy.csv
  */
