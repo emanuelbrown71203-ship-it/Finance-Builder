@@ -11,6 +11,9 @@ import { importAppleCard, previewAppleCard, undoAppleCardImport } from "@/server
 import { contextForTapKey, createTapKey, recordTap, revokeTapKey, tapStatus } from "@/server/card-taps";
 import { signOutEverywhere } from "@/server/auth";
 import { checkIn, win } from "@/server/game";
+import { createCategory, loadUserCategories, removeCategory, restoreCategory, updateCategory } from "@/server/categories";
+import { withCategories } from "@/server/category-scope";
+import { category } from "@/lib/categories";
 import { POST as tapRoute } from "@/app/api/tap/[key]/route";
 import { and, eq as eqOp, inArray as inArrayOp } from "drizzle-orm";
 import { addBill, addGoal, addToGoal, changeGoal, changeLoan, findCharge, findDebt, findGoal, listActivity, renameCharges, undoActivity } from "@/server/actions";
@@ -414,6 +417,40 @@ describe("sample household", () => {
     expect(await win(ctx, "review", key, "Week of Nov 16")).toBe(false);
     expect((await getRecap(ctx, 0)).ahead!.reviewed).toBe(true);
     await db.delete(playerWinsTable).where(and(eqOp(playerWinsTable.userId, DEMO_USER_ID), eqOp(playerWinsTable.kind, "review")));
+  });
+
+  it("lets the owner make categories of their own: sort into them, budget them, rename and remove with Undo", async () => {
+    const car = await createCategory(ctx, { label: "Car", icon: "transport" });
+    expect(car.key).toMatch(/^c_[a-z0-9]{10}$/);
+    await expect(createCategory(ctx, { label: "car" })).rejects.toThrow(/already/);
+    await expect(createCategory(ctx, { label: "Groceries" })).rejects.toThrow(/already/);
+    await expect(createCategory(ctx, { label: "Tools", icon: "not-an-icon" })).rejects.toThrow(/icons/);
+    const list = await loadUserCategories(ctx);
+    // A charge goes into it, it can have a budget, and it's known by name wherever the request goes.
+    const [charge] = (await getTransactions(ctx, { category: "shopping", month: "2026-11", limit: 1, offset: 0 })).transactions;
+    await updateTransaction(ctx, charge.id, { category: car.key });
+    await setBudget(ctx, car.key, 15_000);
+    await withCategories(list, async () => {
+      expect(category(car.key)).toMatchObject({ label: "Car", group: "spending", icon: "transport" });
+      const row = (await getBudget(ctx, "2026-11")).rows.find((r) => r.category === car.key)!;
+      expect(row).toMatchObject({ limit: 15_000 });
+      expect(row.spent).toBeGreaterThan(0);
+    });
+    // Outside a request, or someone else's key, it isn't usable.
+    await expect(updateTransaction(ctx, charge.id, { category: "c_nottheirs1" })).rejects.toThrow(/Unknown category/);
+    // Rename.
+    expect((await updateCategory(ctx, car.key, { label: "Car stuff" })).previous.label).toBe("Car");
+    // Remove: its charges go back to Everything else; Undo puts it all back.
+    const undo = await removeCategory(ctx, car.key);
+    expect(undo.transactionIds).toContain(charge.id);
+    expect(undo.budget).toMatchObject({ monthlyLimit: 15_000 });
+    expect((await getTransactions(ctx, { q: charge.bankName, limit: 50, offset: 0 })).transactions.find((t) => t.id === charge.id)?.category).toBe("other");
+    await restoreCategory(ctx, undo);
+    expect((await loadUserCategories(ctx)).some((c) => c.key === car.key && c.label === "Car stuff")).toBe(true);
+    expect((await getTransactions(ctx, { q: charge.bankName, limit: 50, offset: 0 })).transactions.find((t) => t.id === charge.id)?.category).toBe(car.key);
+    // Tidy up.
+    await removeCategory(ctx, car.key);
+    await updateTransaction(ctx, charge.id, { category: "shopping" });
   });
 
   it("recaps last week, Monday to Sunday", async () => {

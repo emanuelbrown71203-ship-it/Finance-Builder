@@ -1,6 +1,6 @@
 "use client";
 
-import { CalendarCheck, ChevronRight, History, Landmark, PencilLine, Settings, type LucideIcon } from "lucide-react";
+import { CalendarCheck, ChevronRight, History, Landmark, PencilLine, Settings, Shapes, type LucideIcon } from "lucide-react";
 import Link from "next/link";
 import { useSyncExternalStore, type ReactNode } from "react";
 import { GAME_URL } from "@/components/game/game";
@@ -115,6 +115,7 @@ export default function YouPage() {
 
         <Sheet>
           <ul>
+            <Row href="/categories" icon={Shapes} title="Categories" detail="Make your own, like Car or Tools" />
             <Row href="/recap" icon={CalendarCheck} title="Weekly review" detail="Last week in money, the week ahead, and a quick check-in" badge={recapNew ? <Tag tone="sky">New</Tag> : undefined} />
             <Row href="/accounts" icon={Landmark} title="Accounts" detail={banks > 0 ? `${banks} ${banks === 1 ? "bank" : "banks"} linked` : "Link a bank, card or lender"} />
             <Row href="/transactions/names" icon={PencilLine} title="Names" detail="Charges you’ve renamed, and bank code to tidy" />

@@ -77,6 +77,12 @@ for it to be remembered and used whenever an app is built.
 - **Weekly review** (`/recap`, modelled on Tasks for Two's): last week, the week ahead (bills, paychecks,
   left to spend, budgets to watch, the no-spend week) and a check-in list; "Finish my review" is a win
   once a week (`review`, keyed by the week's Monday).
+- **Categories of the owner's own** ("Car", "Tools": `user_categories`, keys "c_…", a name and a pixel
+  icon) are everyday spending: budgetable, rememberable for a store, made from the category picker
+  ("+ New category") or the Categories page on You, renamed, or removed with Undo (its charges go back to
+  Everything else). `category()` knows them everywhere: in the browser once `/api/me` loads, and on the
+  server because `withUser` runs each request inside the person's own (`src/server/category-scope.ts`).
+  Saving a category checks it's built in or the person's own (`isUsableCategory`).
 - **The app has five places** (`src/components/nav.tsx`): Home, Spending, Bills, Wealth, You. No "More"
   menu. Spending switches Budget / Transactions with tabs under the title. **Wealth's four screens (Net
   worth, Savings, Investing, Debt payoff) each stand on their own**, with their own title and no tabs, as

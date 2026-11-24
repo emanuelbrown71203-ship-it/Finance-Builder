@@ -1,4 +1,4 @@
-import { isCategoryKey } from "@/lib/categories";
+import { isCategoryKey, isCustomKey } from "@/lib/categories";
 import { withUser } from "@/server/http";
 import { getTransactions } from "@/server/queries";
 
@@ -9,7 +9,8 @@ export const GET = withUser(async (ctx, request) => {
   const flow = p.get("flow");
   return getTransactions(ctx, {
     q: p.get("q")?.trim().slice(0, 80) || undefined,
-    category: isCategoryKey(category) ? category : undefined,
+    // Built in, or one of the person's own (only their own transactions are ever searched).
+    category: isCategoryKey(category) || isCustomKey(category) ? category : undefined,
     accountId: p.get("account") || undefined,
     month: /^\d{4}-\d{2}$/.test(month) ? month : undefined,
     flow: flow === "in" || flow === "out" ? flow : undefined,

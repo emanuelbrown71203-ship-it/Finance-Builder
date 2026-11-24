@@ -19,6 +19,7 @@ import { ReauthHost } from "./reauth";
 import { PullToRefresh } from "./pull-to-refresh";
 import { ConfirmHost, Dialog, IconButton, Tag, Toaster, cx } from "./ui";
 import { send, useApi, useNow } from "./use-api";
+import { setCustomCategories } from "@/lib/categories";
 
 /** The mark: Nickel on his arcade tile. */
 export function Logo({ size = 28 }: { size?: number }) {
@@ -90,6 +91,8 @@ function IconTile({ icon, active }: { icon: PixelName; active?: boolean }) {
 export function Shell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const { data: me } = useApi<Me>("/api/me");
+  // The person's own categories, known to every screen below before it draws.
+  if (me) setCustomCategories(me.categories ?? []);
   const { data: overview } = useApi<Overview>("/api/overview");
   const { data: game } = useApi<GamePayload>(GAME_URL);
   const current = sectionFor(pathname);

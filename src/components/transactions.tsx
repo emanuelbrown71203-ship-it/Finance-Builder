@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { BUDGET_CATEGORIES, CATEGORIES, category, isNecessity } from "@/lib/categories";
+import { CATEGORIES, budgetCategories, category, customCategories, isNecessity, setCustomCategories, type UserCategory } from "@/lib/categories";
+import { CategoryEditor } from "./categories";
 import { formatMedium, formatRelativeDay, type ISODate } from "@/lib/dates";
 import { dollarsExact, signedAmount } from "@/lib/money";
 import type { TxView } from "@/lib/types";
@@ -58,9 +59,13 @@ export async function changeCategory(tx: TxView, next: { category: string; note?
 }
 
 /** Categories as the owner thinks of them: bills, everyday spending, and money coming in or moving. */
-const CATEGORY_GROUPS = [
+/** The category picker's "+ New category…" choice. */
+const NEW = "__new";
+
+const categoryGroups = () => [
   { title: "Bills", hint: "Must-pays, set aside first each month. Never counted in a budget.", categories: CATEGORIES.filter((c) => isNecessity(c.key)) },
-  { title: "Everyday spending", hint: "Counts in its category’s budget.", categories: BUDGET_CATEGORIES },
+  // The owner's own categories are everyday spending, after the built-in ones.
+  { title: "Everyday spending", hint: "Counts in its category’s budget.", categories: budgetCategories() },
   { title: "Money in and moving", hint: "Not spending.", categories: CATEGORIES.filter((c) => c.group !== "spending") },
 ];
 
@@ -256,6 +261,11 @@ export function TxList({ transactions, today, grouped = true }: { transactions: 
   );
 }
 
+/** A category just made is known straight away, before the account reloads. */
+function known(made: UserCategory) {
+  setCustomCategories([...customCategories().filter((c) => c.key !== made.key), made]);
+}
+
 /** Several round-ups on one day, in or out of one account: one line, opened to see each. */
 function RoundUps({ rows, render }: { rows: TxView[]; render: (t: TxView) => ReactNode }) {
   const [open, setOpen] = useState(false);
@@ -286,6 +296,7 @@ function RoundUps({ rows, render }: { rows: TxView[]; render: (t: TxView) => Rea
 /** The quick way, after sliding a row: one tap on a category and it's done (and remembered). */
 function CategoryPicker({ tx, onClose }: { tx: TxView | null; onClose: () => void }) {
   const [busy, setBusy] = useState(false);
+  const [making, setMaking] = useState(false);
   const pick = async (key: string) => {
     if (!tx || busy) return;
     if (key === tx.category) return onClose();
@@ -301,11 +312,21 @@ function CategoryPicker({ tx, onClose }: { tx: TxView | null; onClose: () => voi
     }
   };
   return (
-    <Dialog open={tx !== null} onClose={onClose} title={tx ? `Where does ${tx.name} go?` : ""}>
-      {tx && (
+    <Dialog open={tx !== null} onClose={() => (setMaking(false), onClose())} title={tx ? (making ? "New category" : `Where does ${tx.name} go?`) : ""}>
+      {tx && making && (
+        <CategoryEditor
+          onCancel={() => setMaking(false)}
+          onDone={(made) => {
+            known(made);
+            setMaking(false);
+            void pick(made.key);
+          }}
+        />
+      )}
+      {tx && !making && (
         <>
           <p className="mb-3 text-small text-ink-3">Every {tx.name} charge will go there from now on. You can Undo straight after.</p>
-          {CATEGORY_GROUPS.map((group) => (
+          {categoryGroups().map((group) => (
             <div key={group.title} className="mb-3 last:mb-0">
               <p className="mb-1.5 text-small font-bold text-ink-2">{group.title}</p>
               <p className="mb-2 text-micro text-ink-3">{group.hint}</p>
@@ -321,6 +342,9 @@ function CategoryPicker({ tx, onClose }: { tx: TxView | null; onClose: () => voi
               </ul>
             </div>
           ))}
+          <Button size="sm" onClick={() => setMaking(true)} className="mt-1">
+            + New category
+          </Button>
         </>
       )}
     </Dialog>
@@ -340,6 +364,7 @@ function TxForm({ tx, onClose }: { tx: TxView; onClose: () => void }) {
   const [scope, setScope] = useState<Scope>(tx.nameSource === "custom" ? "one" : "every");
   const [exact, setExact] = useState(tx.ruleExact);
   const [categoryKey, setCategoryKey] = useState(tx.category);
+  const [makingCategory, setMakingCategory] = useState(false);
   const [note, setNote] = useState(tx.note ?? "");
   const [remember, setRemember] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -458,10 +483,10 @@ function TxForm({ tx, onClose }: { tx: TxView; onClose: () => void }) {
           </div>
         )}
       </div>
-      <Field label="Category" hint={categoryKey === "transfer" ? "Transfers between your own accounts don’t count as income or spending." : isNecessity(categoryKey) ? "A bill: set aside first each month, not counted in a budget." : CATEGORIES.find((c) => c.key === categoryKey)?.group === "spending" ? "Everyday spending: counts in this category’s budget." : undefined}>
+      <Field label="Category" hint={categoryKey === "transfer" ? "Transfers between your own accounts don’t count as income or spending." : isNecessity(categoryKey) ? "A bill: set aside first each month, not counted in a budget." : category(categoryKey).group === "spending" ? "Everyday spending: counts in this category’s budget." : undefined}>
         {(id) => (
-          <Select id={id} value={categoryKey} onChange={(e) => setCategoryKey(e.target.value)}>
-            {CATEGORY_GROUPS.map((group) => (
+          <Select id={id} value={categoryKey} onChange={(e) => (e.target.value === NEW ? setMakingCategory(true) : setCategoryKey(e.target.value))}>
+            {categoryGroups().map((group) => (
               <optgroup key={group.title} label={group.title}>
                 {group.categories.map((c) => (
                   <option key={c.key} value={c.key}>
@@ -470,9 +495,24 @@ function TxForm({ tx, onClose }: { tx: TxView; onClose: () => void }) {
                 ))}
               </optgroup>
             ))}
+            <option value={NEW}>+ New category…</option>
           </Select>
         )}
       </Field>
+      {makingCategory && (
+        <div className="rounded-control border border-line-soft p-3">
+          <p className="mb-2 font-bold">New category</p>
+          <CategoryEditor
+            inside
+            onCancel={() => setMakingCategory(false)}
+            onDone={(made) => {
+              known(made);
+              setMakingCategory(false);
+              setCategoryKey(made.key);
+            }}
+          />
+        </div>
+      )}
       {changed && (
         <label className="flex min-h-12 cursor-pointer items-center gap-3 rounded-control bg-accent-soft px-3.5 py-2 text-small">
           <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} className="size-5 shrink-0 accent-[var(--accent)]" />

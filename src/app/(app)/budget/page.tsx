@@ -12,7 +12,7 @@ import { nickelReact } from "@/components/nickel/store";
 import { Switch } from "@/components/settings-sections";
 import { Blocks, Button, Dialog, EmptyState, ErrorNote, Field, Fold, IconButton, MoneyInput, PageHeader, Sheet, SheetHeader, Skeleton, Tag, cx, toast } from "@/components/ui";
 import { send, useApi } from "@/components/use-api";
-import { BUDGET_CATEGORIES, SPENDING_CATEGORIES, category } from "@/lib/categories";
+import { budgetCategories, category } from "@/lib/categories";
 import { TxList } from "@/components/transactions";
 import { GoalDialog, type GoalSheet } from "@/components/goals";
 import { PixelIcon } from "@/components/pixel-icons";
@@ -699,8 +699,8 @@ function Budget() {
   const everyday = (r: BudgetRow) => r.spent > 0 || r.average > 0;
   const loose = data.rows.filter((r) => r.limit === null && everyday(r));
   // Necessities (rent, insurance…) are bills, so they're never offered a budget.
-  const nothingYet = BUDGET_CATEGORIES.filter((c) => !data.rows.some((r) => r.category === c.key && (r.limit !== null || everyday(r))));
-  const openRow = opened ? (data.rows.find((r) => r.category === opened) ?? (adding === opened || SPENDING_CATEGORIES.some((c) => c.key === opened) ? blankRow(opened, data) : null)) : null;
+  const nothingYet = budgetCategories().filter((c) => !data.rows.some((r) => r.category === c.key && (r.limit !== null || everyday(r))));
+  const openRow = opened ? (data.rows.find((r) => r.category === opened) ?? (adding === opened || budgetCategories().some((c) => c.key === opened) ? blankRow(opened, data) : null)) : null;
 
   return (
     <>

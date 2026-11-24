@@ -26,6 +26,31 @@ export type CategoryKey =
 
 export type Category = { key: CategoryKey; label: string; group: CategoryGroup };
 
+/** A category the owner made ("Car", "Tools"): everyday spending, with its own pixel icon. */
+export type UserCategory = { key: string; label: string; icon: string };
+
+/** Icons a category of the owner's own can have. */
+export const CATEGORY_ICONS = ["other", "shopping", "dining", "groceries", "transport", "tools", "package", "paw", "phone", "health", "personal", "entertainment", "travel", "giving", "housing", "utilities", "savings", "fees"] as const;
+
+/** The owner's own category keys: "c_" and random letters. */
+export const isCustomKey = (key: string) => /^c_[a-z0-9]{6,16}$/.test(key);
+
+/*
+ * The owner's own categories, so `category()` knows them everywhere. In the browser they're set once the
+ * account loads; on the server each signed-in request carries the person's own (src/server/category-scope).
+ */
+let resolveCustom: () => readonly UserCategory[] = () => browserCustom;
+let browserCustom: readonly UserCategory[] = [];
+export function setCategoryResolver(resolve: () => readonly UserCategory[]) {
+  resolveCustom = resolve;
+}
+export function setCustomCategories(list: readonly UserCategory[]) {
+  browserCustom = list;
+}
+export function customCategories(): readonly UserCategory[] {
+  return resolveCustom();
+}
+
 export const CATEGORIES: Category[] = [
   { key: "income", label: "Income", group: "income" },
   { key: "housing", label: "Home & rent", group: "spending" },
@@ -48,8 +73,23 @@ export const CATEGORIES: Category[] = [
 
 const BY_KEY = new Map(CATEGORIES.map((c) => [c.key, c]));
 
-export function category(key: string): Category {
-  return BY_KEY.get(key as CategoryKey) ?? BY_KEY.get("other")!;
+export function category(key: string): Category & { icon?: string } {
+  const built = BY_KEY.get(key as CategoryKey);
+  if (built) return built;
+  const own = isCustomKey(key) ? resolveCustom().find((c) => c.key === key) : undefined;
+  // An own category is everyday spending; its key stands in where a built-in one's would.
+  if (own) return { key: own.key as CategoryKey, label: own.label, group: "spending", icon: own.icon };
+  return BY_KEY.get("other")!;
+}
+
+/** Every category, the owner's own after the built-in ones. */
+export function allCategories(): (Category & { icon?: string })[] {
+  return [...CATEGORIES, ...resolveCustom().map((c) => category(c.key))];
+}
+
+/** The kinds of everyday spending a budget can be set for, the owner's own included. */
+export function budgetCategories(): (Category & { icon?: string })[] {
+  return [...BUDGET_CATEGORIES, ...resolveCustom().map((c) => category(c.key))];
 }
 
 export function isCategoryKey(key: string): key is CategoryKey {

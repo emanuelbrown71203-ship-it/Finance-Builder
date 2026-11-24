@@ -8,7 +8,7 @@ import { Suspense, useEffect, useMemo, useState } from "react";
 import { TxList } from "@/components/transactions";
 import { Button, Dialog, EmptyState, ErrorNote, Field, Input, PageHeader, Segmented, Select, Sheet, Skeleton } from "@/components/ui";
 import { LIVE_INTERVAL, useApi } from "@/components/use-api";
-import { CATEGORIES } from "@/lib/categories";
+import { allCategories } from "@/lib/categories";
 import { addMonthsToMonth, monthName, monthOf } from "@/lib/dates";
 import type { Me, TransactionsPayload } from "@/lib/types";
 
@@ -77,7 +77,7 @@ function Transactions() {
   const categorySelect = (id?: string) => (
     <Select id={id} aria-label="Category" value={categoryKey} onChange={(e) => setCategoryKey(e.target.value)}>
       <option value="">All categories</option>
-      {CATEGORIES.map((c) => (
+      {allCategories().map((c) => (
         <option key={c.key} value={c.key}>
           {c.label}
         </option>

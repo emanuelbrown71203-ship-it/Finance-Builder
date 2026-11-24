@@ -1,6 +1,7 @@
 import { and, eq, inArray, isNull, lt, ne, sql } from "drizzle-orm";
 import { accounts, balanceSnapshots, budgets, categoryRules, debtPlans, goalDeposits, goals, incomeAdjustments, recurringOverrides, transactions, userSettings } from "@/db/schema";
-import { category as categoryOf, isCategoryKey } from "@/lib/categories";
+import { category as categoryOf } from "@/lib/categories";
+import { isUsableCategory } from "./categories";
 import { addDays, monthOf } from "@/lib/dates";
 import { cleanName, validName } from "@/lib/finance/names";
 import { merchantKey } from "@/lib/finance/recurring";
@@ -24,7 +25,7 @@ export async function updateTransaction(
   id: string,
   patch: { category?: string; note?: string | null; name?: string | null; remember?: boolean; restore?: RememberUndo; undo?: boolean },
 ): Promise<{ moved: number; undo: RememberUndo | null }> {
-  if (patch.category !== undefined && !isCategoryKey(patch.category)) throw new HttpError(400, "Unknown category.");
+  if (patch.category !== undefined && !(await isUsableCategory(ctx, patch.category))) throw new HttpError(400, "Unknown category.");
   const [tx] = await ctx.db.select().from(transactions).where(and(eq(transactions.id, id), eq(transactions.userId, ctx.userId))).limit(1);
   if (!tx) throw new HttpError(404, "Transaction not found.");
 
@@ -56,9 +57,9 @@ export async function updateTransaction(
   // Undo of a remembered change: put the rule and the other charges back as they were.
   if (patch.restore) {
     if (patch.restore.rule === null) await ctx.db.delete(categoryRules).where(and(eq(categoryRules.userId, ctx.userId), eq(categoryRules.merchantKey, key)));
-    else if (isCategoryKey(patch.restore.rule)) await saveRule(ctx, key, patch.restore.rule);
+    else if (await isUsableCategory(ctx, patch.restore.rule)) await saveRule(ctx, key, patch.restore.rule);
     for (const other of patch.restore.others.slice(0, 5000)) {
-      if (!isCategoryKey(other.category)) continue;
+      if (!(await isUsableCategory(ctx, other.category))) continue;
       await ctx.db.update(transactions).set({ category: other.category }).where(and(eq(transactions.id, other.id), eq(transactions.userId, ctx.userId)));
     }
     return { moved: 0, undo: null };
@@ -135,7 +136,7 @@ async function chargedAs(ctx: Ctx, key: string): Promise<boolean> {
 
 const titleCase = (words: string) => words.replace(/\b[a-z]/g, (c) => c.toUpperCase());
 
-const isBudgetCategory = (category: string) => isCategoryKey(category) && category !== "transfer" && category !== "income";
+
 const MONTH = /^\d{4}-(0[1-9]|1[0-2])$/;
 
 export type BudgetRestore = { rolloverSince?: string | null; rolloverCarry?: number };
@@ -149,7 +150,7 @@ export type BudgetRestore = { rolloverSince?: string | null; rolloverCarry?: num
  * at the old limit, so earlier months keep the limit they really had.
  */
 export async function setBudget(ctx: Ctx, category: string, monthlyLimit: number | null, restore: BudgetRestore = {}) {
-  if (!isBudgetCategory(category)) throw new HttpError(400, "Unknown category.");
+  if (!(await isUsableCategory(ctx, category, { budget: true }))) throw new HttpError(400, "Unknown category.");
   if (restore.rolloverSince != null && (!MONTH.test(restore.rolloverSince) || restore.rolloverSince > monthOf(ctx.today))) throw new HttpError(400, "That rollover month isn’t right.");
   if (restore.rolloverCarry !== undefined && (!Number.isSafeInteger(restore.rolloverCarry) || Math.abs(restore.rolloverCarry) > 100_000_000_00)) throw new HttpError(400, "That carried amount isn’t right.");
   const mine = and(eq(budgets.userId, ctx.userId), eq(budgets.category, category));
@@ -196,7 +197,7 @@ export async function budgetState(ctx: Ctx, category: string): Promise<BudgetSta
  * forgets what was carried; the answer says what it was, so it can be put back.
  */
 export async function setRollover(ctx: Ctx, category: string, on: boolean): Promise<{ previous: BudgetState }> {
-  if (!isBudgetCategory(category)) throw new HttpError(400, "Unknown category.");
+  if (!(await isUsableCategory(ctx, category, { budget: true }))) throw new HttpError(400, "Unknown category.");
   const previous = await budgetState(ctx, category);
   if (previous.monthlyLimit === null) throw new HttpError(400, "Set a limit for this category first.");
   const mine = and(eq(budgets.userId, ctx.userId), eq(budgets.category, category));
@@ -209,7 +210,8 @@ export type BudgetChange = { category: string; monthlyLimit: number | null; roll
 
 /** Several limits at once (a starting budget, or its Undo). Returns what each was before, for Undo. */
 export async function setBudgets(ctx: Ctx, changes: BudgetChange[]): Promise<{ previous: BudgetChange[] }> {
-  if (changes.some((c) => !isBudgetCategory(c.category)) || new Set(changes.map((c) => c.category)).size !== changes.length) throw new HttpError(400, "Unknown category.");
+  if (new Set(changes.map((c) => c.category)).size !== changes.length) throw new HttpError(400, "Unknown category.");
+  for (const c of changes) if (!(await isUsableCategory(ctx, c.category, { budget: true }))) throw new HttpError(400, "Unknown category.");
   const previous: BudgetChange[] = [];
   for (const c of changes) previous.push({ category: c.category, ...(await budgetState(ctx, c.category)) });
   for (const c of changes) await setBudget(ctx, c.category, c.monthlyLimit, c.rolloverSince !== undefined ? { rolloverSince: c.rolloverSince, rolloverCarry: c.rolloverCarry } : {});

@@ -1,3 +1,4 @@
+import { customCategories } from "@/lib/categories";
 import { eq } from "drizzle-orm";
 import { users } from "@/db/schema";
 import { SESSION_COOKIE, plaidConfig } from "@/lib/config";
@@ -12,6 +13,7 @@ export const GET = withUser(async (ctx): Promise<Me> => {
     demo: ctx.demo,
     today: ctx.today,
     bankLinking: { available: !ctx.demo && plaid !== null, sandbox: plaid?.env === "sandbox" },
+    categories: [...customCategories()],
   };
 });
 

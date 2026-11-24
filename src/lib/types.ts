@@ -1,4 +1,5 @@
 import type { NameSource } from "./finance/names";
+import type { UserCategory } from "./categories";
 import type { ISODate } from "./dates";
 import type { NoSpendWeek } from "./finance/nospend";
 import type { MonthAhead } from "./finance/forecast";
@@ -14,6 +15,8 @@ export type Me = {
   demo: boolean;
   today: ISODate;
   bankLinking: { available: boolean; sandbox: boolean };
+  /** Categories the person made themselves. */
+  categories: UserCategory[];
 };
 
 export type TxView = {

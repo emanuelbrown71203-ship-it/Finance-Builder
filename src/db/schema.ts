@@ -466,3 +466,17 @@ export const incomeAdjustments = pgTable(
   },
   (t) => [uniqueIndex("income_adjustments_user_series_date_idx").on(t.userId, t.seriesKey, t.date)],
 );
+
+/** A category the owner made ("Car", "Tools"): everyday spending, with a name and a pixel icon. */
+export const userCategories = pgTable(
+  "user_categories",
+  {
+    /** "c_" and random letters: what transactions, rules and budgets store as their category. */
+    key: text("key").primaryKey(),
+    userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    label: text("label").notNull(),
+    icon: text("icon").notNull().default("other"),
+    createdAt: createdAt(),
+  },
+  (t) => [index("user_categories_user_idx").on(t.userId)],
+);

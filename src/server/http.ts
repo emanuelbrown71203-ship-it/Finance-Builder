@@ -3,6 +3,8 @@ import { isDemoMode, liveConfigProblem, siteOrigin } from "@/lib/config";
 import { getContext, type Ctx } from "./auth";
 import { HttpError, describeError } from "./errors";
 import { clientAddress, limitKey } from "./rate-limit";
+import { loadUserCategories } from "./categories";
+import { withCategories } from "./category-scope";
 
 export { HttpError };
 
@@ -84,7 +86,8 @@ export function withUser<P = unknown>(handler: (ctx: Ctx, request: Request, para
       if (request.method !== "GET" && request.method !== "HEAD") {
         await limitKey("write", ctx.demo ? clientAddress(request) : ctx.userId, 240, 60_000);
       }
-      const result = await handler(ctx, request, await route.params);
+      // The person's own categories go with the request, so everything it does can name them.
+      const result = await withCategories(await loadUserCategories(ctx), async () => handler(ctx, request, await route.params));
       return result instanceof Response ? result : json(result);
     } catch (error) {
       return failure(error);

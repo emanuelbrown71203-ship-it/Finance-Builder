@@ -96,5 +96,8 @@ export const MIGRATION_STATEMENTS: string[] = [
   "ALTER TABLE \"income_adjustments\" ADD CONSTRAINT \"income_adjustments_user_id_users_id_fk\" FOREIGN KEY (\"user_id\") REFERENCES \"public\".\"users\"(\"id\") ON DELETE cascade ON UPDATE no action;",
   "CREATE UNIQUE INDEX \"income_adjustments_user_series_date_idx\" ON \"income_adjustments\" USING btree (\"user_id\",\"series_key\",\"date\");",
   "ALTER TABLE \"goals\" ADD COLUMN \"account_id\" text;",
-  "ALTER TABLE \"goals\" ADD CONSTRAINT \"goals_account_id_accounts_id_fk\" FOREIGN KEY (\"account_id\") REFERENCES \"public\".\"accounts\"(\"id\") ON DELETE set null ON UPDATE no action;"
+  "ALTER TABLE \"goals\" ADD CONSTRAINT \"goals_account_id_accounts_id_fk\" FOREIGN KEY (\"account_id\") REFERENCES \"public\".\"accounts\"(\"id\") ON DELETE set null ON UPDATE no action;",
+  "CREATE TABLE \"user_categories\" (\n\t\"key\" text PRIMARY KEY NOT NULL,\n\t\"user_id\" text NOT NULL,\n\t\"label\" text NOT NULL,\n\t\"icon\" text DEFAULT 'other' NOT NULL,\n\t\"created_at\" timestamp with time zone DEFAULT now() NOT NULL\n);",
+  "ALTER TABLE \"user_categories\" ADD CONSTRAINT \"user_categories_user_id_users_id_fk\" FOREIGN KEY (\"user_id\") REFERENCES \"public\".\"users\"(\"id\") ON DELETE cascade ON UPDATE no action;",
+  "CREATE INDEX \"user_categories_user_idx\" ON \"user_categories\" USING btree (\"user_id\");"
 ];
