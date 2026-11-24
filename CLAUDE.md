@@ -143,8 +143,9 @@ for it to be remembered and used whenever an app is built.
   list in Settings: `recurring_overrides.notify_paid`, settled payments only, after each bank sync),
   checking is short for bills it pays in the next 3 days (card-paid bills don't count, a card's minimum
   does), Monday's weekly review, and the no-spend week's first day. The last three can be switched off
-  (`user_settings.notify_*`); the morning ones come from a daily Vercel cron (`vercel.json`,
-  `/api/cron/notify`, GET only because the scheduler can't POST, guarded by `CRON_SECRET`). Each note goes
+  (`user_settings.notify_*`); the morning ones come with the first bank update after 8 a.m. (`afterSync`),
+  and from a daily Vercel cron when `CRON_SECRET` is set (`vercel.json`, `/api/cron/notify`, GET only
+  because the scheduler can't POST; 404 until the secret exists). Each note goes
   out once (`notifications_sent`). Push is written out by hand in `src/server/webpush.ts` (RFC 8291/8292,
   tested against the RFC's worked example): the site's push key is derived from `TOKEN_ENCRYPTION_KEY`
   (`derivedKey`), device addresses are stored encrypted (`push:<user>`), and notes only ever go to the

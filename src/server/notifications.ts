@@ -20,6 +20,8 @@ import { isPushEndpoint, isPushKeys, sendPush, type PushResult, type PushTarget 
  *  - checking is short for bills the bank pays in the next three days: after a sync, and each morning;
  *  - Monday morning: the weekly review is ready;
  *  - the first day of the no-spend week.
+ * The morning ones come with the first bank update after 8 a.m., and from a scheduled run each morning
+ * when the site has CRON_SECRET set (vercel.json), whichever is first.
  * Each note goes out once (`notifications_sent`), only to the person's own devices, and only through the
  * browsers' push services. Nothing here can change anything at a bank.
  */
@@ -249,11 +251,36 @@ async function billNotes(ctx: Ctx, settings: NotifySettings, fetchImpl: typeof f
 
 const hasDevices = async (db: DB, userId: string) => (await db.select({ id: pushSubscriptions.id }).from(pushSubscriptions).where(eq(pushSubscriptions.userId, userId)).limit(1)).length > 0;
 
-/** After the bank sends new data: bills that were just paid, and whether checking covers what's coming. */
+/** Monday's weekly review (or Tuesday's, if Monday was missed) and the no-spend week's first day: each once. */
+async function dayNotes(ctx: Ctx, settings: NotifySettings, fetchImpl: typeof fetch) {
+  if (settings.weeklyReview && (weekday(ctx.today) === 1 || weekday(ctx.today) === 2)) {
+    const recap = await getRecap(ctx);
+    await deliver(ctx.db, ctx.userId, reviewNote({ week: weekKey(ctx.today), spent: recap.spent, spentBefore: recap.spentBefore }, settings.amounts), { ttl: 12 * 3600 }, fetchImpl);
+  }
+  const week = noSpendWeekOf(monthOf(ctx.today));
+  if (settings.noSpend && ctx.today === week.start) {
+    await deliver(ctx.db, ctx.userId, noSpendStartNote({ month: monthOf(ctx.today), end: week.end, left: await leftThisMonth(ctx) }, settings.amounts), { ttl: 12 * 3600 }, fetchImpl);
+  }
+}
+
+/** The hour where the person is (0–23). */
+function localHour(now: Date): number {
+  return Number(new Intl.DateTimeFormat("en-US", { timeZone: DEFAULT_TIMEZONE, hour: "numeric", hourCycle: "h23" }).format(now));
+}
+
+/**
+ * After the bank sends new data: bills that were just paid, and whether checking covers what's coming.
+ * In the daytime (8 a.m. to 9 p.m.) also the day's notes, so they arrive with the first bank update of
+ * the morning even without the scheduled run.
+ */
 export async function afterSync(db: DB, userId: string, now: Date = new Date(), fetchImpl: typeof fetch = fetch): Promise<void> {
   if (!(await hasDevices(db, userId))) return;
   const settings = await getNotifySettings(db, userId);
-  await asUser(db, userId, now, (ctx) => billNotes(ctx, settings, fetchImpl));
+  const hour = localHour(now);
+  await asUser(db, userId, now, async (ctx) => {
+    await billNotes(ctx, settings, fetchImpl);
+    if (hour >= 8 && hour < 21) await dayNotes(ctx, settings, fetchImpl);
+  });
 }
 
 /** How long the morning run keeps starting on people, inside its 60 seconds. */
@@ -273,15 +300,7 @@ export async function morningNotes(db: DB, now: Date = new Date(), fetchImpl: ty
       const settings = await getNotifySettings(db, userId);
       await asUser(db, userId, now, async (ctx) => {
         await billNotes(ctx, settings, fetchImpl);
-        // Monday, or Tuesday if Monday's run didn't reach them (it's sent once a week either way).
-        if (settings.weeklyReview && (weekday(ctx.today) === 1 || weekday(ctx.today) === 2)) {
-          const recap = await getRecap(ctx);
-          await deliver(db, userId, reviewNote({ week: weekKey(ctx.today), spent: recap.spent, spentBefore: recap.spentBefore }, settings.amounts), { ttl: 12 * 3600 }, fetchImpl);
-        }
-        const week = noSpendWeekOf(monthOf(ctx.today));
-        if (settings.noSpend && ctx.today === week.start) {
-          await deliver(db, userId, noSpendStartNote({ month: monthOf(ctx.today), end: week.end, left: await leftThisMonth(ctx) }, settings.amounts), { ttl: 12 * 3600 }, fetchImpl);
-        }
+        await dayNotes(ctx, settings, fetchImpl);
       });
     } catch (error) {
       // One person's trouble never stops the others' notes.

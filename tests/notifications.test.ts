@@ -352,6 +352,20 @@ describe("phone notifications", () => {
     await clear();
   });
 
+  it("the day's notes also come with the first bank update after 8 a.m., never at night", async () => {
+    const p = phone(1);
+    await addDevice(me, p, "iPhone");
+    const push = service();
+    // Monday the 23rd, 3 a.m. in New York: bills only.
+    await afterSync(db, DEMO_USER_ID, new Date("2026-11-23T08:00:00Z"), push.fetchImpl);
+    expect(push.sent.map((x) => p.read(x.body).title)).not.toContain("Your weekly review is ready");
+    // 9 a.m.: the review comes with it, once.
+    await afterSync(db, DEMO_USER_ID, new Date("2026-11-23T14:00:00Z"), push.fetchImpl);
+    await afterSync(db, DEMO_USER_ID, new Date("2026-11-23T16:00:00Z"), push.fetchImpl);
+    expect(push.sent.map((x) => p.read(x.body).title).filter((t) => t === "Your weekly review is ready")).toHaveLength(1);
+    await clear();
+  });
+
   it("the test button reaches every device, and signing out everywhere stops them all", async () => {
     const a = phone(1);
     const b = phone(2);
