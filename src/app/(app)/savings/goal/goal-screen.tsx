@@ -100,13 +100,19 @@ export function GoalScreen() {
           )}
 
           <div className="mt-5 flex flex-wrap gap-2">
-            {!done && (
-              <Button variant="primary" onClick={() => setSheet({ kind: "add", goal })}>
-                Add money
-                <XpTag xp={WINS.save.xp} />
-              </Button>
+            {goal.account ? (
+              <p className="rounded-2xl bg-sunk px-3.5 py-3 text-small text-ink-2">Follows {goal.account.name}: its balance is what’s saved, so round-ups and transfers in count on their own.</p>
+            ) : (
+              <>
+                {!done && (
+                  <Button variant="primary" onClick={() => setSheet({ kind: "add", goal })}>
+                    Add money
+                    <XpTag xp={WINS.save.xp} />
+                  </Button>
+                )}
+                {goal.saved > 0 && <Button onClick={() => setSheet({ kind: "withdraw", goal })}>Take some out</Button>}
+              </>
             )}
-            {goal.saved > 0 && <Button onClick={() => setSheet({ kind: "withdraw", goal })}>Take some out</Button>}
           </div>
         </Sheet>
 

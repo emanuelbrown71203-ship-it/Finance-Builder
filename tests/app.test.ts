@@ -3,10 +3,10 @@ import { getDb, type DB } from "@/db";
 import { seedDemo } from "@/db/seed";
 import { DEMO_USER_ID } from "@/lib/config";
 import type { Ctx } from "@/server/auth";
-import { budgetState, deleteDeposit, deleteManualAccount, setBudget, setBudgets, setDebtPlan, setDebtSettings, setRecurringOverride, setRollover, updateGoal, updateTransaction } from "@/server/mutations";
+import { budgetState, createGoal, deleteDeposit, deleteManualAccount, setBudget, setBudgets, setDebtPlan, setDebtSettings, setPaycheck, setRecurringOverride, setRollover, updateGoal, updateTransaction } from "@/server/mutations";
 import { loadRules } from "@/server/rules";
 import { countUnclear, createNameRule, deleteNameRule, getNames, previewNameRule, renameRule, restoreNameRule } from "@/server/names";
-import { accounts as accountsTable, budgets as budgetsTable, categoryRules as categoryRulesTable, playerWins as playerWinsTable, tapKeys as tapKeysTable, transactions as transactionsTable } from "@/db/schema";
+import { goals as goalsTable, accounts as accountsTable, budgets as budgetsTable, categoryRules as categoryRulesTable, playerWins as playerWinsTable, tapKeys as tapKeysTable, transactions as transactionsTable } from "@/db/schema";
 import { importAppleCard, previewAppleCard, undoAppleCardImport } from "@/server/card-import";
 import { contextForTapKey, createTapKey, recordTap, revokeTapKey, tapStatus } from "@/server/card-taps";
 import { signOutEverywhere } from "@/server/auth";
@@ -313,6 +313,89 @@ describe("sample household", () => {
     expect(wins).toHaveLength(1);
     expect(wins[0]).toMatchObject({ ref: "2026-11", xp: 75 });
     await db.delete(playerWinsTable).where(and(eqOp(playerWinsTable.userId, DEMO_USER_ID), inArrayOp(playerWinsTable.day, ["2026-12-03"])));
+  });
+
+  it("adds up interest and fees: this month, 90 days, this year, by account", async () => {
+    const before = (await getDebt(ctx)).costs;
+    const rows = [
+      { id: "fee-int", date: "2026-11-12", name: "INTEREST CHARGE:PURCHASES", amount: -5_377 },
+      { id: "fee-late", date: "2026-10-11", name: "PAST DUE FEE", amount: -4_000 },
+      { id: "fee-back", date: "2026-10-20", name: "LATE FEE REFUND", amount: 4_000 },
+      { id: "fee-old", date: "2025-12-15", name: "INTEREST CHARGE:PURCHASES", amount: -9_999 }, // last year
+    ];
+    await db.insert(transactionsTable).values(rows.map((r) => ({ ...r, userId: DEMO_USER_ID, accountId: "demo-card", rawName: r.name, category: "fees" })));
+    try {
+      const c = (await getDebt(ctx)).costs;
+      expect(c.thisMonth - before.thisMonth).toBe(5_377);
+      expect(c.thisYear - before.thisYear).toBe(5_377); // the late fee was refunded; last year's isn't this year
+      expect(c.interestYear - before.interestYear).toBe(5_377);
+      expect(c.feesYear - before.feesYear).toBe(0);
+      expect(c.byAccount.some((a) => a.name === "Cashback Visa")).toBe(true);
+      expect(c.latest[0]).toMatchObject({ kind: "interest", amount: 5_377 });
+    } finally {
+      await db.delete(transactionsTable).where(inArrayOp(transactionsTable.id, rows.map((r) => r.id)));
+    }
+  });
+
+  it("plans a lighter paycheck (missed days) and re-plans the month around it, with Undo", async () => {
+    const before = await getBudget(ctx, "2026-11");
+    const next = before.paychecks.find((p) => !p.received)!;
+    expect(next).toMatchObject({ adjusted: false, amount: next.usual });
+    expect(before.paychecks.some((p) => p.received)).toBe(true);
+    const lighter = Math.round((next.usual * (next.workdays - 2)) / next.workdays);
+    expect((await setPaycheck(ctx, next.key, next.date, lighter)).previous).toBeNull();
+    try {
+      const after = await getBudget(ctx, "2026-11");
+      expect(after.paychecks.find((p) => p.key === next.key && p.date === next.date)).toMatchObject({ amount: lighter, adjusted: true });
+      expect(after.plan.income).toBe(before.plan.income - (next.usual - lighter));
+      expect(after.plan.leftToSpend).toBe(before.plan.leftToSpend - (next.usual - lighter));
+      expect((await getOverview(ctx)).plan.leftToSpend).toBe(after.plan.leftToSpend);
+      // Only a paycheck, and only one that hasn't come in.
+      await expect(setPaycheck(ctx, "out:netflix", next.date, 100)).rejects.toThrow();
+      await expect(setPaycheck(ctx, next.key, "2026-10-01", 100)).rejects.toThrow();
+    } finally {
+      expect((await setPaycheck(ctx, next.key, next.date, null)).previous).toBe(lighter);
+    }
+    expect((await getBudget(ctx, "2026-11")).plan.income).toBe(before.plan.income);
+  });
+
+  it("shows round-ups as round-ups, kept off Home's latest", async () => {
+    const rows = [
+      { id: "ru-in", accountId: "demo-savings", name: "Ingles Markets", rawName: "Roundup *INGLES MARKETS #480", amount: 80 },
+      { id: "ru-out", accountId: "demo-checking", name: "Ingles Markets", rawName: "Roundup *INGLES MARKETS #480", amount: -80 },
+      { id: "ru-in2", accountId: "demo-savings", name: "Roundup *RICE AND SPICE CARROLL", rawName: "Roundup *RICE AND SPICE CARROLL", amount: 65 },
+    ];
+    await db.insert(transactionsTable).values(rows.map((r) => ({ ...r, userId: DEMO_USER_ID, date: today, category: "transfer" })));
+    try {
+      const { transactions } = await getTransactions(ctx, { month: "2026-11", limit: 200, offset: 0 });
+      const byId = Object.fromEntries(transactions.map((t) => [t.id, t]));
+      expect(byId["ru-in"]).toMatchObject({ roundUp: true, name: "Round-up from Ingles Markets" });
+      expect(byId["ru-out"]).toMatchObject({ roundUp: true, name: "Round-up for Ingles Markets" });
+      expect(byId["ru-in2"].name).toMatch(/^Round-up from Rice/);
+      // A card's own small credit isn't one.
+      expect(transactions.filter((t) => t.accountId === "demo-card").every((t) => !t.roundUp)).toBe(true);
+      expect((await getOverview(ctx)).recent.some((t) => t.roundUp)).toBe(false);
+    } finally {
+      await db.delete(transactionsTable).where(inArrayOp(transactionsTable.id, rows.map((r) => r.id)));
+    }
+  });
+
+  it("lets a goal follow a real savings account, so it updates on its own", async () => {
+    const savings = (await getAccounts(ctx)).institutions.flatMap((i) => i.accounts).find((a) => a.id === "demo-savings")!;
+    const id = await createGoal(ctx, { name: "Vault goal", target: 5_000_000, saved: 99_999, monthlyContribution: 10_000, targetDate: null, accountId: "demo-savings" });
+    try {
+      const goal = (await getGoals(ctx)).goals.find((g) => g.id === id)!;
+      expect(goal).toMatchObject({ saved: Math.max(0, savings.balance), account: { id: "demo-savings", name: savings.name } });
+      // It updates on its own, so money can't be put in by hand.
+      await expect(updateGoal(ctx, id, { add: 1_000 })).rejects.toThrow(/follows an account/);
+      // Only a savings-type account of your own.
+      await expect(createGoal(ctx, { name: "Nope", target: 1_000, saved: 0, monthlyContribution: 0, targetDate: null, accountId: "demo-checking" })).rejects.toThrow();
+      // Stops following: keeps the balance as what's saved.
+      await updateGoal(ctx, id, { accountId: null });
+      expect((await getGoals(ctx)).goals.find((g) => g.id === id)).toMatchObject({ account: null, saved: Math.max(0, savings.balance) });
+    } finally {
+      await db.delete(goalsTable).where(eqOp(goalsTable.id, id));
+    }
   });
 
   it("recaps last week, Monday to Sunday", async () => {

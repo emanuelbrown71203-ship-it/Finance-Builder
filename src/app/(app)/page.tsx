@@ -304,7 +304,7 @@ export default function HomePage() {
 
           <Sheet className="order-6">
             <SheetHeader title="Latest activity" hint="New transactions show up here as they happen." action={<More href="/transactions">All</More>} />
-            {data.recent.length > 0 ? <TxList transactions={data.recent.slice(0, 5)} today={data.today} grouped={false} /> : <EmptyState title="No transactions yet">They show up here as soon as your bank reports them.</EmptyState>}
+            {data.recent.length > 0 ? <TxList transactions={data.recent.filter((t) => !t.roundUp).slice(0, 5)} today={data.today} grouped={false} /> : <EmptyState title="No transactions yet">They show up here as soon as your bank reports them.</EmptyState>}
           </Sheet>
         </div>
 

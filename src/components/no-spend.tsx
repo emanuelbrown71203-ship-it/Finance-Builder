@@ -77,6 +77,7 @@ export function NoSpendCard({ week, today, className }: { week: Week; today: ISO
         ))}
       </ol>
       <p className="mt-3 text-ink-2">{text}</p>
+      {week.phase === "done" && left > 0 && goal?.account && <p className="mt-2 rounded-2xl bg-sunk px-3.5 py-3 text-small text-ink-2">Move {dollarsExact(left)} into {goal.account.name} in your bank’s app, and “{goal.name}” will show it on its own.</p>}
 
       {week.phase === "done" && (
         <div className="mt-3 flex flex-col gap-2">
@@ -98,7 +99,7 @@ export function NoSpendCard({ week, today, className }: { week: Week; today: ISO
             >
               {left > 0 ? "Not now" : "Got it"}
             </Button>
-            {left > 0 && (
+            {left > 0 && !goal?.account && (
               <Button variant="primary" onClick={() => setSheet(goal ? { kind: "add", goal, amount: left } : { kind: "new" })}>
                 {goal ? `Put ${dollarsExact(left)} in savings` : "Start a savings goal"}
               </Button>

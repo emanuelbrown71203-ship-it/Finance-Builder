@@ -1,7 +1,7 @@
 import { and, eq, inArray, isNull, lt, ne, sql } from "drizzle-orm";
-import { accounts, balanceSnapshots, budgets, categoryRules, debtPlans, goalDeposits, goals, recurringOverrides, transactions, userSettings } from "@/db/schema";
+import { accounts, balanceSnapshots, budgets, categoryRules, debtPlans, goalDeposits, goals, incomeAdjustments, recurringOverrides, transactions, userSettings } from "@/db/schema";
 import { category as categoryOf, isCategoryKey } from "@/lib/categories";
-import { monthOf } from "@/lib/dates";
+import { addDays, monthOf } from "@/lib/dates";
 import { cleanName, validName } from "@/lib/finance/names";
 import { merchantKey } from "@/lib/finance/recurring";
 import type { Ctx } from "./auth";
@@ -216,15 +216,24 @@ export async function setBudgets(ctx: Ctx, changes: BudgetChange[]): Promise<{ p
   return { previous };
 }
 
-type GoalInput = { name: string; target: number; saved: number; monthlyContribution: number; targetDate: string | null };
+type GoalInput = { name: string; target: number; saved: number; monthlyContribution: number; targetDate: string | null; accountId?: string | null };
+
+/** A goal can follow only the person's own savings-type account (a vault, savings, cash management). */
+async function checkFollowed(ctx: Ctx, accountId: string | null | undefined): Promise<void> {
+  if (!accountId) return;
+  const [a] = await ctx.db.select({ type: accounts.type, subtype: accounts.subtype }).from(accounts).where(and(eq(accounts.id, accountId), eq(accounts.userId, ctx.userId))).limit(1);
+  if (!a || a.type !== "depository" || a.subtype === "checking") throw new HttpError(400, "A goal can follow one of your savings accounts.");
+}
 
 export async function createGoal(ctx: Ctx, input: GoalInput): Promise<string> {
   const [{ count }] = await ctx.db.select({ count: sql<number>`count(*)::int` }).from(goals).where(eq(goals.userId, ctx.userId));
   if (count >= 50) throw new HttpError(400, "That’s the most goals Passbook keeps. Delete one you’ve finished first.");
+  await checkFollowed(ctx, input.accountId);
   const id = crypto.randomUUID();
-  await ctx.db.insert(goals).values({ id, userId: ctx.userId, ...input });
+  // Following an account, its balance is what's saved: nothing typed in counts.
+  await ctx.db.insert(goals).values({ id, userId: ctx.userId, ...input, saved: input.accountId ? 0 : input.saved, accountId: input.accountId ?? null });
   await win(ctx, "goal", id, input.name);
-  if (input.saved > 0) await goalMilestones(ctx, { id, name: input.name, target: input.target }, 0, input.saved);
+  if (input.saved > 0 && !input.accountId) await goalMilestones(ctx, { id, name: input.name, target: input.target }, 0, input.saved);
   return id;
 }
 
@@ -237,18 +246,20 @@ const MAX_DEPOSITS = 2000;
  */
 export async function updateGoal(ctx: Ctx, id: string, patch: Partial<GoalInput> & { add?: number }): Promise<{ depositId: string | null }> {
   const { add, ...fields } = patch;
+  await checkFollowed(ctx, fields.accountId);
   type Moved = { goal: { id: string; name: string; target: number }; before: number; after: number };
   let moved: Moved | null = null;
   // One transaction with the goal locked, so two changes at once (two phones, a double tap) can't
   // both read the same amount: what's saved and the list of deposits always agree.
   const result = await ctx.db.transaction(async (tx) => {
     const [goal] = await tx
-      .select({ id: goals.id, saved: goals.saved, name: goals.name, target: goals.target })
+      .select({ id: goals.id, saved: goals.saved, name: goals.name, target: goals.target, accountId: goals.accountId })
       .from(goals)
       .where(and(eq(goals.id, id), eq(goals.userId, ctx.userId)))
       .for("update")
       .limit(1);
     if (!goal) throw new HttpError(404, "Goal not found.");
+    if (add && (fields.accountId ?? goal.accountId)) throw new HttpError(400, "This goal follows an account, so it updates on its own as that account’s balance changes.");
     // Never below zero: taking out more than is there takes out what is there.
     const change = add ? Math.max(-goal.saved, add) : 0;
     if (change) {
@@ -257,6 +268,11 @@ export async function updateGoal(ctx: Ctx, id: string, patch: Partial<GoalInput>
     }
     const set: Record<string, unknown> = { ...fields };
     if (change) set.saved = goal.saved + change;
+    // Stopping following an account keeps what it had as what's saved, so the goal doesn't drop to zero.
+    if (fields.accountId === null && goal.accountId) {
+      const [a] = await tx.select({ balance: accounts.balance }).from(accounts).where(and(eq(accounts.id, goal.accountId), eq(accounts.userId, ctx.userId))).limit(1);
+      if (a) set.saved = Math.max(0, a.balance);
+    }
     if (Object.keys(set).length > 0) await tx.update(goals).set(set).where(and(eq(goals.id, goal.id), eq(goals.userId, ctx.userId)));
     if (!change) return { depositId: null };
     const depositId = crypto.randomUUID();
@@ -353,4 +369,26 @@ export async function setDebtPlan(ctx: Ctx, accountId: string, patch: { aprPerce
     .values({ accountId, userId: ctx.userId, aprPercent: patch.aprPercent ?? null, monthlyPayment: patch.monthlyPayment ?? null })
     .onConflictDoUpdate({ target: debtPlans.accountId, set: { ...(patch.aprPercent !== undefined ? { aprPercent: patch.aprPercent } : {}), ...(patch.monthlyPayment !== undefined ? { monthlyPayment: patch.monthlyPayment } : {}) } });
   await win(ctx, "plan", `${monthOf(ctx.today)}:${account.id}`, account.name);
+}
+
+const DAY = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/;
+
+/**
+ * "This paycheck will be lighter": what one coming paycheck is expected to be (missed days, say), so the
+ * month re-plans around it; null goes back to the usual. Returns what it was, for Undo.
+ */
+export async function setPaycheck(ctx: Ctx, key: string, date: string, amount: number | null): Promise<{ previous: number | null }> {
+  if (!key.startsWith("in:")) throw new HttpError(400, "That isn’t a paycheck.");
+  if (!DAY.test(date) || date < addDays(ctx.today, -10) || date > addDays(ctx.today, 400)) throw new HttpError(400, "Pick a paycheck that hasn’t come in yet.");
+  if (amount !== null && (!Number.isInteger(amount) || amount < 0 || amount > 100_000_000)) throw new HttpError(400, "Enter an amount, like 750.");
+  const mine = and(eq(incomeAdjustments.userId, ctx.userId), eq(incomeAdjustments.seriesKey, key), eq(incomeAdjustments.date, date));
+  const [row] = await ctx.db.select({ amount: incomeAdjustments.amount }).from(incomeAdjustments).where(mine).limit(1);
+  if (amount === null) await ctx.db.delete(incomeAdjustments).where(mine);
+  else {
+    await ctx.db
+      .insert(incomeAdjustments)
+      .values({ id: crypto.randomUUID(), userId: ctx.userId, seriesKey: key, date, amount })
+      .onConflictDoUpdate({ target: [incomeAdjustments.userId, incomeAdjustments.seriesKey, incomeAdjustments.date], set: { amount } });
+  }
+  return { previous: row?.amount ?? null };
 }

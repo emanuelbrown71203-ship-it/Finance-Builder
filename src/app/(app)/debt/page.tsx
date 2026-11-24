@@ -5,10 +5,10 @@ import { Minus, Plus } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 import { TrendChart } from "@/components/charts";
-import { Button, Dialog, EmptyState, ErrorNote, Field, IconButton, Input, MoneyInput, PageHeader, Segmented, Sheet, SheetHeader, Skeleton, Tag, toast } from "@/components/ui";
+import { Button, Dialog, EmptyState, ErrorNote, Field, Fold, IconButton, Input, MoneyInput, PageHeader, Segmented, Sheet, SheetHeader, Skeleton, Tag, toast } from "@/components/ui";
 import { send, useApi } from "@/components/use-api";
-import { addMonthsToMonth, monthName, monthOf } from "@/lib/dates";
-import { dollars, parseDollarsToCents } from "@/lib/money";
+import { addMonthsToMonth, formatShort as formatShortDate, monthName, monthOf } from "@/lib/dates";
+import { dollars, dollarsExact, parseDollarsToCents } from "@/lib/money";
 import type { DebtPayload, DebtView } from "@/lib/types";
 
 const STEP = 2500; // $25 at a time
@@ -64,6 +64,65 @@ function EditDebt({ debt, onClose }: { debt: DebtView; onClose: () => void }) {
         </Button>
       </div>
     </form>
+  );
+}
+
+/** What interest and fees have cost: money that went to the banks instead of to you. */
+function CostsCard({ costs, year }: { costs: DebtPayload["costs"]; year: string }) {
+  return (
+    <Sheet>
+      <SheetHeader title="Interest & fees" hint="Money paid to banks for carrying a balance, paying late, or a payment bouncing." action={costs.thisYear > 0 ? <Tag tone="pink">{dollars(costs.thisYear)} in {year}</Tag> : undefined} />
+      {costs.thisYear <= 0 ? (
+        <p className="rounded-2xl bg-mint px-4 py-3 font-bold text-mint-ink">No interest or fees this year. Nice!</p>
+      ) : (
+        <>
+          <div className="grid grid-cols-3 gap-2">
+            {[
+              { label: "This month", value: costs.thisMonth },
+              { label: "90 days", value: costs.last90 },
+              { label: `${year} so far`, value: costs.thisYear },
+            ].map((x) => (
+              <div key={x.label} className="min-w-0 rounded-2xl border border-line-soft px-2.5 py-2.5 text-center">
+                <p className="truncate text-small text-ink-3">{x.label}</p>
+                <p className="figure mt-1 text-[1.2rem]">{dollars(x.value)}</p>
+              </div>
+            ))}
+          </div>
+          <p className="mt-3 text-small text-ink-2">
+            {dollars(costs.interestYear)} in interest and {dollars(costs.feesYear)} in fees this year. Paying a card’s full statement balance by its due date stops the interest; paying at least the minimum on time stops late fees.
+          </p>
+          {costs.byAccount.length > 0 && (
+            <ul className="mt-3 divide-y divide-line-soft">
+              {costs.byAccount.map((a) => (
+                <li key={a.name} className="flex items-baseline justify-between gap-3 py-2">
+                  <span className="min-w-0">
+                    <span className="block truncate font-bold">{a.name}</span>
+                    <span className="block text-small text-ink-3">
+                      {[a.interest > 0 ? `${dollars(a.interest)} interest` : "", a.fees > 0 ? `${dollars(a.fees)} fees` : ""].filter(Boolean).join(", ")}
+                    </span>
+                  </span>
+                  <span className="tabular shrink-0 font-bold">{dollars(a.interest + a.fees)}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+          {costs.latest.length > 0 && (
+            <Fold title="Each charge" summary={`latest ${formatShortDate(costs.latest[0].date)}`} className="mt-1 border-t border-line-soft">
+              <ul className="pb-2 text-small">
+                {costs.latest.map((c, i) => (
+                  <li key={`${c.date}-${i}`} className="flex items-baseline justify-between gap-3 py-1.5">
+                    <span className="min-w-0 truncate">
+                      {formatShortDate(c.date)} · {c.kind === "interest" ? "Interest" : c.name}, {c.account}
+                    </span>
+                    <span className="tabular shrink-0">{dollarsExact(c.amount)}</span>
+                  </li>
+                ))}
+              </ul>
+            </Fold>
+          )}
+        </>
+      )}
+    </Sheet>
   );
 }
 
@@ -245,6 +304,8 @@ export default function DebtPage() {
             </ul>
             <p className="mt-3 text-small text-ink-3">These are estimates from today’s balances and rates. Your lender’s payoff figure is the exact one.</p>
           </Sheet>
+
+          <CostsCard costs={data.costs} year={data.today.slice(0, 4)} />
         </div>
       </div>
 

@@ -8,7 +8,7 @@ import { countUnclear } from "./names";
 import { answerQuestion, type Answer, type LastVerdict, type Snapshot } from "@/lib/nickel/answers";
 import { monthOf } from "@/lib/dates";
 import { dollarsExact } from "@/lib/money";
-import { getAccounts, getBudget, getGoals, getOverview, getRecurring, getTransactions } from "./queries";
+import { feesAndInterest, getAccounts, getBudget, getGoals, getOverview, getRecurring, getTransactions } from "./queries";
 
 export type NickelPayload = {
   mood: Mood;
@@ -89,7 +89,7 @@ export async function getNickel(ctx: Ctx): Promise<NickelPayload> {
 export async function askNickel(ctx: Ctx, question: string, last: LastVerdict | null = null): Promise<Answer | null> {
   const q = question.slice(0, 300);
   const month = monthOf(ctx.today);
-  const [overview, recurring, budget, goals, accounts] = await Promise.all([getOverview(ctx), getRecurring(ctx), getBudget(ctx, month), getGoals(ctx), getAccounts(ctx)]);
+  const [overview, recurring, budget, goals, accounts, costs] = await Promise.all([getOverview(ctx), getRecurring(ctx), getBudget(ctx, month), getGoals(ctx), getAccounts(ctx), feesAndInterest(ctx)]);
   const latest = overview.recent[0] ?? null;
   const all = [...accounts.institutions.flatMap((i) => i.accounts), ...accounts.manual];
   const debts = all.filter((a) => a.balance < 0 && a.aprPercent !== null).sort((a, b) => (b.aprPercent ?? 0) - (a.aprPercent ?? 0));
@@ -134,6 +134,7 @@ export async function askNickel(ctx: Ctx, question: string, last: LastVerdict | 
     }),
     weeks: { today: spentFrom(ctx.today, ctx.today), thisWeek: spentFrom(monday, ctx.today), lastWeek: spentFrom(lastMonday, addDays(monday, -1)) },
     extras: recurring.series.filter((s) => s.kind === "subscription" && s.active).map((s) => ({ name: s.name, monthly: s.monthly })),
+    costs,
   };
   const answer = answerQuestion(q, snapshot, last);
   if (!answer || !("merchant" in answer)) return answer;

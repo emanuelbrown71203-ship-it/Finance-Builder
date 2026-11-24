@@ -91,5 +91,10 @@ export const MIGRATION_STATEMENTS: string[] = [
   "ALTER TABLE \"budgets\" ADD COLUMN \"removed_at\" timestamp with time zone;",
   "CREATE TABLE \"tap_keys\" (\n\t\"user_id\" text PRIMARY KEY NOT NULL,\n\t\"token_hash\" text NOT NULL,\n\t\"last_used_at\" timestamp with time zone,\n\t\"created_at\" timestamp with time zone DEFAULT now() NOT NULL,\n\tCONSTRAINT \"tap_keys_token_hash_unique\" UNIQUE(\"token_hash\")\n);",
   "ALTER TABLE \"tap_keys\" ADD CONSTRAINT \"tap_keys_user_id_users_id_fk\" FOREIGN KEY (\"user_id\") REFERENCES \"public\".\"users\"(\"id\") ON DELETE cascade ON UPDATE no action;",
-  "ALTER TABLE \"recurring_overrides\" ADD COLUMN \"share_bp\" integer;"
+  "ALTER TABLE \"recurring_overrides\" ADD COLUMN \"share_bp\" integer;",
+  "CREATE TABLE \"income_adjustments\" (\n\t\"id\" text PRIMARY KEY NOT NULL,\n\t\"user_id\" text NOT NULL,\n\t\"series_key\" text NOT NULL,\n\t\"date\" text NOT NULL,\n\t\"amount\" bigint NOT NULL,\n\t\"created_at\" timestamp with time zone DEFAULT now() NOT NULL\n);",
+  "ALTER TABLE \"income_adjustments\" ADD CONSTRAINT \"income_adjustments_user_id_users_id_fk\" FOREIGN KEY (\"user_id\") REFERENCES \"public\".\"users\"(\"id\") ON DELETE cascade ON UPDATE no action;",
+  "CREATE UNIQUE INDEX \"income_adjustments_user_series_date_idx\" ON \"income_adjustments\" USING btree (\"user_id\",\"series_key\",\"date\");",
+  "ALTER TABLE \"goals\" ADD COLUMN \"account_id\" text;",
+  "ALTER TABLE \"goals\" ADD CONSTRAINT \"goals_account_id_accounts_id_fk\" FOREIGN KEY (\"account_id\") REFERENCES \"public\".\"accounts\"(\"id\") ON DELETE set null ON UPDATE no action;"
 ];

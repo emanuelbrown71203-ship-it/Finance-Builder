@@ -80,7 +80,8 @@ function CategoryRow({ row, data, onOpen }: { row: BudgetRow; data: BudgetPayloa
 }
 
 /** Where the month's money goes, as one bar and its parts. */
-function PlanCard({ data }: { data: BudgetPayload }) {
+function PlanCard({ data, onPaychecks }: { data: BudgetPayload; onPaychecks: () => void }) {
+  const past = data.month < monthOf(data.today);
   const p = data.plan;
   const limited = data.rows.filter((r) => r.limit !== null);
   const leftInBudgets = limited.reduce((s, r) => s + (r.left ?? 0), 0);
@@ -116,14 +117,16 @@ function PlanCard({ data }: { data: BudgetPayload }) {
           {parts.map((x) => x.amount > 0 && <span key={x.label} className="block-on h-full rounded-[2px]" style={{ width: `${(x.amount / whole) * 100}%`, background: x.color }} />)}
         </div>
       </div>
-      <dl className="mt-3 divide-y divide-line-soft">
-        <div className="flex items-baseline justify-between gap-4 py-2.5">
-          <dt className="font-bold">
-            {data.isCurrent ? "Expected in this month" : "Money in"}
-            {data.isCurrent && p.income > data.income && <span className="block text-small font-normal text-ink-3">{dollars(data.income)} in so far; the rest is paychecks still to come</span>}
-          </dt>
-          <dd className="tabular font-bold">{dollars(p.income)}</dd>
-        </div>
+      {/* Tap it to see the month's paychecks and set a coming one lighter (missed days). */}
+      <button type="button" onClick={onPaychecks} disabled={data.paychecks.length === 0} className="mt-3 flex w-full items-baseline justify-between gap-4 border-b border-line-soft py-2.5 text-left enabled:active:bg-sunk">
+        <span className="font-bold">
+          {past ? "Money in" : `Expected in ${data.isCurrent ? "this month" : monthName(data.month)}`}
+          {data.isCurrent && p.income > data.income && <span className="block text-small font-normal text-ink-3">{dollars(data.income)} in so far; the rest is paychecks still to come</span>}
+          {data.paychecks.length > 0 && <span className="block text-small font-bold text-accent-text">{past ? "See paychecks" : "Paychecks: change a lighter one"}</span>}
+        </span>
+        <span className="tabular font-bold">{dollars(p.income)}</span>
+      </button>
+      <dl className="divide-y divide-line-soft">
         {parts.map((x) => (
           <div key={x.label} className="flex items-baseline justify-between gap-4 py-2.5">
             <dt className="flex items-center gap-2">
@@ -146,6 +149,102 @@ function PlanCard({ data }: { data: BudgetPayload }) {
       {data.isCurrent && p.unplanned > 2000 && limited.length > 0 && <p className="mt-2 rounded-control bg-sunk px-3.5 py-3 text-small text-ink-2">{dollars(p.unplanned)} has no job yet. Raise a limit, or put it toward a goal in Wealth.</p>}
       {data.isCurrent && p.unplanned < 0 && <p className="mt-2 rounded-control bg-pink px-3.5 py-3 text-small text-pink-ink">Your plan asks for {dollars(-p.unplanned)} more than comes in this month. Lowering a limit or two would close the gap.</p>}
     </Sheet>
+  );
+}
+
+/** The month's paychecks. A coming one can be set lighter (missed days), and the month re-plans around it. */
+function PaychecksDialog({ data, open, onClose }: { data: BudgetPayload; open: boolean; onClose: () => void }) {
+  return (
+    <Dialog open={open} onClose={onClose} title={`Paychecks in ${monthName(data.month)}`}>
+      <p className="mb-3 text-ink-2">Missed a day or two? Set what a coming paycheck will be, and your month re-plans around it.</p>
+      <ul className="flex flex-col gap-2">
+        {data.paychecks.map((p) => (
+          <PaycheckRow key={`${p.key}|${p.date}|${p.amount}`} paycheck={p} />
+        ))}
+      </ul>
+    </Dialog>
+  );
+}
+
+function PaycheckRow({ paycheck: p }: { paycheck: BudgetPayload["paychecks"][number] }) {
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState(String(p.amount / 100));
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const short = (days: number) => Math.round((p.usual * (p.workdays - days)) / p.workdays);
+
+  const save = async (amount: number | null) => {
+    setBusy(true);
+    setError(null);
+    try {
+      const { previous } = await send<{ previous: number | null }>("PUT", "/api/paychecks", { key: p.key, date: p.date, amount });
+      toast(amount === null ? `${formatShort(p.date)} paycheck is back to the usual ${dollars(p.usual)}` : `Planning on ${dollars(amount)} on ${formatShort(p.date)}`, {
+        action: { label: "Undo", run: () => send("PUT", "/api/paychecks", { key: p.key, date: p.date, amount: previous }) },
+      });
+      setEditing(false);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Couldn’t save. Try again.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <li className="rounded-2xl border border-line-soft p-3">
+      <div className="flex items-baseline justify-between gap-3">
+        <span className="min-w-0">
+          <span className="block font-bold">{formatShort(p.date)}</span>
+          <span className="block truncate text-small text-ink-3">
+            {p.name}
+            {p.adjusted ? `, usually ${dollars(p.usual)}` : ""}
+          </span>
+        </span>
+        <span className="flex shrink-0 items-center gap-2">
+          {p.received ? <Tag tone="mint">In</Tag> : p.adjusted ? <Tag tone="canary">Lighter</Tag> : <Tag>Expected</Tag>}
+          <span className="tabular font-bold">{dollarsExact(p.amount)}</span>
+        </span>
+      </div>
+      {!p.received && !editing && (
+        <div className="mt-2 flex flex-wrap gap-2">
+          <Button size="sm" onClick={() => setEditing(true)}>
+            Change
+          </Button>
+          {p.adjusted && (
+            <Button size="sm" variant="ghost" disabled={busy} onClick={() => save(null)}>
+              Back to usual
+            </Button>
+          )}
+        </div>
+      )}
+      {editing && (
+        <div className="mt-3 flex flex-col gap-2.5">
+          <div className="flex flex-wrap gap-2">
+            {[1, 2, 3].map((n) => (
+              <Button key={n} size="sm" disabled={busy} onClick={() => save(short(n))}>
+                {n} {n === 1 ? "day" : "days"} short ({dollars(short(n))})
+              </Button>
+            ))}
+          </div>
+          <form
+            className="flex gap-2"
+            onSubmit={(e) => {
+              e.preventDefault();
+              const cents = parseDollarsToCents(value);
+              if (cents === null || cents < 0) return setError("Enter an amount, like 750.");
+              void save(cents);
+            }}
+          >
+            <div className="min-w-0 flex-1">
+              <MoneyInput aria-label="What this paycheck will be" inputMode="decimal" value={value} onChange={(e) => setValue(e.target.value)} />
+            </div>
+            <Button variant="primary" type="submit" disabled={busy}>
+              Save
+            </Button>
+          </form>
+          {error && <p className="text-small text-bad">{error}</p>}
+        </div>
+      )}
+    </li>
   );
 }
 
@@ -204,9 +303,13 @@ function SavingsDialog({ data, open, onClose, onGoal }: { data: BudgetPayload; o
                   {dollars(g.saved)} of {dollars(g.target)} saved
                 </p>
                 <div className="mt-2 flex flex-wrap gap-2">
-                  <Button size="sm" onClick={() => onGoal({ kind: "add", goal: g })}>
-                    Put money in
-                  </Button>
+                  {g.account ? (
+                    <span className="inline-flex min-h-9 items-center text-small text-ink-3">Follows {g.account.name}</span>
+                  ) : (
+                    <Button size="sm" onClick={() => onGoal({ kind: "add", goal: g })}>
+                      Put money in
+                    </Button>
+                  )}
                   <Button size="sm" variant="ghost" onClick={() => onGoal({ kind: "edit", goal: g })}>
                     Change monthly amount
                   </Button>
@@ -488,6 +591,7 @@ function Budget() {
   const { data, error, mutate, isValidating } = useApi<BudgetPayload>(shown ? `/api/budget?month=${shown}` : null, { refreshInterval: 30_000 });
   const [setup, setSetup] = useState(false);
   const [savingsOpen, setSavingsOpen] = useState(false);
+  const [paychecksOpen, setPaychecksOpen] = useState(false);
   const [goalSheet, setGoalSheet] = useState<GoalSheet>({ kind: "closed" });
   const [hidden, hide] = useSuggestionHidden(shown);
   const opened = params.get("category");
@@ -577,7 +681,7 @@ function Budget() {
               </div>
             </Sheet>
           )}
-          <PlanCard data={data} />
+          <PlanCard data={data} onPaychecks={() => setPaychecksOpen(true)} />
           {data.monthPlan && (
             <Sheet>
               <SheetHeader title="Spending pace" hint="What’s left to spend as the month goes on, against spending it evenly." />
@@ -658,6 +762,7 @@ function Budget() {
 
       <CategoryDialog row={openRow} data={data} onClose={() => open(null)} />
       <SetupDialog data={data} open={setup} onClose={() => setSetup(false)} />
+      <PaychecksDialog data={data} open={paychecksOpen} onClose={() => setPaychecksOpen(false)} />
       <SavingsDialog
         data={data}
         open={savingsOpen}

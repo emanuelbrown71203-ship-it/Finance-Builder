@@ -182,6 +182,31 @@ function cutAt(words: string[]): number {
  * A readable version of a bank's text. Clear names come back unchanged, so
  * this is safe to apply to every name, any number of times.
  */
+/**
+ * A round-up: the spare change from a purchase moved from checking into savings (SoFi does this after each
+ * card purchase). It shows up twice, a few cents out of checking and the same into the vault, named after
+ * the store, so it reads like a tiny purchase and a refund. It's a transfer under a dollar between bank
+ * accounts, or one the bank calls "Roundup".
+ */
+export function isRoundUp(t: { amount: number; category: string; name: string; rawName: string | null; accountType: string }): boolean {
+  if (t.category !== "transfer" || t.accountType !== "depository" || t.amount === 0) return false;
+  return Math.abs(t.amount) < 100 || /^round\s*-?\s*up\b/i.test(t.rawName ?? t.name);
+}
+
+const ROUND_UP = /^round\s*-?\s*up\s*\*?\s*/i;
+
+/**
+ * "Round-up from Ingles Markets" (into savings) or "Round-up for Ingles Markets" (out of checking): the
+ * store from the shown name, or from the bank's text when the shown name lost it ("Roundup *RICE AND…").
+ */
+export function roundUpName(amount: number, shown: string, bankText: string): string {
+  const fromShown = shown.replace(ROUND_UP, "").trim();
+  const fromBank = bankText.replace(ROUND_UP, "").trim();
+  const tidy = (t: string) => cleanName(t).toLowerCase().replace(/(^|[\s/&-])([a-z])/g, (_, gap: string, c: string) => gap + c.toUpperCase());
+  const place = fromShown && !ROUND_UP.test(shown) ? fromShown : fromBank ? tidy(fromBank) : "a purchase";
+  return `Round-up ${amount > 0 ? "from" : "for"} ${place}`;
+}
+
 export function cleanName(name: string): string {
   const original = name.replace(/\s+/g, " ").trim();
   if (!looksUnclear(original)) return original;

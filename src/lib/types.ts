@@ -37,6 +37,8 @@ export type TxView = {
   ruleId: string | null;
   /** True when that rule only covers this exact amount. */
   ruleExact: boolean;
+  /** Spare change moved into savings after a purchase (shown grouped, and kept off Home's latest). */
+  roundUp?: boolean;
 };
 
 export type AccountView = {
@@ -57,6 +59,8 @@ export type AccountView = {
 
 export type GoalView = {
   id: string;
+  /** The real account it follows (a SoFi vault): its balance is what's saved, so nothing is put in by hand. */
+  account: { id: string; name: string } | null;
   name: string;
   target: number;
   saved: number;
@@ -188,6 +192,9 @@ export type BudgetPlanView = {
   leftToSpend: number;
 };
 
+/** One paycheck in a month: came in, or still expected (at the usual, or what the owner said it'll be). */
+export type Paycheck = { key: string; name: string; date: ISODate; amount: number; usual: number; received: boolean; adjusted: boolean; /** Working days a paycheck covers (10 for every two weeks), for "2 days short". */ workdays: number };
+
 export type BudgetPayload = {
   month: string;
   today: ISODate;
@@ -210,6 +217,8 @@ export type BudgetPayload = {
   suggestion: { limits: { category: string; limit: number }[]; trimmed: boolean; room: number } | null;
   /** Saving, as part of the budget: the goals (each with its monthly amount) and what's been put toward them this month. */
   savings: { goals: GoalView[]; putAside: number };
+  /** The month's paychecks, in and still expected; an expected one can be set lighter. */
+  paychecks: Paycheck[];
 };
 
 export type TransactionsPayload = {
@@ -256,8 +265,20 @@ export type DebtView = {
   order: number | null;
 };
 
+/** What interest and fees have cost (positive cents). */
+export type CostsView = {
+  thisMonth: number;
+  last90: number;
+  thisYear: number;
+  interestYear: number;
+  feesYear: number;
+  byAccount: { name: string; interest: number; fees: number }[];
+  latest: { name: string; account: string; date: ISODate; amount: number; kind: "interest" | "fee" }[];
+};
+
 export type DebtPayload = {
   today: ISODate;
+  costs: CostsView;
   totalOwed: number;
   extra: number;
   strategy: "avalanche" | "snowball";

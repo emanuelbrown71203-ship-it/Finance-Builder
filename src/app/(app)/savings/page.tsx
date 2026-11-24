@@ -34,11 +34,15 @@ function GoalCard({ goal, onAdd }: { goal: GoalView; onAdd: () => void }) {
         <p className="mt-3 text-small text-ink-2">{goalSentence(goal)}</p>
       </Link>
       <div className="mt-4 flex flex-1 items-end gap-2">
-        {!done && (
-          <Button size="sm" variant="primary" onClick={onAdd}>
-            Add money
-            <XpTag xp={WINS.save.xp} />
-          </Button>
+        {goal.account ? (
+          <span className="inline-flex min-h-11 items-center text-small text-ink-3">Follows {goal.account.name}: updates on its own</span>
+        ) : (
+          !done && (
+            <Button size="sm" variant="primary" onClick={onAdd}>
+              Add money
+              <XpTag xp={WINS.save.xp} />
+            </Button>
+          )
         )}
         <Link href={`/savings/goal?id=${encodeURIComponent(goal.id)}`} className="inline-flex min-h-11 items-center gap-1 rounded-control px-3 text-small font-bold text-accent-text active:scale-[0.98]">
           See the track <ChevronRight size={16} />

@@ -11,6 +11,8 @@ import { ScopeChoice, renameEvery, renamedMessage, undoRename, type Scope } from
 import { Button, Dialog, ErrorNote, Field, Input, Select, Tag, cx, toast } from "./ui";
 import { send } from "./use-api";
 import { nickelReact } from "./nickel/store";
+import { ChevronDown } from "lucide-react";
+import { PixelIcon } from "./pixel-icons";
 
 /** Remembers which rows have been shown, so only genuinely new ones animate in. */
 function useArrivals(transactions: TxView[]): Set<string> {
@@ -209,6 +211,27 @@ export function TxList({ transactions, today, grouped = true }: { transactions: 
     else days.push({ date: t.date, rows: [t] });
   }
   const row = (t: TxView) => <TxRow key={t.id} tx={t} fresh={fresh.has(t.id)} onOpen={() => setOpenId(t.id)} onCategory={() => setPickId(t.id)} />;
+  // A day's round-ups into (or out of) one account show as one line, opened to see each.
+  const rows = (list: TxView[]) => {
+    const out: ReactNode[] = [];
+    const grouped = new Map<string, TxView[]>();
+    for (const t of list) {
+      if (!t.roundUp) continue;
+      const key = `${t.date}|${t.accountId}`;
+      grouped.set(key, [...(grouped.get(key) ?? []), t]);
+    }
+    const shown = new Set<string>();
+    for (const t of list) {
+      const key = `${t.date}|${t.accountId}`;
+      const group = t.roundUp ? grouped.get(key)! : null;
+      if (!group || group.length < 2) out.push(row(t));
+      else if (!shown.has(key)) {
+        shown.add(key);
+        out.push(<RoundUps key={`ru-${key}`} rows={group} render={row} />);
+      }
+    }
+    return out;
+  };
 
   return (
     <>
@@ -220,16 +243,43 @@ export function TxList({ transactions, today, grouped = true }: { transactions: 
                 <h3 className="font-bold text-ink-2">{formatRelativeDay(day.date, today)}</h3>
                 <span className="tabular">{dollarsExact(day.rows.reduce((s, t) => s + (t.category === "transfer" ? 0 : t.amount), 0))}</span>
               </div>
-              <ul>{day.rows.map(row)}</ul>
+              <ul>{rows(day.rows)}</ul>
             </section>
           ))}
         </div>
       ) : (
-        <ul>{transactions.map(row)}</ul>
+        <ul>{rows(transactions)}</ul>
       )}
       <TxDialog tx={open} onClose={() => setOpenId(null)} />
       <CategoryPicker tx={picking} onClose={() => setPickId(null)} />
     </>
+  );
+}
+
+/** Several round-ups on one day, in or out of one account: one line, opened to see each. */
+function RoundUps({ rows, render }: { rows: TxView[]; render: (t: TxView) => ReactNode }) {
+  const [open, setOpen] = useState(false);
+  const total = rows.reduce((s, t) => s + t.amount, 0);
+  const into = total > 0;
+  return (
+    <li>
+      <button type="button" onClick={() => setOpen(!open)} aria-expanded={open} className="flex min-h-[60px] w-full items-center gap-3 rounded-2xl px-2 py-2 text-left transition-colors hover:bg-sunk active:bg-sunk">
+        <span aria-hidden className="inline-flex size-10 shrink-0 items-center justify-center rounded-xl bg-[var(--c-savings)] text-sheet">
+          <PixelIcon name="savings" size={20} />
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block truncate font-bold">{rows.length} round-ups</span>
+          <span className="block truncate text-small text-ink-3">
+            Spare change {into ? "saved to" : "moved out of"} {rows[0].accountName}
+          </span>
+        </span>
+        <span className="flex items-center gap-1.5">
+          <Amount cents={total} neutral />
+          <ChevronDown size={16} aria-hidden className={cx("shrink-0 text-ink-3 transition-transform", open && "rotate-180")} />
+        </span>
+      </button>
+      {open && <ul className="ml-4 border-l-2 border-line-soft pl-2">{rows.map(render)}</ul>}
+    </li>
   );
 }
 

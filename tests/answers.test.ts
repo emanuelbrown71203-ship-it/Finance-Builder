@@ -138,6 +138,12 @@ describe("the questions the owner asked that he couldn't answer", () => {
     expect(say("how much is my cashback visa bill")).toBe("Cashback Visa has $2,697.26 on it.");
   });
 
+  it("says what interest and fees have cost", () => {
+    const withCosts = { ...more, costs: { thisMonth: 5_377, thisYear: 48_500, interestYear: 35_600, feesYear: 12_900 } };
+    expect((answerQuestion("how much interest have I paid", withCosts) as Answer).text).toBe("$485 in interest and fees this year ($356 interest, $129 fees), $53.77 of it this month.");
+    expect((answerQuestion("what's the interest rate on my loan", withCosts) as Answer | null)?.text ?? "").not.toMatch(/interest and fees this year/);
+  });
+
   it("says where the money goes, how the budgets stand, what's saved, income and subscriptions", () => {
     expect(say("where is my money going")).toBe("This month the most has gone to Home & rent ($2,150), Groceries ($520.10), Restaurants & coffee ($312.50).");
     expect(say("am I over budget")).toBe("Groceries is $20.10 over. Restaurants & coffee is on pace to go over.");

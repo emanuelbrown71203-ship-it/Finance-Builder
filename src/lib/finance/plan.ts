@@ -62,8 +62,10 @@ export function buildMonthPlan(args: {
    * the month's end.
    */
   usualIncome?: number;
+  /** What the owner expects particular coming paychecks to be ("this one's lighter"), keyed "seriesKey|date". */
+  incomeAdjust?: ReadonlyMap<string, number>;
 }): MonthPlan {
-  const { month, today, transactions, recurring, savingsPlanned, billIds, usualIncome = 0 } = args;
+  const { month, today, transactions, recurring, savingsPlanned, billIds, usualIncome = 0, incomeAdjust } = args;
   const start = monthStart(month);
   const end = monthEnd(month);
 
@@ -111,9 +113,10 @@ export function buildMonthPlan(args: {
       const day = days.get(date);
       if (!day) continue;
       if (s.kind === "income") {
-        incomeUpcoming += s.amount;
-        day.income += s.amount;
-        day.events.push({ name: s.name, amount: s.amount, type: "income", settled: false });
+        const amount = incomeAdjust?.get(`${s.key}|${due}`) ?? s.amount;
+        incomeUpcoming += amount;
+        day.income += amount;
+        day.events.push({ name: s.name, amount, type: "income", settled: false });
       } else {
         billsUpcoming += -s.amount;
         day.bills += -s.amount;

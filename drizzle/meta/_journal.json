@@ -85,6 +85,20 @@
       "when": 1795452372487,
       "tag": "0011_daily_avengers",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1795485454273,
+      "tag": "0012_glossy_emma_frost",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1795485740259,
+      "tag": "0013_uneven_ultimatum",
+      "breakpoints": true
     }
   ]
 }

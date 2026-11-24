@@ -146,6 +146,8 @@ export const goals = pgTable(
     saved: cents("saved").notNull().default(0),
     monthlyContribution: cents("monthly_contribution").notNull().default(0),
     targetDate: text("target_date"),
+    /** A goal that follows a real account (a SoFi vault): its balance is what's saved, updating on its own. */
+    accountId: text("account_id").references(() => accounts.id, { onDelete: "set null" }),
     createdAt: createdAt(),
   },
   (t) => [index("goals_user_idx").on(t.userId)],
@@ -447,3 +449,20 @@ export type Budget = typeof budgets.$inferSelect;
 export type Goal = typeof goals.$inferSelect;
 export type Holding = typeof holdings.$inferSelect;
 export type RecurringOverride = typeof recurringOverrides.$inferSelect;
+
+/** "This paycheck will be lighter": what the owner expects one coming paycheck to be, so the month re-plans around it. */
+export const incomeAdjustments = pgTable(
+  "income_adjustments",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    /** The paycheck's series (its key, like "in:team members"). */
+    seriesKey: text("series_key").notNull(),
+    /** The day that paycheck is expected. */
+    date: text("date").notNull(),
+    /** What it's expected to be, in cents. */
+    amount: cents("amount").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex("income_adjustments_user_series_date_idx").on(t.userId, t.seriesKey, t.date)],
+);

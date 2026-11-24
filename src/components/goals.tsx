@@ -2,13 +2,13 @@
 
 import { useState } from "react";
 import { celebrate } from "@/components/celebrate";
-import { Button, Dialog, ErrorNote, Field, Input, MoneyInput, confirm, cx, toast, type Tone } from "@/components/ui";
+import { Button, Dialog, ErrorNote, Field, Input, MoneyInput, Select, confirm, cx, toast, type Tone } from "@/components/ui";
 import { nickelReact } from "@/components/nickel/store";
-import { send } from "@/components/use-api";
+import { send, useApi } from "@/components/use-api";
 import { formatMedium, formatShort, monthName, type ISODate } from "@/lib/dates";
 import { monthlyFor, quickDates } from "@/lib/finance/goalplan";
 import { dollars, parseDollarsToCents } from "@/lib/money";
-import type { GoalView } from "@/lib/types";
+import type { AccountsPayload, GoalView } from "@/lib/types";
 
 /* ---------- how a goal is going, in words ---------- */
 
@@ -129,11 +129,16 @@ function GoalForm({ goal, today, onClose, onDeleted, onSaved }: { goal: GoalView
   const [saved, setSaved] = useState("");
   const [targetDate, setTargetDate] = useState<string>(goal ? (goal.targetDate ?? "") : quickDates(today)[2].date);
   const [monthly, setMonthly] = useState(goal && goal.monthlyContribution > 0 ? String(goal.monthlyContribution / 100) : "");
+  // A goal can follow a savings account (a SoFi vault): its balance is what's saved, updating on its own.
+  const [accountId, setAccountId] = useState(goal?.account?.id ?? "");
+  const { data: accountData } = useApi<AccountsPayload>("/api/accounts");
+  const savingsAccounts = (accountData?.institutions ?? []).flatMap((i) => i.accounts).filter((a) => a.type === "depository" && a.subtype !== "checking");
+  const followed = savingsAccounts.find((a) => a.id === accountId);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   const targetCents = parseDollarsToCents(target);
-  const savedCents = goal ? goal.saved : (parseDollarsToCents(saved) ?? 0);
+  const savedCents = followed ? Math.max(0, followed.balance) : goal ? goal.saved : (parseDollarsToCents(saved) ?? 0);
   const suggested = targetCents && targetDate ? monthlyFor(targetCents, savedCents, today, targetDate) : null;
 
   const submit = async (e: React.FormEvent) => {
@@ -144,7 +149,7 @@ function GoalForm({ goal, today, onClose, onDeleted, onSaved }: { goal: GoalView
     const monthlyCents = monthly.trim() ? parseDollarsToCents(monthly) : (suggested ?? 0);
     if (startCents === null || monthlyCents === null) return setError("Amounts should be numbers, like 250.");
     if (targetDate && targetDate <= today && targetDate !== (goal?.targetDate ?? "")) return setError("Pick a date after today.");
-    const body = { name, target: targetCents, monthlyContribution: monthlyCents, targetDate: targetDate || null };
+    const body = { name, target: targetCents, monthlyContribution: monthlyCents, targetDate: targetDate || null, accountId: accountId || null };
     setBusy(true);
     try {
       if (goal) await send("PATCH", `/api/goals/${goal.id}`, body);
@@ -167,8 +172,22 @@ function GoalForm({ goal, today, onClose, onDeleted, onSaved }: { goal: GoalView
       <Field label="What are you saving for?">{(id) => <Input id={id} value={name} onChange={(e) => setName(e.target.value)} maxLength={80} placeholder="New roof" />}</Field>
       <div className="grid grid-cols-2 gap-3">
         <Field label="Amount needed">{(id) => <MoneyInput id={id} value={target} onChange={(e) => setTarget(e.target.value)} placeholder="0" />}</Field>
-        {!goal && <Field label="Already saved">{(id) => <MoneyInput id={id} value={saved} onChange={(e) => setSaved(e.target.value)} placeholder="0" />}</Field>}
+        {!goal && !accountId && <Field label="Already saved">{(id) => <MoneyInput id={id} value={saved} onChange={(e) => setSaved(e.target.value)} placeholder="0" />}</Field>}
       </div>
+      {savingsAccounts.length > 0 && (
+        <Field label="Follow a savings account?" hint={followed ? `Its balance (${dollars(Math.max(0, followed.balance))} now) is what’s saved, and it updates on its own: round-ups and transfers in count.` : "Pick a vault or savings account and the goal keeps itself up to date. Or leave it, and record what you put in."}>
+          {(id) => (
+            <Select id={id} value={accountId} onChange={(e) => setAccountId(e.target.value)}>
+              <option value="">No, I’ll record what I put in</option>
+              {savingsAccounts.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.name} ({dollars(Math.max(0, a.balance))})
+                </option>
+              ))}
+            </Select>
+          )}
+        </Field>
+      )}
       <div>
         <p className="mb-1.5 text-small font-bold text-ink-2">By when?</p>
         <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Target date">

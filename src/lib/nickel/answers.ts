@@ -36,6 +36,8 @@ export type Snapshot = {
   weeks?: { today: number; thisWeek: number; lastWeek: number };
   /** Extras: subscriptions you could live without, and what each costs a month. */
   extras?: { name: string; monthly: number }[];
+  /** What interest and fees have cost: this month and this year. */
+  costs?: { thisMonth: number; thisYear: number; interestYear: number; feesYear: number };
 };
 
 export type Verdict = "yes" | "wait" | "no";
@@ -261,6 +263,13 @@ export function answerQuestion(question: string, s: Snapshot, last?: LastVerdict
     if (one === "savings") return { text: `${money(savings)} in savings.`, href: "/accounts", link: "See accounts" };
     if (one === "checking") return { text: `${money(checking)} in checking.`, href: "/accounts", link: "See accounts" };
     return { text: `${checking < 0 ? "−" : ""}${money(checking)} in checking${savings ? ` and ${money(savings)} in savings` : ""}.`, href: "/accounts", link: "See accounts" };
+  }
+
+  // Interest and fees.
+  if (/\b(interest|fees?|late fees?|penalt(y|ies))\b/.test(q) && s.costs && !/\b(rate|apr)\b/.test(q)) {
+    const c = s.costs;
+    if (c.thisYear <= 0) return { text: "No interest or fees this year. *proud wag*", href: "/debt", link: "See debt payoff" };
+    return { text: `${money(c.thisYear)} in interest and fees this year (${money(c.interestYear)} interest, ${money(c.feesYear)} fees), ${money(c.thisMonth)} of it this month.`, href: "/debt", link: "See debt payoff" };
   }
 
   // Where the money goes.

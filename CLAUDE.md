@@ -60,6 +60,16 @@ for it to be remembered and used whenever an app is built.
   recognised the plan expects the usual (middle of the last three months' income) by month's end
   (`usualIncome`, `buildMonthPlan`). The owner is paid every two weeks ("TEAM MEMBERS" is always pay; a
   remember rule files it as Income).
+- **A lighter paycheck re-plans the month.** On Budget, "Expected in this month" opens the month's
+  paychecks; a coming one can be set to an amount or "1/2/3 days short" (`income_adjustments`, keyed by
+  the paycheck's series and date), and the plan uses it (`buildMonthPlan`'s `incomeAdjust`), with Undo.
+- **Interest & fees** are totalled on Debt payoff (this month, 90 days, this year, by account:
+  `feesAndInterest`); Nickel answers "how much interest have I paid?".
+- **Round-ups read as round-ups.** SoFi moves each purchase's spare change from checking into a vault,
+  named after the store, on both sides. A transfer under a dollar between bank accounts (or "Roundup …")
+  is shown as "Round-up from/for <store>" (`isRoundUp`, `roundUpName`), a day's are grouped into one line,
+  and they're kept off Home's latest. **A goal can follow a savings account** (`goals.account_id`): its
+  balance is what's saved and the money moving in and out is its track; nothing is added by hand.
 - **The app has five places** (`src/components/nav.tsx`): Home, Spending, Bills, Wealth, You. No "More"
   menu. Spending switches Budget / Transactions with tabs under the title. **Wealth's four screens (Net
   worth, Savings, Investing, Debt payoff) each stand on their own**, with their own title and no tabs, as
