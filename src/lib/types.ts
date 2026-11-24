@@ -1,6 +1,7 @@
 import type { NameSource } from "./finance/names";
 import type { ISODate } from "./dates";
 import type { NoSpendWeek } from "./finance/nospend";
+import type { MonthAhead } from "./finance/forecast";
 import type { MonthPlan } from "./finance/plan";
 import type { CategoryBudget } from "./finance/budget";
 import type { RecurringSeries } from "./finance/recurring";
@@ -219,6 +220,8 @@ export type BudgetPayload = {
   savings: { goals: GoalView[]; putAside: number };
   /** The month's paychecks, in and still expected; an expected one can be set lighter. */
   paychecks: Paycheck[];
+  /** This month and later ones: the month split at each payday, with a forecast of spending. */
+  ahead: MonthAhead | null;
 };
 
 export type TransactionsPayload = {
@@ -305,6 +308,24 @@ export type RecapPayload = {
   billsPaid: { count: number; total: number };
   savedToGoals: number;
   netWorthChange: number | null;
+  /** The most recent week only: the week ahead, and the check-in worth doing. */
+  ahead: {
+    from: ISODate;
+    to: ISODate;
+    leftToSpend: number;
+    perDay: number;
+    bills: { name: string; date: ISODate; amount: number }[];
+    paychecks: { name: string; date: ISODate; amount: number }[];
+    budgetsOver: string[];
+    budgetsHeading: string[];
+    noSpend: { start: ISODate; end: ISODate; phase: "soon" | "on" } | null;
+    /** Charges in the last 30 days still in "Everything else". */
+    unsorted: number;
+    /** Last month's leftover, ready to put in savings. */
+    leftover: number | null;
+    /** This week's review is done (its XP is in). */
+    reviewed: boolean;
+  } | null;
 };
 
 export type NetWorthPayload = {

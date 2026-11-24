@@ -149,7 +149,7 @@ function NeedsALook({ items, today }: { items: AttentionItem[]; today: string })
             <CalendarCheck size={19} />
           </span>
           <span className="min-w-0 flex-1">
-            <span className="block font-bold leading-snug">Your week in money is ready</span>
+            <span className="block font-bold leading-snug">Your weekly review is ready</span>
             <span className="block truncate text-small text-ink-3">What you spent, saved and paid last week</span>
           </span>
           <ChevronRight size={18} className="shrink-0 text-ink-3" />

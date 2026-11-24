@@ -1,14 +1,15 @@
 import { and, asc, desc, eq, gte, ilike, inArray, isNull, lte, ne, or, sql } from "drizzle-orm";
-import { accounts, balanceSnapshots, budgets, debtPlans, goalDeposits, goals, holdings, incomeAdjustments, items, recurringOverrides, transactions, userSettings, type Account } from "@/db/schema";
+import { accounts, balanceSnapshots, budgets, debtPlans, goalDeposits, goals, holdings, incomeAdjustments, items, playerWins, recurringOverrides, transactions, userSettings, type Account } from "@/db/schema";
 import { category, isNecessity } from "@/lib/categories";
 import { DEFAULT_TIMEZONE } from "@/lib/config";
 import { addDays, addMonths, addMonthsToMonth, dayOfMonth, daysInMonth, diffDays, eachDay, formatDistance, formatShort, monthEnd, monthOf, monthStart, todayIn, weekday, type ISODate } from "@/lib/dates";
 import { goalIdeas, goalPlan } from "@/lib/finance/goalplan";
 import { dollars, dollarsExact } from "@/lib/money";
-import { buildMonthPlan, spendingByCategory } from "@/lib/finance/plan";
+import { buildMonthPlan, spendingByCategory, type MonthPlan } from "@/lib/finance/plan";
 import { budgetPlan, categoryBudgets, monthProgress, suggestLimits, type Limit } from "@/lib/finance/budget";
 import { payoffPlan, payoffOrder, recentMonthlyPaydown, type Debt, type Strategy } from "@/lib/finance/payoff";
-import { noSpendWeek } from "@/lib/finance/nospend";
+import { noSpendWeek, noSpendWeekOf } from "@/lib/finance/nospend";
+import { monthAhead, spendingShape, type MonthAhead } from "@/lib/finance/forecast";
 import { FREQUENCY_LABEL, detectRecurring, monthlyEquivalent, seriesKeyFor, upcomingBetween, type RecurringKind } from "@/lib/finance/recurring";
 import { cancelHelp, isKnownSubscription } from "@/lib/finance/subscriptions";
 import { isRoundUp, roundUpName, type Namer } from "@/lib/finance/names";
@@ -406,6 +407,26 @@ function paychecksFor(bundle: RecurringBundle, month: string, today: ISODate): P
   return out.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
 }
 
+/**
+ * The month ahead, split at each payday: everyday spending forecast from the last three months' pattern
+ * (more early in the month if that's when it usually goes), and nothing planned in the no-spend week.
+ */
+function aheadFor(bundle: RecurringBundle, month: string, plan: MonthPlan): MonthAhead {
+  const billIds = billIdsOf(bundle);
+  const before = new Set([1, 2, 3].map((n) => addMonthsToMonth(monthOf(plan.today) > month ? month : monthOf(plan.today), -n)));
+  const byDay = new Map<string, number>();
+  for (const t of bundle.history) {
+    if (!before.has(monthOf(t.date)) || t.category === "transfer" || t.category === "income" || billIds.has(t.id)) continue;
+    byDay.set(t.date, (byDay.get(t.date) ?? 0) - t.amount);
+  }
+  const history = [...byDay].map(([date, everyday]) => ({ date, everyday }));
+  const months = new Set(history.map((h) => monthOf(h.date))).size;
+  const usualEveryday = months ? Math.round(history.reduce((s, h) => s + Math.max(0, h.everyday), 0) / months) : 0;
+  const week = noSpendWeekOf(month);
+  const noSpendDays = new Set(eachDay(week.start, week.end));
+  return monthAhead({ plan, paychecks: paychecksFor(bundle, month, plan.today), usualEveryday, shape: spendingShape(history), noSpendDays });
+}
+
 /** What usually comes in a month: the middle of the last three months' income (months with any). */
 function usualIncome(history: { date: string; amount: number; category: string }[], month: string): number {
   const totals = [1, 2, 3]
@@ -462,6 +483,8 @@ export async function getBudget(ctx: Ctx, month: string): Promise<BudgetPayload>
     // Saving is part of the budget: the goals' monthly amounts are set aside first, and what's gone in this month.
     savings: { goals: goalList, putAside: deposits.filter((d) => monthOf(d.date) === month).reduce((s, d) => s + d.amount, 0) },
     paychecks: paychecksFor(bundle, month, ctx.today),
+    // The month ahead (this month and later ones): split at each payday, with a forecast of spending.
+    ahead: month >= monthOf(ctx.today) ? aheadFor(bundle, month, monthPlan) : null,
   };
 }
 
@@ -1014,5 +1037,45 @@ export async function getRecap(ctx: Ctx, weeksBack = 0): Promise<RecapPayload> {
     billsPaid: { count: bills.length, total: bills.reduce((s, t) => s - t.amount, 0) },
     savedToGoals: rows.filter((t) => t.date >= from && savingsIds.has(t.accountId)).reduce((s, t) => s + t.amount, 0),
     netWorthChange: start && end ? end.net - start.net : null,
+    ahead: weeksBack === 0 ? await weekAhead(ctx, bundle) : null,
+  };
+}
+
+/** The Monday a week starts on: the key a weekly review is done for. */
+export function weekKey(today: ISODate): ISODate {
+  return addDays(today, -((weekday(today) + 6) % 7));
+}
+
+/**
+ * The weekly review's look ahead: the next seven days' bills and paychecks, what's left to spend, budgets
+ * to watch, the no-spend week if it's near, and the few things worth a tap (charges still in "Everything
+ * else", last month's leftover to put in savings).
+ */
+async function weekAhead(ctx: Ctx, bundle: RecurringBundle): Promise<NonNullable<RecapPayload["ahead"]>> {
+  const to = addDays(ctx.today, 6);
+  const [overview, [{ unsorted }], [done]] = await Promise.all([
+    getOverview(ctx),
+    ctx.db
+      .select({ unsorted: sql<number>`count(*)::int` })
+      .from(transactions)
+      .where(and(eq(transactions.userId, ctx.userId), eq(transactions.category, "other"), sql`${transactions.amount} < 0`, gte(transactions.date, addDays(ctx.today, -30)))),
+    ctx.db.select({ id: playerWins.id }).from(playerWins).where(and(eq(playerWins.userId, ctx.userId), eq(playerWins.kind, "review"), eq(playerWins.ref, weekKey(ctx.today)))).limit(1),
+  ]);
+  const months = [monthOf(ctx.today), monthOf(to)];
+  const paychecks = [...new Set(months)].flatMap((m) => paychecksFor(bundle, m, ctx.today)).filter((p) => !p.received && p.date <= to);
+  const ns = overview.noSpend;
+  return {
+    from: ctx.today,
+    to,
+    leftToSpend: overview.plan.leftToSpend,
+    perDay: overview.plan.perDay,
+    bills: upcomingBills(bundle, ctx.today, 6).map((b) => ({ name: b.name, date: b.date, amount: b.amount })),
+    paychecks: paychecks.map((p) => ({ name: p.name, date: p.date, amount: p.amount })),
+    budgetsOver: overview.budget.rows.filter((r) => r.status === "over").map((r) => category(r.category).label),
+    budgetsHeading: overview.budget.rows.filter((r) => r.status === "watch").map((r) => category(r.category).label),
+    noSpend: ns && ns.phase !== "done" ? { start: ns.start, end: ns.end, phase: ns.phase } : null,
+    unsorted: Number(unsorted),
+    leftover: ns && ns.phase === "done" && ns.leftover > 0 ? ns.leftover : null,
+    reviewed: !!done,
   };
 }

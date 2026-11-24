@@ -70,6 +70,13 @@ for it to be remembered and used whenever an app is built.
   is shown as "Round-up from/for <store>" (`isRoundUp`, `roundUpName`), a day's are grouped into one line,
   and they're kept off Home's latest. **A goal can follow a savings account** (`goals.account_id`): its
   balance is what's saved and the money moving in and out is its track; nothing is added by hand.
+- **Month ahead** (Budget, this month and later): the month split at each payday, with money in, bills
+  and everyday spending, spent so far then forecast from the last three months' pattern by thirds of the
+  month (front-loaded months forecast heavier early), nothing in the no-spend week, down to "about $X
+  left at the end of the month" (`src/lib/finance/forecast.ts`).
+- **Weekly review** (`/recap`, modelled on Tasks for Two's): last week, the week ahead (bills, paychecks,
+  left to spend, budgets to watch, the no-spend week) and a check-in list; "Finish my review" is a win
+  once a week (`review`, keyed by the week's Monday).
 - **The app has five places** (`src/components/nav.tsx`): Home, Spending, Bills, Wealth, You. No "More"
   menu. Spending switches Budget / Transactions with tabs under the title. **Wealth's four screens (Net
   worth, Savings, Investing, Debt payoff) each stand on their own**, with their own title and no tabs, as

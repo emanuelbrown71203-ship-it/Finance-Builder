@@ -115,7 +115,7 @@ export default function YouPage() {
 
         <Sheet>
           <ul>
-            <Row href="/recap" icon={CalendarCheck} title="Weekly recap" detail="Last week in money: spent, saved and paid" badge={recapNew ? <Tag tone="sky">New</Tag> : undefined} />
+            <Row href="/recap" icon={CalendarCheck} title="Weekly review" detail="Last week in money, the week ahead, and a quick check-in" badge={recapNew ? <Tag tone="sky">New</Tag> : undefined} />
             <Row href="/accounts" icon={Landmark} title="Accounts" detail={banks > 0 ? `${banks} ${banks === 1 ? "bank" : "banks"} linked` : "Link a bank, card or lender"} />
             <Row href="/transactions/names" icon={PencilLine} title="Names" detail="Charges you’ve renamed, and bank code to tidy" />
             <Row href="/settings/activity" icon={History} title="Activity" detail="What Nickel and Claude changed for you, with Undo" />

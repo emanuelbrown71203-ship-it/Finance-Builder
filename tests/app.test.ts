@@ -10,14 +10,14 @@ import { goals as goalsTable, accounts as accountsTable, budgets as budgetsTable
 import { importAppleCard, previewAppleCard, undoAppleCardImport } from "@/server/card-import";
 import { contextForTapKey, createTapKey, recordTap, revokeTapKey, tapStatus } from "@/server/card-taps";
 import { signOutEverywhere } from "@/server/auth";
-import { checkIn } from "@/server/game";
+import { checkIn, win } from "@/server/game";
 import { POST as tapRoute } from "@/app/api/tap/[key]/route";
 import { and, eq as eqOp, inArray as inArrayOp } from "drizzle-orm";
 import { addBill, addGoal, addToGoal, changeGoal, changeLoan, findCharge, findDebt, findGoal, listActivity, renameCharges, undoActivity } from "@/server/actions";
 import { bankMatch, createManualBill, deleteManualBill, manualSeries, nextDue, restoreManualBill, updateManualBill } from "@/server/manual-bills";
 import { upcomingBetween } from "@/lib/finance/recurring";
 import { askNickel } from "@/server/nickel";
-import { getAccounts, getBudget, getDebt, getGoal, getGoals, getInvestments, getNetWorth, getOverview, getRecap, getRecurring, getTransactions } from "@/server/queries";
+import { getAccounts, getBudget, getDebt, getGoal, getGoals, getInvestments, getNetWorth, getOverview, getRecap, getRecurring, getTransactions, weekKey } from "@/server/queries";
 
 /** End-to-end over the real SQL: seed the sample household into PGlite, then read it back. */
 const today = "2026-11-19";
@@ -396,6 +396,24 @@ describe("sample household", () => {
     } finally {
       await db.delete(goalsTable).where(eqOp(goalsTable.id, id));
     }
+  });
+
+  it("adds the week ahead and a check-in to the weekly review, and finishing it is a win once a week", async () => {
+    const r = await getRecap(ctx, 0);
+    const a = r.ahead!;
+    expect(a).toMatchObject({ from: today, to: "2026-11-25", reviewed: false });
+    expect(a.leftToSpend).toBe((await getOverview(ctx)).plan.leftToSpend);
+    expect(a.bills.every((b) => b.date >= today && b.date <= "2026-11-25")).toBe(true);
+    expect(a.paychecks.every((p) => p.date >= today && p.date <= "2026-11-25")).toBe(true);
+    expect(typeof a.unsorted).toBe("number");
+    // Only the most recent week looks ahead.
+    expect((await getRecap(ctx, 1)).ahead).toBeNull();
+    const key = weekKey(today);
+    expect(key).toBe("2026-11-16");
+    expect(await win(ctx, "review", key, "Week of Nov 16")).toBe(true);
+    expect(await win(ctx, "review", key, "Week of Nov 16")).toBe(false);
+    expect((await getRecap(ctx, 0)).ahead!.reviewed).toBe(true);
+    await db.delete(playerWinsTable).where(and(eqOp(playerWinsTable.userId, DEMO_USER_ID), eqOp(playerWinsTable.kind, "review")));
   });
 
   it("recaps last week, Monday to Sunday", async () => {

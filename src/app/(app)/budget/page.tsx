@@ -16,7 +16,7 @@ import { BUDGET_CATEGORIES, SPENDING_CATEGORIES, category } from "@/lib/categori
 import { TxList } from "@/components/transactions";
 import { GoalDialog, type GoalSheet } from "@/components/goals";
 import { PixelIcon } from "@/components/pixel-icons";
-import { addMonthsToMonth, formatShort, monthEnd, monthName, monthOf } from "@/lib/dates";
+import { addMonthsToMonth, dayOfMonth, formatShort, monthEnd, monthName, monthOf } from "@/lib/dates";
 import { WINS } from "@/lib/game/progress";
 import { dollars, dollarsExact, parseDollarsToCents } from "@/lib/money";
 import type { BudgetPayload, BudgetRow, Me, TransactionsPayload } from "@/lib/types";
@@ -148,6 +148,55 @@ function PlanCard({ data, onPaychecks }: { data: BudgetPayload; onPaychecks: () 
       </dl>
       {data.isCurrent && p.unplanned > 2000 && limited.length > 0 && <p className="mt-2 rounded-control bg-sunk px-3.5 py-3 text-small text-ink-2">{dollars(p.unplanned)} has no job yet. Raise a limit, or put it toward a goal in Wealth.</p>}
       {data.isCurrent && p.unplanned < 0 && <p className="mt-2 rounded-control bg-pink px-3.5 py-3 text-small text-pink-ink">Your plan asks for {dollars(-p.unplanned)} more than comes in this month. Lowering a limit or two would close the gap.</p>}
+    </Sheet>
+  );
+}
+
+/**
+ * The month ahead, split at each payday: what comes in, bills due, and everyday spending (spent so far,
+ * then a forecast from the usual pattern, with nothing planned for the no-spend week), down to what's
+ * likely left at the month's end.
+ */
+function MonthAheadCard({ data, ahead }: { data: BudgetPayload; ahead: NonNullable<BudgetPayload["ahead"]> }) {
+  const month = monthName(data.month);
+  const range = (a: string, b: string) => (a === b ? formatShort(a) : `${formatShort(a)} – ${dayOfMonth(b)}`);
+  return (
+    <Sheet>
+      <SheetHeader title="Month ahead" hint="Split at each payday. Spending after today is a forecast from how you usually spend; the no-spend week is planned at $0." />
+      <ol className="flex flex-col gap-2">
+        {ahead.periods.map((p) => (
+          <li key={p.start} className={cx("rounded-2xl border px-3 py-2.5", p.noSpend ? "border-mint-ink/30 bg-mint/40" : "border-line-soft")}>
+            <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+              <span className="font-bold">{range(p.start, p.end)}</span>
+              <span className="flex flex-wrap gap-1.5">
+                {p.paycheck ? <Tag tone={p.paycheck.expected ? "sky" : "mint"}>{p.paycheck.expected ? "Payday" : "Paid"} {dollars(p.paycheck.amount)}</Tag> : <Tag>Before payday</Tag>}
+                {p.noSpend && <Tag tone="mint">No-spend week</Tag>}
+              </span>
+            </div>
+            <dl className="mt-2 grid grid-cols-3 gap-2 text-center">
+              {[
+                { label: "In", value: p.income, sign: "+" },
+                { label: "Bills", value: p.bills, sign: "−" },
+                { label: p.forecast > 0 && p.everyday === p.forecast ? "Spending (likely)" : p.forecast > 0 ? "Spending + likely" : "Spending", value: p.everyday, sign: "−" },
+              ].map((x) => (
+                <div key={x.label} className="min-w-0">
+                  <dt className="truncate text-micro text-ink-3">{x.label}</dt>
+                  <dd className="tabular font-bold">{x.value > 0 ? `${x.sign}${dollars(x.value)}` : "$0"}</dd>
+                </div>
+              ))}
+            </dl>
+          </li>
+        ))}
+      </ol>
+      <div className={cx("mt-3 rounded-2xl px-4 py-3", ahead.forecastLeft >= 0 ? "bg-mint text-mint-ink" : "bg-pink text-pink-ink")}>
+        <p className="font-bold">
+          {ahead.forecastLeft >= 0 ? `About ${dollars(ahead.forecastLeft)} left at the end of ${month}` : `About ${dollars(-ahead.forecastLeft)} short by the end of ${month}`}
+        </p>
+        <p className="mt-0.5 text-small">
+          {ahead.forecast > 0 ? `If you spend like usual: ${dollars(ahead.leftNow)} left to spend now, less about ${dollars(ahead.forecast)} more spending. ` : ""}
+          {ahead.forecastLeft > 0 ? "That’s what can go to savings." : "Skipping a few buys before the no-spend week closes the gap."}
+        </p>
+      </div>
     </Sheet>
   );
 }
@@ -682,6 +731,7 @@ function Budget() {
             </Sheet>
           )}
           <PlanCard data={data} onPaychecks={() => setPaychecksOpen(true)} />
+          {data.ahead && <MonthAheadCard data={data} ahead={data.ahead} />}
           {data.monthPlan && (
             <Sheet>
               <SheetHeader title="Spending pace" hint="What’s left to spend as the month goes on, against spending it evenly." />
