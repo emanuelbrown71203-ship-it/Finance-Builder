@@ -14,7 +14,7 @@ import { send, useApi, useNow } from "./use-api";
  * Passbook is on the home screen and opened from there.
  */
 
-type PushInfo = { key: string; demo: boolean; devices: PushDevice[]; settings: NotifySettings };
+type PushInfo = { key: string; demo: boolean; devices: PushDevice[]; removed: string[]; settings: NotifySettings };
 type DeviceState = "loading" | "unsupported" | "home-screen" | "denied" | "off" | "on";
 
 const fail = (e: unknown) => toast(e instanceof Error ? e.message : "Something went wrong. Try again.", { tone: "error" });
@@ -103,7 +103,8 @@ export function PushKeeper() {
         // Made with an old key, it can't be sent to: Settings shows it off, to be switched on again there.
         if (info.demo || !sameKey(sub, info.key)) return;
         const match = await matchOf(sub.endpoint);
-        if (!info.devices.some((d) => d.match === match)) await send("POST", "/api/push", { subscription: sub.toJSON(), label: deviceLabel(), auto: true });
+        // Removed from the list on another device: it stays off until switched on here, in Settings.
+        if (!info.devices.some((d) => d.match === match) && !info.removed.includes(match)) await send("POST", "/api/push", { subscription: sub.toJSON(), label: deviceLabel(), auto: true });
       } catch {
         // Tried again next time.
       }

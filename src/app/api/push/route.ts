@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { readBody, withUser } from "@/server/http";
-import { addDevice, getNotifySettings, listDevices, removeDevice, setNotifySettings } from "@/server/notifications";
+import { addDevice, getNotifySettings, listDevices, removedDevices, removeDevice, setNotifySettings } from "@/server/notifications";
 import { clientAddress, limitKey } from "@/server/rate-limit";
 import { vapidPublicKey } from "@/server/webpush";
 
@@ -14,6 +14,8 @@ export const GET = withUser(async (ctx) => ({
   /** The sample household is shared, so its devices are never listed. */
   demo: ctx.demo,
   devices: await listDevices(ctx),
+  /** Devices removed from the list: the app on one of them doesn't put itself back. */
+  removed: await removedDevices(ctx),
   settings: await getNotifySettings(ctx.db, ctx.userId),
 }));
 
@@ -26,13 +28,15 @@ const Subscription = z.object({
   label: z.string().trim().min(1).max(40).regex(/^[\p{L}\p{N} .,'()-]+$/u),
   /** The app putting back a device the server lost, rather than the person turning it on. */
   auto: z.boolean().optional(),
+  /** The push address this one takes over from, when the browser renewed it. */
+  replaces: z.string().url().max(1000).optional(),
 });
 
 /** Turns notifications on for this device. */
 export const POST = withUser(async (ctx, request) => {
   await limitKey("push-add", ctx.demo ? clientAddress(request) : ctx.userId, 20, 60 * 60_000);
-  const { subscription, label, auto } = await readBody(request, Subscription);
-  await addDevice(ctx, subscription, label, { auto });
+  const { subscription, label, auto, replaces } = await readBody(request, Subscription);
+  await addDevice(ctx, subscription, label, { auto, replaces });
   return { ok: true };
 });
 

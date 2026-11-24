@@ -1,5 +1,5 @@
 {
-  "id": "3720f3e9-cd8d-4118-8740-ff52775c6a99",
+  "id": "37be2718-d313-410c-ac7a-b9c935f6b966",
   "prevId": "9fcb8564-3eff-47ba-80de-da2919218424",
   "version": "7",
   "dialect": "postgresql",
@@ -2035,6 +2035,80 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
+    "public.push_removed": {
+      "name": "push_removed",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "endpoint_hash": {
+          "name": "endpoint_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "push_removed_idx": {
+          "name": "push_removed_idx",
+          "columns": [
+            {
+              "expression": "user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "endpoint_hash",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "push_removed_user_id_users_id_fk": {
+          "name": "push_removed_user_id_users_id_fk",
+          "tableFrom": "push_removed",
+          "tableTo": "users",
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
     "public.push_subscriptions": {
       "name": "push_subscriptions",
       "schema": "",
@@ -2072,12 +2146,6 @@
         "session_id": {
           "name": "session_id",
           "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "removed_at": {
-          "name": "removed_at",
-          "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
         },

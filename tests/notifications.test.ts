@@ -2,15 +2,15 @@ import { createDecipheriv, createECDH, createHmac } from "node:crypto";
 import { and, eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { getDb, type DB } from "@/db";
-import { accounts, notificationsSent, pushSubscriptions, recurringOverrides, sessions, transactions, userSettings, users } from "@/db/schema";
+import { accounts, notificationsSent, pushRemoved, pushSubscriptions, recurringOverrides, sessions, transactions, userSettings, users } from "@/db/schema";
 import { seedDemo } from "@/db/seed";
-import { DEMO_USER_ID } from "@/lib/config";
+import { DEMO_USER_ID, SESSION_COOKIE } from "@/lib/config";
 import { billPaidNote, lowBalanceNote, noSpendStartNote, reviewNote, whenDue } from "@/lib/notifications";
 import type { Ctx } from "@/server/auth";
-import { signOutEverywhere } from "@/server/auth";
+import { endSession, signOutEverywhere } from "@/server/auth";
 import { sha256 } from "@/server/crypto";
 import { setRecurringOverride } from "@/server/mutations";
-import { addDevice, afterSync, getNotifySettings, listDevices, morningNotes, removeDevice, sendTest, setNotifySettings } from "@/server/notifications";
+import { addDevice, afterSync, getNotifySettings, listDevices, morningNotes, removedDevices, removeDevice, sendTest, setNotifySettings } from "@/server/notifications";
 import { getRecurring, notifyFacts } from "@/server/queries";
 
 /* ---------- what each note says ---------- */
@@ -105,6 +105,7 @@ function service(status = 201) {
 
 async function clear() {
   await db.delete(pushSubscriptions).where(eq(pushSubscriptions.userId, DEMO_USER_ID));
+  await db.delete(pushRemoved).where(eq(pushRemoved.userId, DEMO_USER_ID));
   await db.delete(notificationsSent).where(eq(notificationsSent.userId, DEMO_USER_ID));
   await db.update(recurringOverrides).set({ notifyPaid: false }).where(eq(recurringOverrides.userId, DEMO_USER_ID));
   await db.delete(userSettings).where(eq(userSettings.userId, DEMO_USER_ID));
@@ -259,6 +260,10 @@ describe("phone notifications", () => {
     const last = p.read(push.sent[push.sent.length - 1].body);
     expect(last).toMatchObject({ title: "No-spend week starts today", url: "/" });
     expect(last.body).toMatch(/^Bills only through Nov 30\./);
+    // Not sent again on Tuesday: once a week.
+    const monday = push.sent.length;
+    await morningNotes(db, new Date("2026-11-24T13:30:00Z"), push.fetchImpl);
+    expect(push.sent.slice(monday).map((s) => p.read(s.body).title)).not.toContain("Your weekly review is ready");
     // Switched off: no review the next Monday.
     await setNotifySettings(me, { weeklyReview: false });
     const before = push.sent.length;
@@ -267,22 +272,32 @@ describe("phone notifications", () => {
     await clear();
   });
 
-  it("a device's notes end with its sign-in: signing out, or two weeks unused", async () => {
-    await addDevice(me, phone(1), "iPhone");
-    // Signing out ends the sign-in, and the device goes with it.
+  it("a device's notes end with its sign-in: signing out, a sign-in ended elsewhere, or two weeks unused", async () => {
+    // Signing out on the device: it's forgotten at once.
+    const token = "notify-test-token";
+    await db.insert(sessions).values({ id: sha256(token), userId: DEMO_USER_ID, expiresAt: new Date(Date.now() + 86_400_000) });
+    await addDevice({ ...me, sessionId: sha256(token) }, phone(1), "iPhone");
+    await endSession(db, new Request("http://localhost/api/auth/logout", { headers: { cookie: `${SESSION_COOKIE}=${token}` } }));
+    expect(await db.select().from(pushSubscriptions).where(eq(pushSubscriptions.userId, DEMO_USER_ID))).toHaveLength(0);
+
+    // A sign-in ended some other way (a new password on another device, the old ones cleared away).
+    await addDevice(me, phone(2), "iPhone");
     await db.delete(sessions).where(eq(sessions.id, SESSION));
     expect(await db.select().from(pushSubscriptions).where(eq(pushSubscriptions.userId, DEMO_USER_ID))).toHaveLength(0);
     await signIn();
-    // Unused for over two weeks: nothing is sent, and the device is forgotten.
-    await addDevice(me, phone(2), "iPhone");
+
+    // Unused for over two weeks: one last note with nothing about money in it, then it's forgotten.
+    const p = phone(3);
+    await addDevice(me, p, "iPhone");
     await db.update(sessions).set({ lastSeenAt: new Date(Date.now() - 15 * 86_400_000) }).where(eq(sessions.id, SESSION));
     const push = service();
     expect(await sendTest(me, undefined, push.fetchImpl)).toEqual({ sent: 0, devices: 0 });
-    expect(push.sent).toHaveLength(0);
+    expect(push.sent.map((x) => p.read(x.body))).toEqual([{ title: "Notifications are paused", body: "Your sign-in on this device has ended. Open Passbook and sign in to get notes again.", url: "/", tag: "paused" }]);
     expect(await db.select().from(pushSubscriptions).where(eq(pushSubscriptions.userId, DEMO_USER_ID))).toHaveLength(0);
     await db.update(sessions).set({ lastSeenAt: new Date() }).where(eq(sessions.id, SESSION));
+
     // Turning them on needs a sign-in (outside the sample household).
-    await expect(addDevice({ ...me, sessionId: undefined }, phone(3), "iPhone")).rejects.toThrow(/from the app itself/);
+    await expect(addDevice({ ...me, sessionId: undefined }, phone(4), "iPhone")).rejects.toThrow(/from the app itself/);
     await clear();
   });
 
@@ -297,9 +312,26 @@ describe("phone notifications", () => {
     // The app quietly putting it back is refused…
     await addDevice(me, p, "iPad", { auto: true });
     expect(await listDevices(me)).toHaveLength(0);
+    // It stays removed after that sign-in ends and a new one starts, and the app is told to leave it be.
+    await db.delete(sessions).where(eq(sessions.id, SESSION));
+    await signIn();
+    await addDevice(me, p, "iPad", { auto: true });
+    expect(await listDevices(me)).toHaveLength(0);
+    expect(await removedDevices(me)).toEqual([sha256(p.endpoint).slice(0, 16)]);
+    // A renewed push address for it is the same device: still off, under the new address too.
+    const renewed = phone(5);
+    await addDevice(me, renewed, "iPad", { auto: true, replaces: p.endpoint });
+    await addDevice(me, renewed, "iPad", { auto: true });
+    expect(await listDevices(me)).toHaveLength(0);
+    expect((await removedDevices(me)).sort()).toEqual([sha256(p.endpoint).slice(0, 16), sha256(renewed.endpoint).slice(0, 16)].sort());
     // …switching it on there works.
     await addDevice(me, p, "iPad");
     expect(await listDevices(me)).toHaveLength(1);
+    expect(await removedDevices(me)).toEqual([sha256(renewed.endpoint).slice(0, 16)]);
+    // And a renewed address takes over from the old one, rather than adding a second device.
+    await addDevice(me, renewed, "iPad", { replaces: p.endpoint });
+    const list = await listDevices(me);
+    expect(list.map((d) => d.match)).toEqual([sha256(renewed.endpoint).slice(0, 16)]);
     await clear();
   });
 
@@ -316,7 +348,7 @@ describe("phone notifications", () => {
     // And one visitor can't remove another's from a list.
     const [row] = await db.select().from(pushSubscriptions).where(eq(pushSubscriptions.endpointHash, sha256(theirs.endpoint)));
     await removeDevice(ctx, { id: row.id });
-    expect((await db.select().from(pushSubscriptions).where(eq(pushSubscriptions.id, row.id)))[0].removedAt).toBeNull();
+    expect(await db.select().from(pushSubscriptions).where(eq(pushSubscriptions.id, row.id))).toHaveLength(1);
     await clear();
   });
 

@@ -511,14 +511,24 @@ export const pushSubscriptions = pgTable(
      * or two weeks unused) the device stops getting notes. Null only for the sample household.
      */
     sessionId: text("session_id").references(() => sessions.id, { onDelete: "cascade" }),
-    /** Removed from the list on another device: it stays off until turned on again from the device itself. */
-    removedAt: timestamp("removed_at", { withTimezone: true }),
     createdAt: createdAt(),
     lastSentAt: timestamp("last_sent_at", { withTimezone: true }),
     /** Sends in a row the push service refused for a reason other than "gone". Too many and it's dropped. */
     failures: integer("failures").notNull().default(0),
   },
   (t) => [uniqueIndex("push_endpoint_idx").on(t.endpointHash), index("push_user_idx").on(t.userId)],
+);
+
+/** Devices removed from the list on another device: they stay off, across sign-ins, until switched on from the device itself. */
+export const pushRemoved = pgTable(
+  "push_removed",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    endpointHash: text("endpoint_hash").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex("push_removed_idx").on(t.userId, t.endpointHash)],
 );
 
 /** Each notification sent, so the same one ("Rent is paid", this week's review) never goes out twice. */

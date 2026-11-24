@@ -169,6 +169,7 @@ export async function signIn(input: { email: string; password: string }, request
 /** Ends the session this request came in on, if it has one. */
 export async function endSession(db: DB, request: Request | undefined): Promise<void> {
   const token = request ? readCookie(request, SESSION_COOKIE) : null;
+  // This device's notifications end with it (push_subscriptions.session_id cascades).
   if (token) await db.delete(sessions).where(eq(sessions.id, sha256(token)));
 }
 

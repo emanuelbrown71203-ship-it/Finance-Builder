@@ -1,6 +1,6 @@
-import { and, asc, eq, isNull, lt } from "drizzle-orm";
+import { and, asc, eq, inArray, lt } from "drizzle-orm";
 import type { DB } from "@/db";
-import { notificationsSent, pushSubscriptions, sessions, userSettings, users } from "@/db/schema";
+import { notificationsSent, pushRemoved, pushSubscriptions, sessions, userSettings, users } from "@/db/schema";
 import { DEFAULT_TIMEZONE, isDemoMode } from "@/lib/config";
 import { addDays, monthOf, todayIn, weekday } from "@/lib/dates";
 import { noSpendWeekOf } from "@/lib/finance/nospend";
@@ -36,14 +36,17 @@ export type PushDevice = { id: string; label: string; createdAt: string; lastSen
 /** A short fingerprint of a push address, so a browser can tell whether it's one of the devices listed. */
 const matchOf = (endpointHash: string) => endpointHash.slice(0, 16);
 
+/** Fingerprints of devices removed from the list, so the app on one of them doesn't keep asking to come back. */
+export async function removedDevices(ctx: Ctx): Promise<string[]> {
+  if (ctx.demo) return [];
+  const rows = await ctx.db.select({ endpointHash: pushRemoved.endpointHash }).from(pushRemoved).where(eq(pushRemoved.userId, ctx.userId));
+  return rows.map((r) => matchOf(r.endpointHash));
+}
+
 /** The person's devices. The sample household is shared by every visitor, so it never lists anyone's. */
 export async function listDevices(ctx: Ctx): Promise<PushDevice[]> {
   if (ctx.demo) return [];
-  const rows = await ctx.db
-    .select()
-    .from(pushSubscriptions)
-    .where(and(eq(pushSubscriptions.userId, ctx.userId), isNull(pushSubscriptions.removedAt)))
-    .orderBy(asc(pushSubscriptions.createdAt));
+  const rows = await ctx.db.select().from(pushSubscriptions).where(eq(pushSubscriptions.userId, ctx.userId)).orderBy(asc(pushSubscriptions.createdAt));
   return rows.map((r) => ({ id: r.id, label: r.label, createdAt: r.createdAt.toISOString(), lastSentAt: r.lastSentAt?.toISOString() ?? null, match: matchOf(r.endpointHash) }));
 }
 
@@ -52,20 +55,32 @@ export async function listDevices(ctx: Ctx): Promise<PushDevice[]> {
  * on last. `auto` is the app quietly putting back a device the server lost (after signing in again): it
  * never brings back one that was removed from the list.
  */
-export async function addDevice(ctx: Ctx, target: PushTarget, label: string, options: { auto?: boolean } = {}): Promise<void> {
+export async function addDevice(ctx: Ctx, target: PushTarget, label: string, options: { auto?: boolean; replaces?: string } = {}): Promise<void> {
   if (!isPushEndpoint(target.endpoint) || !isPushKeys(target.keys)) throw new HttpError(400, "This browser’s notification setup wasn’t recognised.");
   if (!ctx.demo && !ctx.sessionId) throw new HttpError(400, "Notifications are turned on from the app itself.");
   const endpointHash = sha256(target.endpoint);
+  // The browser gave this device a new push address: the old one is the same device.
+  const oldHash = options.replaces && options.replaces !== target.endpoint ? sha256(options.replaces) : null;
+  const hashes = oldHash ? [endpointHash, oldHash] : [endpointHash];
+  const removedMark = and(eq(pushRemoved.userId, ctx.userId), inArray(pushRemoved.endpointHash, hashes));
   if (options.auto) {
-    const [row] = await ctx.db.select({ userId: pushSubscriptions.userId, removedAt: pushSubscriptions.removedAt }).from(pushSubscriptions).where(eq(pushSubscriptions.endpointHash, endpointHash)).limit(1);
-    if (row?.removedAt && row.userId === ctx.userId) return;
+    // Removed from the list on another device: the app doesn't put it back by itself. A renewed address for
+    // it is marked too, so it stays off under that one as well.
+    if ((await ctx.db.select({ id: pushRemoved.id }).from(pushRemoved).where(removedMark).limit(1)).length) {
+      if (oldHash) await ctx.db.insert(pushRemoved).values({ id: crypto.randomUUID(), userId: ctx.userId, endpointHash }).onConflictDoNothing();
+      return;
+    }
+  } else {
+    // Switched on from the device itself: any "removed" mark goes.
+    await ctx.db.delete(pushRemoved).where(removedMark);
   }
+  if (oldHash) await ctx.db.delete(pushSubscriptions).where(and(eq(pushSubscriptions.userId, ctx.userId), eq(pushSubscriptions.endpointHash, oldHash)));
   const subscriptionEnc = encryptSecret(JSON.stringify({ endpoint: target.endpoint, keys: target.keys }), owner(ctx.userId));
   const sessionId = ctx.sessionId ?? null;
   await ctx.db
     .insert(pushSubscriptions)
     .values({ id: crypto.randomUUID(), userId: ctx.userId, endpointHash, subscriptionEnc, label, sessionId })
-    .onConflictDoUpdate({ target: pushSubscriptions.endpointHash, set: { userId: ctx.userId, subscriptionEnc, label, sessionId, failures: 0, removedAt: null, lastSentAt: null } });
+    .onConflictDoUpdate({ target: pushSubscriptions.endpointHash, set: { userId: ctx.userId, subscriptionEnc, label, sessionId, failures: 0, lastSentAt: null } });
   const rows = await ctx.db.select({ id: pushSubscriptions.id }).from(pushSubscriptions).where(eq(pushSubscriptions.userId, ctx.userId)).orderBy(asc(pushSubscriptions.createdAt));
   const extra = rows.slice(0, Math.max(0, rows.length - MAX_DEVICES)).map((r) => r.id);
   for (const id of extra) await ctx.db.delete(pushSubscriptions).where(and(eq(pushSubscriptions.userId, ctx.userId), eq(pushSubscriptions.id, id)));
@@ -77,8 +92,14 @@ export async function addDevice(ctx: Ctx, target: PushTarget, label: string, opt
  */
 export async function removeDevice(ctx: Ctx, by: { endpoint?: string; id?: string }): Promise<void> {
   const mine = eq(pushSubscriptions.userId, ctx.userId);
-  if (by.endpoint) await ctx.db.delete(pushSubscriptions).where(and(mine, eq(pushSubscriptions.endpointHash, sha256(by.endpoint))));
-  else if (by.id && !ctx.demo) await ctx.db.update(pushSubscriptions).set({ removedAt: new Date() }).where(and(mine, eq(pushSubscriptions.id, by.id)));
+  if (by.endpoint) {
+    await ctx.db.delete(pushSubscriptions).where(and(mine, eq(pushSubscriptions.endpointHash, sha256(by.endpoint))));
+  } else if (by.id && !ctx.demo) {
+    const [row] = await ctx.db.select({ endpointHash: pushSubscriptions.endpointHash }).from(pushSubscriptions).where(and(mine, eq(pushSubscriptions.id, by.id))).limit(1);
+    if (!row) return;
+    await ctx.db.insert(pushRemoved).values({ id: crypto.randomUUID(), userId: ctx.userId, endpointHash: row.endpointHash }).onConflictDoNothing();
+    await ctx.db.delete(pushSubscriptions).where(and(mine, eq(pushSubscriptions.id, by.id)));
+  }
 }
 
 export async function getNotifySettings(db: DB, userId: string): Promise<NotifySettings> {
@@ -102,7 +123,15 @@ export async function setNotifySettings(ctx: Ctx, patch: Partial<NotifySettings>
 }
 
 /** How long a push service gets for all of one note's devices together. */
-const SEND_DEADLINE_MS = 12_000;
+const SEND_DEADLINE_MS = 8_000;
+
+/** Sent once to a device whose sign-in has ended, just before it's forgotten. Nothing about money in it. */
+const PAUSED_NOTE = {
+  title: "Notifications are paused",
+  body: "Your sign-in on this device has ended. Open Passbook and sign in to get notes again.",
+  url: "/",
+  tag: "paused",
+};
 
 /**
  * Sends a note to the person's devices: every one still signed in (a device whose sign-in has ended is
@@ -124,10 +153,21 @@ export async function deliver(
     .select({ device: pushSubscriptions, sessionExpires: sessions.expiresAt, sessionSeen: sessions.lastSeenAt })
     .from(pushSubscriptions)
     .leftJoin(sessions, eq(sessions.id, pushSubscriptions.sessionId))
-    .where(and(mine, isNull(pushSubscriptions.removedAt), options.onlyEndpoint ? eq(pushSubscriptions.endpointHash, sha256(options.onlyEndpoint)) : undefined));
-  // A sign-in that has run out or sat unused too long can't be used again, so its device is done too.
+    .where(and(mine, options.onlyEndpoint ? eq(pushSubscriptions.endpointHash, sha256(options.onlyEndpoint)) : undefined));
+  // A sign-in that has run out or sat unused too long can't be used again, so its device is done too: it
+  // gets one last note saying so (nothing about money in it), and is forgotten. (A deleted sign-in takes
+  // its devices with it; the sample household has no sign-ins.)
   const ended = rows.filter((r) => r.device.sessionId !== null && (!r.sessionExpires || r.sessionExpires <= now || !r.sessionSeen || now.getTime() - r.sessionSeen.getTime() > IDLE_DAYS * 86_400_000));
   for (const r of ended) await db.delete(pushSubscriptions).where(and(mine, eq(pushSubscriptions.id, r.device.id)));
+  await Promise.all(
+    ended.map(async (r) => {
+      try {
+        await withDeadline(sendPush(JSON.parse(decryptSecret(r.device.subscriptionEnc, owner(userId))), PAUSED_NOTE, { ttl: 86_400 }, fetchImpl));
+      } catch {
+        // Unreadable: it's forgotten all the same.
+      }
+    }),
+  );
   const devices = rows.filter((r) => !ended.includes(r)).map((r) => r.device);
   if (devices.length === 0) return { sent: 0, devices: 0 };
 
@@ -147,8 +187,7 @@ export async function deliver(
       } catch {
         return "unreadable";
       }
-      const timeout = new Promise<PushResult>((resolve) => setTimeout(() => resolve("failed"), SEND_DEADLINE_MS).unref?.());
-      return Promise.race([sendPush(target, { title: note.title, body: note.body, url: note.url, tag: note.tag }, { ttl: options.ttl, urgency: options.urgency }, fetchImpl), timeout]);
+      return withDeadline(sendPush(target, { title: note.title, body: note.body, url: note.url, tag: note.tag }, { ttl: options.ttl, urgency: options.urgency }, fetchImpl));
     }),
   );
   let sent = 0;
@@ -169,6 +208,16 @@ export async function deliver(
   }
   if (sentId && sent === 0 && failed > 0) await db.delete(notificationsSent).where(eq(notificationsSent.id, sentId));
   return { sent, devices: devices.length };
+}
+
+/** A send, given up on (as "failed") if the push service hasn't answered in time. */
+async function withDeadline(send: Promise<PushResult>): Promise<PushResult> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([send, new Promise<PushResult>((resolve) => (timer = setTimeout(() => resolve("failed"), SEND_DEADLINE_MS)))]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /**
@@ -207,18 +256,25 @@ export async function afterSync(db: DB, userId: string, now: Date = new Date(), 
   await asUser(db, userId, now, (ctx) => billNotes(ctx, settings, fetchImpl));
 }
 
+/** How long the morning run keeps starting on people, inside its 60 seconds. */
+const MORNING_BUDGET_MS = 30_000;
+
 /**
  * Each morning (the scheduled run): the same checks as after a sync, in case the bank was quiet, then
  * Monday's weekly review and the no-spend week's first day. Old "sent" records are tidied away.
  */
 export async function morningNotes(db: DB, now: Date = new Date(), fetchImpl: typeof fetch = fetch): Promise<{ people: number }> {
   const people = [...new Set((await db.select({ userId: pushSubscriptions.userId }).from(pushSubscriptions)).map((r) => r.userId))];
+  const started = Date.now();
   for (const userId of people) {
+    // Within the run's time limit: anyone not reached is reached by tomorrow's run (or the next bank sync).
+    if (Date.now() - started > MORNING_BUDGET_MS) break;
     try {
       const settings = await getNotifySettings(db, userId);
       await asUser(db, userId, now, async (ctx) => {
         await billNotes(ctx, settings, fetchImpl);
-        if (settings.weeklyReview && weekday(ctx.today) === 1) {
+        // Monday, or Tuesday if Monday's run didn't reach them (it's sent once a week either way).
+        if (settings.weeklyReview && (weekday(ctx.today) === 1 || weekday(ctx.today) === 2)) {
           const recap = await getRecap(ctx);
           await deliver(db, userId, reviewNote({ week: weekKey(ctx.today), spent: recap.spent, spentBefore: recap.spentBefore }, settings.amounts), { ttl: 12 * 3600 }, fetchImpl);
         }

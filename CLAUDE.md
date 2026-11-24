@@ -150,9 +150,10 @@ for it to be remembered and used whenever an app is built.
   (`derivedKey`), device addresses are stored encrypted (`push:<user>`), and notes only ever go to the
   browsers' own push services (`isPushEndpoint`). **A device's notes end with the sign-in it was turned on
   from** (`push_subscriptions.session_id`, cascades; an expired or idle sign-in's device is dropped when
-  sending): signing out, sign out everywhere, a new password (other devices) or two weeks unused. Signing in
-  again quietly puts a device back (`PushKeeper`, `auto`), except one removed from the list on another
-  device (`removed_at`). "Show amounts" off leaves every dollar figure out (notes show on the lock screen).
+  sending, after one last "Notifications are paused" note): signing out, sign out everywhere, a new password
+  (other devices) or two weeks unused. Signing in again quietly puts a device back (`PushKeeper`, `auto`),
+  except one removed from the list on another device (`push_removed`, kept across sign-ins; a renewed push
+  address sends the one it `replaces`). "Show amounts" off leaves every dollar figure out (notes show on the lock screen).
   Notes are worked out after a sync (webhook, or `after()` on refresh), never inside `syncItem`.
   `public/sw.js` only shows notes and opens a screen on this site (`safeUrl`): it never caches. On an
   iPhone, notifications need Passbook on the home screen. The sample household (shared by every visitor)
