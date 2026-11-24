@@ -1,6 +1,6 @@
 import { and, eq, gt, lt, ne } from "drizzle-orm";
 import { getDb, type DB } from "@/db";
-import { connectorTokens, sessions, tapKeys, users } from "@/db/schema";
+import { connectorTokens, pushSubscriptions, sessions, tapKeys, users } from "@/db/schema";
 import { DEFAULT_TIMEZONE, DEMO_USER_ID, SESSION_COOKIE, isDemoMode } from "@/lib/config";
 import { isValidTimeZone, todayIn, type ISODate } from "@/lib/dates";
 import { hashPassword, passwordNeedsUpgrade, randomToken, sha256, verifyPassword } from "./crypto";
@@ -10,7 +10,7 @@ import { limitKey } from "./rate-limit";
 
 /** A session ends 30 days after sign-in at the latest, or after 14 days without being used. */
 const SESSION_DAYS = 30;
-const IDLE_DAYS = 14;
+export const IDLE_DAYS = 14;
 
 export type Ctx = {
   db: DB;
@@ -88,6 +88,8 @@ export async function signOutEverywhere(ctx: Ctx): Promise<string> {
   await ctx.db.delete(sessions).where(eq(sessions.userId, ctx.userId));
   await ctx.db.delete(connectorTokens).where(eq(connectorTokens.userId, ctx.userId));
   await ctx.db.delete(tapKeys).where(eq(tapKeys.userId, ctx.userId));
+  // A lost phone stops showing notifications too. Devices still signed in turn theirs back on by themselves.
+  await ctx.db.delete(pushSubscriptions).where(eq(pushSubscriptions.userId, ctx.userId));
   return sessionCookie("", 0);
 }
 
@@ -117,6 +119,7 @@ export async function changePassword(ctx: Ctx, current: string, next: string): P
   // A password is changed when someone else may have had it. Whatever they set up while they did goes too.
   await ctx.db.delete(connectorTokens).where(eq(connectorTokens.userId, ctx.userId));
   await ctx.db.delete(tapKeys).where(eq(tapKeys.userId, ctx.userId));
+  // The other devices' notifications ended with their sign-ins; this one keeps its own.
   await ctx.db.update(sessions).set({ authAt: new Date() }).where(eq(sessions.id, ctx.sessionId));
 }
 

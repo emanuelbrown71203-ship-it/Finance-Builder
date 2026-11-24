@@ -22,5 +22,6 @@ export function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!api|_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|ico|webmanifest)$).*)"],
+  // sw.js is the notifications helper: the phone fetches it on its own and it holds nothing private.
+  matcher: ["/((?!api|_next/static|_next/image|favicon.ico|sw\\.js$|.*\\.(?:svg|png|ico|webmanifest)$).*)"],
 };

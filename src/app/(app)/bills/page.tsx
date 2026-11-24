@@ -1,6 +1,7 @@
 "use client";
 
 import { XpTag } from "@/components/game/level";
+import { NotifyPaidRow } from "@/components/push";
 import { WINS } from "@/lib/game/progress";
 import { ExternalLink, PencilLine, Plus } from "lucide-react";
 import { Suspense, useEffect, useState } from "react";
@@ -301,6 +302,8 @@ function SeriesDialog({ series, today, onClose: close }: { series: RecurringView
           </div>
 
           {series.kind === "bill" && <ShareControl key={`${series.key}:${series.share}`} series={series} />}
+
+          {series.kind !== "income" && series.active && !series.cancelled && <NotifyPaidRow key={`${series.key}:${series.notifyPaid}`} series={series} />}
 
           {series.kind === "subscription" && !series.cancelled && <CancelHelpBox name={series.name} help={series.help} />}
 

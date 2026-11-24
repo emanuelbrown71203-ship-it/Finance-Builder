@@ -2,6 +2,7 @@
 
 import { KeyRound, LogOut } from "lucide-react";
 import { useState } from "react";
+import { NotificationsSection, forgetThisDevice } from "@/components/push";
 import { ChangePasswordDialog } from "@/components/reauth";
 import { CelebrationsRow, ClaudeSection, NickelSection, PasskeySection, RulesSection, SoundsRow, TasksSection } from "@/components/settings-sections";
 import { Button, Fold, PageHeader, Segmented, Sheet, SheetHeader, confirm, toast } from "@/components/ui";
@@ -15,6 +16,8 @@ export default function SettingsPage() {
   const [changingPassword, setChangingPassword] = useState(false);
 
   const signOut = async () => {
+    // This device stops showing notes about the account once it's signed out.
+    await forgetThisDevice();
     await fetch("/api/auth/logout", { method: "POST" });
     // A full page load on purpose: it clears everything the signed-in session had cached.
     // eslint-disable-next-line @next/next/no-location-assign-relative-destination
@@ -56,6 +59,7 @@ export default function SettingsPage() {
           <SoundsRow />
         </Sheet>
 
+        <NotificationsSection />
         <NickelSection />
         <PasskeySection demo={me?.demo ?? true} />
         <ClaudeSection />

@@ -12,6 +12,7 @@ import { SecretFormatError, decryptSecret, encryptSecret, sha256 } from "./crypt
 import { HttpError, describeError } from "./errors";
 import { loadRules } from "./rules";
 import { checkBills } from "./tasks-link";
+import { afterSync } from "./notifications";
 
 /**
  * Bank connections through Plaid.
@@ -521,7 +522,7 @@ export async function verifyWebhook(rawBody: string, signedJwt: string | null): 
 
 export async function handleWebhook(db: DB, body: { webhook_type?: string; webhook_code?: string; item_id?: string; error?: { error_message?: string } | null }): Promise<void> {
   if (!body.item_id) return;
-  const [item] = await db.select({ id: items.id }).from(items).where(eq(items.plaidItemId, body.item_id)).limit(1);
+  const [item] = await db.select({ id: items.id, userId: items.userId }).from(items).where(eq(items.plaidItemId, body.item_id)).limit(1);
   if (!item) return;
 
   const code = body.webhook_code ?? "";
@@ -536,5 +537,8 @@ export async function handleWebhook(db: DB, body: { webhook_type?: string; webho
   // TRANSACTIONS: SYNC_UPDATES_AVAILABLE, HOLDINGS / LIABILITIES: DEFAULT_UPDATE.
   if (["TRANSACTIONS", "HOLDINGS", "INVESTMENTS_TRANSACTIONS", "LIABILITIES"].includes(body.webhook_type ?? "")) {
     await syncItem(db, item.id);
+    // Phone notifications: a followed bill just paid, or checking short for one coming up. (This already
+    // runs after Plaid has had its answer, so nothing waits on it.)
+    await afterSync(db, item.userId).catch((error) => console.error("Notifications failed:", describeError(error)));
   }
 }

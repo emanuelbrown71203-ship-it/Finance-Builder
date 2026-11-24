@@ -12,6 +12,8 @@ const Body = z.object({
   cancelled: z.boolean().optional(),
   /** A shared bill: the part that's yours, from 5% to all of it. Null is all of it. */
   share: z.number().min(0.05).max(1).nullable().optional(),
+  /** "Tell me when it's paid". */
+  notifyPaid: z.boolean().optional(),
 });
 
 export const PATCH = withUser(async (ctx, request) => {

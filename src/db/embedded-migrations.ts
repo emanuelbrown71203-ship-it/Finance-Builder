@@ -99,5 +99,18 @@ export const MIGRATION_STATEMENTS: string[] = [
   "ALTER TABLE \"goals\" ADD CONSTRAINT \"goals_account_id_accounts_id_fk\" FOREIGN KEY (\"account_id\") REFERENCES \"public\".\"accounts\"(\"id\") ON DELETE set null ON UPDATE no action;",
   "CREATE TABLE \"user_categories\" (\n\t\"key\" text PRIMARY KEY NOT NULL,\n\t\"user_id\" text NOT NULL,\n\t\"label\" text NOT NULL,\n\t\"icon\" text DEFAULT 'other' NOT NULL,\n\t\"created_at\" timestamp with time zone DEFAULT now() NOT NULL\n);",
   "ALTER TABLE \"user_categories\" ADD CONSTRAINT \"user_categories_user_id_users_id_fk\" FOREIGN KEY (\"user_id\") REFERENCES \"public\".\"users\"(\"id\") ON DELETE cascade ON UPDATE no action;",
-  "CREATE INDEX \"user_categories_user_idx\" ON \"user_categories\" USING btree (\"user_id\");"
+  "CREATE INDEX \"user_categories_user_idx\" ON \"user_categories\" USING btree (\"user_id\");",
+  "CREATE TABLE \"notifications_sent\" (\n\t\"id\" text PRIMARY KEY NOT NULL,\n\t\"user_id\" text NOT NULL,\n\t\"ref\" text NOT NULL,\n\t\"sent_at\" timestamp with time zone DEFAULT now() NOT NULL\n);",
+  "CREATE TABLE \"push_subscriptions\" (\n\t\"id\" text PRIMARY KEY NOT NULL,\n\t\"user_id\" text NOT NULL,\n\t\"endpoint_hash\" text NOT NULL,\n\t\"subscription_enc\" text NOT NULL,\n\t\"label\" text NOT NULL,\n\t\"session_id\" text,\n\t\"removed_at\" timestamp with time zone,\n\t\"created_at\" timestamp with time zone DEFAULT now() NOT NULL,\n\t\"last_sent_at\" timestamp with time zone,\n\t\"failures\" integer DEFAULT 0 NOT NULL\n);",
+  "ALTER TABLE \"recurring_overrides\" ADD COLUMN \"notify_paid\" boolean DEFAULT false NOT NULL;",
+  "ALTER TABLE \"user_settings\" ADD COLUMN \"notify_low_balance\" boolean DEFAULT true NOT NULL;",
+  "ALTER TABLE \"user_settings\" ADD COLUMN \"notify_weekly_review\" boolean DEFAULT true NOT NULL;",
+  "ALTER TABLE \"user_settings\" ADD COLUMN \"notify_no_spend\" boolean DEFAULT true NOT NULL;",
+  "ALTER TABLE \"user_settings\" ADD COLUMN \"notify_amounts\" boolean DEFAULT true NOT NULL;",
+  "ALTER TABLE \"notifications_sent\" ADD CONSTRAINT \"notifications_sent_user_id_users_id_fk\" FOREIGN KEY (\"user_id\") REFERENCES \"public\".\"users\"(\"id\") ON DELETE cascade ON UPDATE no action;",
+  "ALTER TABLE \"push_subscriptions\" ADD CONSTRAINT \"push_subscriptions_user_id_users_id_fk\" FOREIGN KEY (\"user_id\") REFERENCES \"public\".\"users\"(\"id\") ON DELETE cascade ON UPDATE no action;",
+  "ALTER TABLE \"push_subscriptions\" ADD CONSTRAINT \"push_subscriptions_session_id_sessions_id_fk\" FOREIGN KEY (\"session_id\") REFERENCES \"public\".\"sessions\"(\"id\") ON DELETE cascade ON UPDATE no action;",
+  "CREATE UNIQUE INDEX \"notifications_sent_ref_idx\" ON \"notifications_sent\" USING btree (\"user_id\",\"ref\");",
+  "CREATE UNIQUE INDEX \"push_endpoint_idx\" ON \"push_subscriptions\" USING btree (\"endpoint_hash\");",
+  "CREATE INDEX \"push_user_idx\" ON \"push_subscriptions\" USING btree (\"user_id\");"
 ];

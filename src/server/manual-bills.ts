@@ -208,6 +208,7 @@ export function manualSeries(bill: ManualBill, today: ISODate, bank: BankMatch =
     accountName: "",
     // A bill added by hand is already the amount the person pays.
     share: null,
+    notifyPaid: false,
     monthly: Math.abs(monthlyEquivalent(base)),
     cancelled: bill.cancelled,
     help: cancelHelp(bill.name),

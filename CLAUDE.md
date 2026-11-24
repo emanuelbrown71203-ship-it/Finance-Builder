@@ -138,6 +138,25 @@ for it to be remembered and used whenever an app is built.
   switches itself off after 180 days unused. A statement confirms each tap (same amount, within 3 days),
   keeping a category the person picked, and drops taps it shows never went through. The sample
   household has a test button instead of a link.
+- **Phone notifications** (web push from the home-screen app; `src/server/notifications.ts`, wording in
+  `src/lib/notifications.ts`): a bill the person follows is paid ("Tell me when it's paid" on the bill, or the
+  list in Settings: `recurring_overrides.notify_paid`, settled payments only, after each bank sync),
+  checking is short for bills it pays in the next 3 days (card-paid bills don't count, a card's minimum
+  does), Monday's weekly review, and the no-spend week's first day. The last three can be switched off
+  (`user_settings.notify_*`); the morning ones come from a daily Vercel cron (`vercel.json`,
+  `/api/cron/notify`, GET only because the scheduler can't POST, guarded by `CRON_SECRET`). Each note goes
+  out once (`notifications_sent`). Push is written out by hand in `src/server/webpush.ts` (RFC 8291/8292,
+  tested against the RFC's worked example): the site's push key is derived from `TOKEN_ENCRYPTION_KEY`
+  (`derivedKey`), device addresses are stored encrypted (`push:<user>`), and notes only ever go to the
+  browsers' own push services (`isPushEndpoint`). **A device's notes end with the sign-in it was turned on
+  from** (`push_subscriptions.session_id`, cascades; an expired or idle sign-in's device is dropped when
+  sending): signing out, sign out everywhere, a new password (other devices) or two weeks unused. Signing in
+  again quietly puts a device back (`PushKeeper`, `auto`), except one removed from the list on another
+  device (`removed_at`). "Show amounts" off leaves every dollar figure out (notes show on the lock screen).
+  Notes are worked out after a sync (webhook, or `after()` on refresh), never inside `syncItem`.
+  `public/sw.js` only shows notes and opens a screen on this site (`safeUrl`): it never caches. On an
+  iPhone, notifications need Passbook on the home screen. The sample household (shared by every visitor)
+  lists no devices, and "Send a test" there reaches only the device that pressed it.
 - **Asking Nickel is one tap**: every bubble has "Ask me something". Anything worded as a question
   ("how much is my rent?", "rent") is answered, never taken for an instruction (`parseCommand` only acts
   on "add…", "new…", "can you add…" and the like), and what's typed survives the panel closing. He answers what's left, what's due,

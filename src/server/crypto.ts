@@ -1,4 +1,5 @@
-import { createCipheriv, createDecipheriv, createHash, randomBytes, scrypt as scryptCb, timingSafeEqual, type ScryptOptions } from "node:crypto";
+import { createCipheriv, createDecipheriv, createHash, hkdfSync, randomBytes, scrypt as scryptCb, timingSafeEqual, type ScryptOptions } from "node:crypto";
+import { isDemoMode } from "@/lib/config";
 
 function scrypt(password: string, salt: Buffer, keylen: number, options: ScryptOptions): Promise<Buffer> {
   return new Promise((resolve, reject) => scryptCb(password, salt, keylen, options, (error, key) => (error ? reject(error) : resolve(key))));
@@ -71,8 +72,16 @@ export class SecretFormatError extends Error {
   }
 }
 
+/**
+ * The sample household lives in memory and starts over with the server, so without a key set it gets a
+ * throwaway one for as long as the server runs (for the few things it keeps sealed, like a test
+ * notification's device). Real data always needs the key it was set up with.
+ */
+let sampleKey: Buffer | null = null;
+
 function encryptionKey(): Buffer {
   const raw = process.env.TOKEN_ENCRYPTION_KEY;
+  if (!raw && isDemoMode()) return (sampleKey ??= randomBytes(32));
   if (!raw) throw new Error("TOKEN_ENCRYPTION_KEY is not set. Generate one with: openssl rand -base64 32");
   const key = Buffer.from(raw, "base64");
   if (key.length !== 32) throw new Error("TOKEN_ENCRYPTION_KEY must be 32 bytes, base64 encoded.");
@@ -106,4 +115,12 @@ export function decryptSecret(stored: string, owner: string): string {
   decipher.setAAD(Buffer.from(owner, "utf8"));
   decipher.setAuthTag(tag);
   return Buffer.concat([decipher.update(Buffer.from(body, "base64url")), decipher.final()]).toString("utf8");
+}
+
+/**
+ * A key for one particular use, worked out from the encryption key (HKDF), so nothing new has to be
+ * kept: the same purpose always gives the same key, and no two purposes share one.
+ */
+export function derivedKey(purpose: string, bytes = 32): Buffer {
+  return Buffer.from(hkdfSync("sha256", encryptionKey(), "passbook", purpose, bytes));
 }

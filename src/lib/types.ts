@@ -122,6 +122,8 @@ export type RecurringView = RecurringSeries & {
   share: number | null;
   /** The latest charge without a name of its own, for renaming the bill. */
   sampleId: string;
+  /** "Tell me when it's paid": a phone notification when the bank shows it paid. */
+  notifyPaid: boolean;
   /** Set for a bill added by hand (by the owner, Nickel or Claude) rather than found in the history. */
   manual: {
     id: string;

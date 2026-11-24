@@ -15,6 +15,7 @@ import { SECTIONS, sectionFor, under } from "./nav";
 import { NickelMark } from "./nickel/mark";
 import { Nickel } from "./nickel/nickel";
 import { PixelIcon, type PixelName } from "./pixel-icons";
+import { PushKeeper } from "./push";
 import { ReauthHost } from "./reauth";
 import { PullToRefresh } from "./pull-to-refresh";
 import { ConfirmHost, Dialog, IconButton, Tag, Toaster, cx } from "./ui";
@@ -218,6 +219,7 @@ export function Shell({ children }: { children: ReactNode }) {
       <Toaster />
       <ConfirmHost />
       <ReauthHost />
+      <PushKeeper />
       <Nickel />
     </div>
   );

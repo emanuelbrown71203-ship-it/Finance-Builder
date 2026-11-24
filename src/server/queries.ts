@@ -5,6 +5,7 @@ import { DEFAULT_TIMEZONE } from "@/lib/config";
 import { addDays, addMonths, addMonthsToMonth, dayOfMonth, daysInMonth, diffDays, eachDay, formatDistance, formatShort, monthEnd, monthOf, monthStart, todayIn, weekday, type ISODate } from "@/lib/dates";
 import { goalIdeas, goalPlan } from "@/lib/finance/goalplan";
 import { dollars, dollarsExact } from "@/lib/money";
+import type { DueFact, PaidFact } from "@/lib/notifications";
 import { buildMonthPlan, spendingByCategory, type MonthPlan } from "@/lib/finance/plan";
 import { budgetPlan, categoryBudgets, monthProgress, suggestLimits, type Limit } from "@/lib/finance/budget";
 import { payoffPlan, payoffOrder, recentMonthlyPaydown, type Debt, type Strategy } from "@/lib/finance/payoff";
@@ -188,7 +189,7 @@ async function recentTransactions(ctx: Ctx, limit: number): Promise<TxView[]> {
 /** Lightweight rows for analysis: everything except transfers since a date. */
 async function analysisRows(ctx: Ctx, from: ISODate) {
   return ctx.db
-    .select({ id: transactions.id, date: transactions.date, name: transactions.name, amount: transactions.amount, category: transactions.category, accountId: transactions.accountId, customName: transactions.customName })
+    .select({ id: transactions.id, date: transactions.date, name: transactions.name, amount: transactions.amount, category: transactions.category, accountId: transactions.accountId, customName: transactions.customName, pending: transactions.pending })
     .from(transactions)
     .where(and(eq(transactions.userId, ctx.userId), gte(transactions.date, from), ne(transactions.category, "transfer")))
     .orderBy(asc(transactions.date));
@@ -254,6 +255,7 @@ async function loadRecurring(ctx: Ctx): Promise<RecurringBundle> {
       ruleId: named.ruleId,
       ruleExact: named.exact,
       sampleId: sample?.id ?? "",
+      notifyPaid: o?.notifyPaid ?? false,
       manual: null,
       kind,
       // A cancelled series stops counting toward what’s coming up.
@@ -270,7 +272,8 @@ async function loadRecurring(ctx: Ctx): Promise<RecurringBundle> {
   // Bills added by hand sit alongside the ones found in the history.
   const found = series.map((s) => ({ name: s.name, bankName: s.bankName, active: s.active, kind: s.kind, amount: s.amount, frequency: s.frequency }));
   const charges = raw.filter((t) => t.amount < 0 && t.date >= addDays(ctx.today, -60)).map((t) => ({ id: t.id, date: t.date, amount: t.amount, names: [t.name, nameFor(t).name] }));
-  for (const bill of added) series.push(manualSeries(bill, ctx.today, bankMatch(bill, ctx.today, charges, found)));
+  for (const bill of added) series.push({ ...manualSeries(bill, ctx.today, bankMatch(bill, ctx.today, charges, found)), notifyPaid: false });
+  for (const s of series) if (s.manual) s.notifyPaid = overrideByKey.get(s.key)?.notifyPaid ?? false;
   series.sort((a, b) => (a.nextDate < b.nextDate ? -1 : a.nextDate > b.nextDate ? 1 : a.name.localeCompare(b.name)));
 
   // A recent charge from a well-known subscription service that hasn't repeated yet.
@@ -859,6 +862,53 @@ export async function getOverview(ctx: Ctx): Promise<Overview> {
     },
     sync,
   };
+}
+
+/* ---------- phone notifications ---------- */
+
+/** How many days ahead a bill counts as coming up for "not enough for a bill". */
+const SHORT_DAYS = 3;
+
+/**
+ * What phone notifications are worked out from: payments lately of the bills the person follows (settled
+ * ones only), bills the bank account pays in the next few days (not ones put on a card, whose money isn't
+ * needed yet, but a card's minimum is), and what's in checking.
+ */
+export async function notifyFacts(ctx: Ctx): Promise<{ today: ISODate; paid: PaidFact[]; due: DueFact[]; cash: number | null; cashName: string }> {
+  const bundle = await loadRecurring(ctx);
+  const pending = new Set(bundle.history.filter((t) => t.pending).map((t) => t.id));
+  const from = addDays(ctx.today, -SHORT_DAYS);
+  const paid = new Map<string, PaidFact>();
+  for (const s of bundle.series) {
+    if (!s.notifyPaid || s.kind === "income") continue;
+    for (const h of s.history) {
+      if (h.amount >= 0 || h.date < from || h.date > ctx.today || pending.has(h.id) || paid.has(h.id)) continue;
+      paid.set(h.id, { txId: h.id, seriesKey: s.key, name: s.name, amount: h.amount, date: h.date, accountName: s.accountName, share: s.share });
+    }
+  }
+  const accountById = new Map(bundle.accounts.map((a) => [a.id, a]));
+  const seriesByKey = new Map(bundle.series.map((s) => [s.key, s]));
+  const due = upcomingBills(bundle, ctx.today, SHORT_DAYS)
+    .filter((b) => {
+      if (b.kind === "card") return true;
+      const account = accountById.get(seriesByKey.get(b.key)?.accountId ?? "");
+      return !account || account.type === "depository";
+    })
+    .map((b) => ({ key: b.key, name: b.name, date: b.date, amount: b.amount }));
+  const checking = bundle.accounts.filter((a) => a.type === "depository" && a.subtype === "checking");
+  return {
+    today: ctx.today,
+    paid: [...paid.values()],
+    due,
+    cash: checking.length ? checking.reduce((s, a) => s + (a.available ?? a.balance), 0) : null,
+    cashName: checking.length === 1 ? checking[0].name : "Checking",
+  };
+}
+
+/** What's left to spend this month (Home's number), for the no-spend week's first-day note. */
+export async function leftThisMonth(ctx: Ctx): Promise<number> {
+  const [bundle, limits, goalList] = await Promise.all([loadRecurring(ctx), loadLimits(ctx), listGoals(ctx)]);
+  return budgetFor(ctx, bundle, limits, goalList, monthOf(ctx.today)).monthPlan.leftToSpend;
 }
 
 /* ---------- debt payoff ---------- */

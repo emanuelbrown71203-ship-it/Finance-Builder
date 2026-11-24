@@ -185,6 +185,8 @@ export const recurringOverrides = pgTable(
     cancelled: boolean("cancelled").notNull().default(false),
     /** A shared bill (rent split with a partner): the owner's part in hundredths of a percent, 5000 = half. Null: all theirs. */
     shareBp: integer("share_bp"),
+    /** "Tell me when it's paid": a phone notification when the bank shows this bill paid. */
+    notifyPaid: boolean("notify_paid").notNull().default(false),
   },
   (t) => [uniqueIndex("recurring_user_series_idx").on(t.userId, t.seriesKey)],
 );
@@ -343,6 +345,14 @@ export const userSettings = pgTable("user_settings", {
   debtExtra: cents("debt_extra").notNull().default(0),
   /** avalanche (highest interest first) | snowball (smallest balance first) */
   debtStrategy: text("debt_strategy").notNull().default("avalanche"),
+  /** Phone notifications, beyond the bills followed one by one: money short for a bill coming up, */
+  notifyLowBalance: boolean("notify_low_balance").notNull().default(true),
+  /** the weekly review on Monday mornings, */
+  notifyWeeklyReview: boolean("notify_weekly_review").notNull().default(true),
+  /** and the no-spend week starting. */
+  notifyNoSpend: boolean("notify_no_spend").notNull().default(true),
+  /** Dollar amounts in notes, which show on the lock screen. Off: notes only say what happened. */
+  notifyAmounts: boolean("notify_amounts").notNull().default(true),
 });
 
 /** A passkey: Face ID, Touch ID or a security key registered for sign-in. Only the public half is stored. */
@@ -479,4 +489,47 @@ export const userCategories = pgTable(
     createdAt: createdAt(),
   },
   (t) => [index("user_categories_user_idx").on(t.userId)],
+);
+
+/**
+ * A phone, tablet or computer that asked for notifications (web push). The push service's address and the
+ * device's keys are kept encrypted; the address's hash finds the device again without opening them.
+ */
+export const pushSubscriptions = pgTable(
+  "push_subscriptions",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    /** SHA-256 of the push address. One device belongs to one person: whoever turned it on last. */
+    endpointHash: text("endpoint_hash").notNull(),
+    /** The address and keys as JSON, sealed with encryptSecret (owner "push:<user id>"). */
+    subscriptionEnc: text("subscription_enc").notNull(),
+    /** "iPhone", "iPad", "Mac": so devices can be told apart in Settings. */
+    label: text("label").notNull(),
+    /**
+     * The sign-in it was turned on from. When that ends (signing out, sign out everywhere, a new password,
+     * or two weeks unused) the device stops getting notes. Null only for the sample household.
+     */
+    sessionId: text("session_id").references(() => sessions.id, { onDelete: "cascade" }),
+    /** Removed from the list on another device: it stays off until turned on again from the device itself. */
+    removedAt: timestamp("removed_at", { withTimezone: true }),
+    createdAt: createdAt(),
+    lastSentAt: timestamp("last_sent_at", { withTimezone: true }),
+    /** Sends in a row the push service refused for a reason other than "gone". Too many and it's dropped. */
+    failures: integer("failures").notNull().default(0),
+  },
+  (t) => [uniqueIndex("push_endpoint_idx").on(t.endpointHash), index("push_user_idx").on(t.userId)],
+);
+
+/** Each notification sent, so the same one ("Rent is paid", this week's review) never goes out twice. */
+export const notificationsSent = pgTable(
+  "notifications_sent",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    /** What it was about: "paid:<transaction id>", "review:<Monday>", "nospend:<month>", "low:<bill>|<date>". */
+    ref: text("ref").notNull(),
+    sentAt: timestamp("sent_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [uniqueIndex("notifications_sent_ref_idx").on(t.userId, t.ref)],
 );
