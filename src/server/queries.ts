@@ -5,7 +5,7 @@ import { DEFAULT_TIMEZONE } from "@/lib/config";
 import { addDays, addMonths, addMonthsToMonth, dayOfMonth, daysInMonth, diffDays, eachDay, formatDistance, formatShort, monthEnd, monthOf, monthStart, todayIn, weekday, type ISODate } from "@/lib/dates";
 import { goalIdeas, goalPlan } from "@/lib/finance/goalplan";
 import { dollars, dollarsExact } from "@/lib/money";
-import type { DueFact, PaidFact } from "@/lib/notifications";
+import type { BudgetFact, DueFact, DueTomorrowFact, MoneyInFact, PaidFact } from "@/lib/notifications";
 import { buildMonthPlan, spendingByCategory, type MonthPlan } from "@/lib/finance/plan";
 import { budgetPlan, categoryBudgets, monthProgress, suggestLimits, type Limit } from "@/lib/finance/budget";
 import { payoffPlan, payoffOrder, recentMonthlyPaydown, type Debt, type Strategy } from "@/lib/finance/payoff";
@@ -874,8 +874,27 @@ const SHORT_DAYS = 3;
  * ones only), bills the bank account pays in the next few days (not ones put on a card, whose money isn't
  * needed yet, but a card's minimum is), and what's in checking.
  */
-export async function notifyFacts(ctx: Ctx): Promise<{ today: ISODate; paid: PaidFact[]; due: DueFact[]; cash: number | null; cashName: string }> {
-  const bundle = await loadRecurring(ctx);
+export async function notifyFacts(ctx: Ctx): Promise<{
+  today: ISODate;
+  paid: PaidFact[];
+  due: DueFact[];
+  cash: number | null;
+  cashName: string;
+  moneyIn: MoneyInFact[];
+  dueTomorrow: DueTomorrowFact[];
+  budgets: BudgetFact[];
+}> {
+  const [bundle, limits, goalList, nameFor, recent] = await Promise.all([
+    loadRecurring(ctx),
+    loadLimits(ctx),
+    listGoals(ctx),
+    loadNamer(ctx),
+    // Transfers included: money someone sends (the partner's half of the rent) arrives as one.
+    ctx.db
+      .select({ id: transactions.id, date: transactions.date, name: transactions.name, amount: transactions.amount, category: transactions.category, accountId: transactions.accountId, customName: transactions.customName })
+      .from(transactions)
+      .where(and(eq(transactions.userId, ctx.userId), gte(transactions.date, addDays(ctx.today, -2 * SHORT_DAYS)), lte(transactions.date, ctx.today))),
+  ]);
   const pending = new Set(bundle.history.filter((t) => t.pending).map((t) => t.id));
   const from = addDays(ctx.today, -SHORT_DAYS);
   const paid = new Map<string, PaidFact>();
@@ -896,12 +915,45 @@ export async function notifyFacts(ctx: Ctx): Promise<{ today: ISODate; paid: Pai
     })
     .map((b) => ({ key: b.key, name: b.name, date: b.date, amount: b.amount }));
   const checking = bundle.accounts.filter((a) => a.type === "depository" && a.subtype === "checking");
+
+  // Money in lately: paychecks, refunds, and money sent from outside (not moved between the person's own
+  // accounts, where the same amount left another of them). A dollar or more, so round-ups don't count. A
+  // pending deposit keeps its row when it settles, so it's told about once, as soon as it shows.
+  const paycheckIds = new Set(bundle.series.filter((s) => s.kind === "income").flatMap((s) => s.history.map((h) => h.id)));
+  const transfers = recent.filter((t) => t.category === "transfer");
+  const moneyIn: MoneyInFact[] = [];
+  for (const t of recent) {
+    const account = accountById.get(t.accountId);
+    if (!account || t.amount < 100 || t.date < from) continue;
+    const base = { txId: t.id, name: nameFor(t).name, amount: t.amount, accountName: account.name };
+    if (t.category === "income") moneyIn.push({ ...base, kind: paycheckIds.has(t.id) ? "paycheck" : "deposit" });
+    else if (t.category === "transfer") {
+      // A card payment lands on the card as a transfer: not money in.
+      if (account.type !== "depository") continue;
+      const own = transfers.some((o) => o.accountId !== t.accountId && o.amount === -t.amount && Math.abs(diffDays(o.date, t.date)) <= SHORT_DAYS);
+      if (!own) moneyIn.push({ ...base, kind: "deposit" });
+    } else moneyIn.push({ ...base, kind: "refund" });
+  }
+
+  const tomorrow = addDays(ctx.today, 1);
+  const dueTomorrow = upcomingBills(bundle, ctx.today, 1)
+    .filter((b) => b.date === tomorrow)
+    .map((b) => ({ key: b.key, name: b.name, amount: b.amount, share: b.share ?? null }));
+
+  const month = monthOf(ctx.today);
+  const budgets = budgetFor(ctx, bundle, limits, goalList, month)
+    .rows.filter((r) => r.limit !== null)
+    .map((r) => ({ category: r.category, label: category(r.category).label, month, budget: (r.limit ?? 0) + r.carried, spent: r.spent }));
+
   return {
     today: ctx.today,
     paid: [...paid.values()],
     due,
     cash: checking.length ? checking.reduce((s, a) => s + (a.available ?? a.balance), 0) : null,
     cashName: checking.length === 1 ? checking[0].name : "Checking",
+    moneyIn,
+    dueTomorrow,
+    budgets,
   };
 }
 

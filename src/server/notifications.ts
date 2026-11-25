@@ -4,7 +4,7 @@ import { notificationsSent, pushRemoved, pushSubscriptions, sessions, userSettin
 import { DEFAULT_TIMEZONE, isDemoMode } from "@/lib/config";
 import { addDays, monthOf, todayIn, weekday } from "@/lib/dates";
 import { noSpendWeekOf } from "@/lib/finance/nospend";
-import { TEST_NOTE, billPaidNote, lowBalanceNote, noSpendStartNote, reviewNote, type Note } from "@/lib/notifications";
+import { TEST_NOTE, billPaidNote, billsDueNote, budgetNote, lowBalanceNote, moneyInNote, noSpendStartNote, reviewNote, type Note } from "@/lib/notifications";
 import { IDLE_DAYS, type Ctx } from "./auth";
 import { loadUserCategories } from "./categories";
 import { withCategories } from "./category-scope";
@@ -19,7 +19,9 @@ import { isPushEndpoint, isPushKeys, sendPush, type PushResult, type PushTarget 
  *  - a bill the person follows is paid: after each bank sync (settled payments only);
  *  - checking is short for bills the bank pays in the next three days: after a sync, and each morning;
  *  - Monday morning: the weekly review is ready;
- *  - the first day of the no-spend week.
+ *  - the first day of the no-spend week;
+ *  - money in (paychecks, refunds, money sent), a budget at 80% or over, bills due tomorrow.
+ * Never at night (8 a.m. to 9 p.m. only).
  * The morning ones come with the first bank update after 8 a.m., and from a scheduled run each morning
  * when the site has CRON_SECRET set (vercel.json), whichever is first.
  * Each note goes out once (`notifications_sent`), only to the person's own devices, and only through the
@@ -32,7 +34,7 @@ const MAX_DEVICES = 10;
 /** Refusals in a row (other than "gone") before a device is dropped. */
 const MAX_FAILURES = 20;
 
-export type NotifySettings = { lowBalance: boolean; weeklyReview: boolean; noSpend: boolean; amounts: boolean };
+export type NotifySettings = { lowBalance: boolean; weeklyReview: boolean; noSpend: boolean; amounts: boolean; moneyIn: boolean; billDue: boolean; budget: boolean };
 export type PushDevice = { id: string; label: string; createdAt: string; lastSentAt: string | null; match: string };
 
 /** A short fingerprint of a push address, so a browser can tell whether it's one of the devices listed. */
@@ -106,11 +108,19 @@ export async function removeDevice(ctx: Ctx, by: { endpoint?: string; id?: strin
 
 export async function getNotifySettings(db: DB, userId: string): Promise<NotifySettings> {
   const [row] = await db
-    .select({ lowBalance: userSettings.notifyLowBalance, weeklyReview: userSettings.notifyWeeklyReview, noSpend: userSettings.notifyNoSpend, amounts: userSettings.notifyAmounts })
+    .select({
+      lowBalance: userSettings.notifyLowBalance,
+      weeklyReview: userSettings.notifyWeeklyReview,
+      noSpend: userSettings.notifyNoSpend,
+      amounts: userSettings.notifyAmounts,
+      moneyIn: userSettings.notifyMoneyIn,
+      billDue: userSettings.notifyBillDue,
+      budget: userSettings.notifyBudget,
+    })
     .from(userSettings)
     .where(eq(userSettings.userId, userId))
     .limit(1);
-  return row ?? { lowBalance: true, weeklyReview: true, noSpend: true, amounts: true };
+  return row ?? { lowBalance: true, weeklyReview: true, noSpend: true, amounts: true, moneyIn: true, billDue: true, budget: true };
 }
 
 export async function setNotifySettings(ctx: Ctx, patch: Partial<NotifySettings>): Promise<NotifySettings> {
@@ -119,6 +129,9 @@ export async function setNotifySettings(ctx: Ctx, patch: Partial<NotifySettings>
     ...(patch.weeklyReview !== undefined ? { notifyWeeklyReview: patch.weeklyReview } : {}),
     ...(patch.noSpend !== undefined ? { notifyNoSpend: patch.noSpend } : {}),
     ...(patch.amounts !== undefined ? { notifyAmounts: patch.amounts } : {}),
+    ...(patch.moneyIn !== undefined ? { notifyMoneyIn: patch.moneyIn } : {}),
+    ...(patch.billDue !== undefined ? { notifyBillDue: patch.billDue } : {}),
+    ...(patch.budget !== undefined ? { notifyBudget: patch.budget } : {}),
   };
   if (Object.keys(set).length) await ctx.db.insert(userSettings).values({ userId: ctx.userId, ...set }).onConflictDoUpdate({ target: userSettings.userId, set });
   return getNotifySettings(ctx.db, ctx.userId);
@@ -240,12 +253,16 @@ async function asUser<T>(db: DB, userId: string, now: Date, work: (ctx: Ctx) => 
 }
 
 /** Bills paid, and money short for bills coming up. */
+/** What the latest bank data says: bills paid, money in, budgets close or over, bills due tomorrow, money short. */
 async function billNotes(ctx: Ctx, settings: NotifySettings, fetchImpl: typeof fetch) {
   const facts = await notifyFacts(ctx);
-  for (const p of facts.paid) await deliver(ctx.db, ctx.userId, billPaidNote(p, settings.amounts), { ttl: 2 * 86_400 }, fetchImpl);
+  const send = (note: Note | null, options: { ttl: number; urgency?: "high" }) => (note ? deliver(ctx.db, ctx.userId, note, options, fetchImpl) : null);
+  for (const p of facts.paid) await send(billPaidNote(p, settings.amounts), { ttl: 2 * 86_400 });
+  if (settings.moneyIn) for (const m of facts.moneyIn) await send(moneyInNote(m, settings.amounts), { ttl: 2 * 86_400 });
+  if (settings.budget) for (const b of facts.budgets) await send(budgetNote(b, settings.amounts), { ttl: 86_400 });
+  if (settings.billDue) await send(billsDueNote({ tomorrow: addDays(facts.today, 1), bills: facts.dueTomorrow }, settings.amounts), { ttl: 12 * 3600 });
   if (settings.lowBalance && facts.cash !== null) {
-    const note = lowBalanceNote({ today: facts.today, cash: facts.cash, cashName: facts.cashName, due: facts.due }, settings.amounts);
-    if (note) await deliver(ctx.db, ctx.userId, note, { ttl: 86_400, urgency: "high" }, fetchImpl);
+    await send(lowBalanceNote({ today: facts.today, cash: facts.cash, cashName: facts.cashName, due: facts.due }, settings.amounts), { ttl: 86_400, urgency: "high" });
   }
 }
 
@@ -268,18 +285,23 @@ function localHour(now: Date): number {
   return Number(new Intl.DateTimeFormat("en-US", { timeZone: DEFAULT_TIMEZONE, hour: "numeric", hourCycle: "h23" }).format(now));
 }
 
+/** Notes only go out from 8 a.m. to 9 p.m. where the person is; anything that came in overnight waits. */
+const quietHours = (now: Date) => {
+  const hour = localHour(now);
+  return hour < 8 || hour >= 21;
+};
+
 /**
- * After the bank sends new data: bills that were just paid, and whether checking covers what's coming.
- * In the daytime (8 a.m. to 9 p.m.) also the day's notes, so they arrive with the first bank update of
- * the morning even without the scheduled run.
+ * After the bank sends new data: bills just paid, money in, budgets, bills due tomorrow, money short,
+ * and the day's notes (so they come with the first bank update of the morning even without the
+ * scheduled run). Never at night: what's waiting goes out with the first update after 8 a.m.
  */
 export async function afterSync(db: DB, userId: string, now: Date = new Date(), fetchImpl: typeof fetch = fetch): Promise<void> {
-  if (!(await hasDevices(db, userId))) return;
+  if (quietHours(now) || !(await hasDevices(db, userId))) return;
   const settings = await getNotifySettings(db, userId);
-  const hour = localHour(now);
   await asUser(db, userId, now, async (ctx) => {
     await billNotes(ctx, settings, fetchImpl);
-    if (hour >= 8 && hour < 21) await dayNotes(ctx, settings, fetchImpl);
+    await dayNotes(ctx, settings, fetchImpl);
   });
 }
 
@@ -291,6 +313,7 @@ const MORNING_BUDGET_MS = 30_000;
  * Monday's weekly review and the no-spend week's first day. Old "sent" records are tidied away.
  */
 export async function morningNotes(db: DB, now: Date = new Date(), fetchImpl: typeof fetch = fetch): Promise<{ people: number }> {
+  if (quietHours(now)) return { people: 0 };
   const people = [...new Set((await db.select({ userId: pushSubscriptions.userId }).from(pushSubscriptions)).map((r) => r.userId))];
   const started = Date.now();
   for (const userId of people) {

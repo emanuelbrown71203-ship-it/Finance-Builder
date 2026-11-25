@@ -17,9 +17,9 @@ import { Nickel } from "./nickel/nickel";
 import { PixelIcon, type PixelName } from "./pixel-icons";
 import { PushKeeper } from "./push";
 import { ReauthHost } from "./reauth";
-import { PullToRefresh } from "./pull-to-refresh";
+import { PullToRefresh, syncNow } from "./pull-to-refresh";
 import { ConfirmHost, Dialog, IconButton, Tag, Toaster, cx } from "./ui";
-import { send, useApi, useNow } from "./use-api";
+import { useApi, useNow } from "./use-api";
 import { setCustomCategories } from "@/lib/categories";
 
 /** The mark: Nickel on his arcade tile. */
@@ -48,7 +48,7 @@ export function LiveStatus({ compact }: { compact?: boolean }) {
   const refresh = async () => {
     setRefreshing(true);
     try {
-      await send("POST", "/api/sync");
+      await syncNow();
     } finally {
       setRefreshing(false);
     }

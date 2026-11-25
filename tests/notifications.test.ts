@@ -1,15 +1,15 @@
 import { createDecipheriv, createECDH, createHmac } from "node:crypto";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { getDb, type DB } from "@/db";
 import { accounts, notificationsSent, pushRemoved, pushSubscriptions, recurringOverrides, sessions, transactions, userSettings, users } from "@/db/schema";
 import { seedDemo } from "@/db/seed";
 import { DEMO_USER_ID, SESSION_COOKIE } from "@/lib/config";
-import { billPaidNote, lowBalanceNote, noSpendStartNote, reviewNote, whenDue } from "@/lib/notifications";
+import { billPaidNote, billsDueNote, budgetNote, lowBalanceNote, moneyInNote, noSpendStartNote, reviewNote, whenDue } from "@/lib/notifications";
 import type { Ctx } from "@/server/auth";
 import { endSession, signOutEverywhere } from "@/server/auth";
 import { sha256 } from "@/server/crypto";
-import { setRecurringOverride } from "@/server/mutations";
+import { setBudget, setRecurringOverride } from "@/server/mutations";
 import { addDevice, afterSync, getNotifySettings, listDevices, morningNotes, removedDevices, removeDevice, sendTest, setNotifySettings } from "@/server/notifications";
 import { getRecurring, notifyFacts } from "@/server/queries";
 
@@ -45,6 +45,30 @@ describe("notification wording", () => {
     expect(review.body).toBe("Take two minutes to look back at last week and plan this one.");
     expect(ns.body).toBe("Bills only through Nov 30. Whatever’s left of November on the 1st can go to savings.");
     for (const n of [paid, low, review, ns]) expect(n.title + n.body).not.toMatch(/\$/);
+  });
+
+  it("words money in, bills due tomorrow and budgets, with and without amounts", () => {
+    expect(moneyInNote({ txId: "t", kind: "paycheck", name: "Team Members", amount: 98812, accountName: "SoFi Checking" })).toMatchObject({ ref: "in:t", title: "Paycheck arrived", body: "$988.12 into SoFi Checking." });
+    expect(moneyInNote({ txId: "t", kind: "deposit", name: "Cash App", amount: 75000, accountName: "SoFi Checking" }).body).toBe("$750.00 from Cash App into SoFi Checking.");
+    expect(moneyInNote({ txId: "t", kind: "refund", name: "Target", amount: 2500, accountName: "Quicksilver" })).toMatchObject({ title: "Refund from Target", body: "$25.00 back on Quicksilver." });
+    expect(moneyInNote({ txId: "t", kind: "paycheck", name: "Team Members", amount: 98812, accountName: "SoFi Checking" }, false).body).toBe("Into SoFi Checking.");
+    expect(moneyInNote({ txId: "t", kind: "deposit", name: "Cash App", amount: 75000, accountName: "SoFi Checking" }, false).body).toBe("From Cash App into SoFi Checking.");
+
+    expect(billsDueNote({ tomorrow: "2026-11-21", bills: [] })).toBeNull();
+    const rent = { key: "out:the foundry", name: "Rent", amount: -75000, share: 0.5 };
+    const phoneBill = { key: "out:mint mobile", name: "Mint Mobile", amount: -4500, share: null };
+    expect(billsDueNote({ tomorrow: "2026-12-01", bills: [rent] })).toMatchObject({ ref: "due:2026-12-01", title: "Rent is due tomorrow", body: "$750.00 (your half).", url: "/bills?open=out%3Athe%20foundry" });
+    expect(billsDueNote({ tomorrow: "2026-12-01", bills: [phoneBill, rent] })).toMatchObject({ title: "2 bills due tomorrow", body: "Rent $750.00 (your half) · Mint Mobile $45.00. $795.00 in all.", url: "/bills" });
+    expect(billsDueNote({ tomorrow: "2026-12-01", bills: [phoneBill, rent] }, false)!.body).toBe("Rent, Mint Mobile.");
+
+    const dining = { category: "dining", label: "Restaurants & coffee", month: "2026-11", budget: 20000 };
+    expect(budgetNote({ ...dining, spent: 15000 })).toBeNull();
+    expect(budgetNote({ ...dining, spent: 16000 })).toMatchObject({ ref: "budget-close:2026-11:dining", title: "Restaurants & coffee is close to its budget", body: "$160 of $200 spent, $40 left for November." });
+    expect(budgetNote({ ...dining, spent: 24500 })).toMatchObject({ ref: "budget-over:2026-11:dining", title: "Restaurants & coffee is over budget", body: "$45 over: $245 of $200 in November." });
+    expect(budgetNote({ ...dining, budget: 0, spent: 1200 })!.body).toBe("$12 spent, with nothing planned for it in November.");
+    expect(budgetNote({ ...dining, budget: 0, spent: 0 })).toBeNull();
+    expect(budgetNote({ ...dining, spent: 24500 }, false)!.body).toBe("Over its budget for November.");
+    for (const n of [moneyInNote({ txId: "t", kind: "refund", name: "Target", amount: 2500, accountName: "Quicksilver" }, false), billsDueNote({ tomorrow: "2026-12-01", bills: [rent] }, false)!, budgetNote({ ...dining, spent: 16000 }, false)!]) expect(n.title + n.body).not.toMatch(/\$/);
   });
 
   it("words the weekly review and the no-spend week", () => {
@@ -109,6 +133,8 @@ async function clear() {
   await db.delete(notificationsSent).where(eq(notificationsSent.userId, DEMO_USER_ID));
   await db.update(recurringOverrides).set({ notifyPaid: false }).where(eq(recurringOverrides.userId, DEMO_USER_ID));
   await db.delete(userSettings).where(eq(userSettings.userId, DEMO_USER_ID));
+  // The older checks count notes one kind at a time; the newer kinds are switched on where they're tested.
+  await db.insert(userSettings).values({ userId: DEMO_USER_ID, notifyMoneyIn: false, notifyBillDue: false, notifyBudget: false });
 }
 
 beforeAll(async () => {
@@ -248,7 +274,9 @@ describe("phone notifications", () => {
   it("sends Monday's weekly review and the no-spend week's first morning, as chosen", async () => {
     const p = phone(1);
     await addDevice(me, p, "iPhone");
-    expect(await getNotifySettings(db, DEMO_USER_ID)).toEqual({ lowBalance: true, weeklyReview: true, noSpend: true, amounts: true });
+    await db.delete(userSettings).where(eq(userSettings.userId, DEMO_USER_ID));
+    expect(await getNotifySettings(db, DEMO_USER_ID)).toEqual({ lowBalance: true, weeklyReview: true, noSpend: true, amounts: true, moneyIn: true, billDue: true, budget: true });
+    await setNotifySettings(me, { moneyIn: false, billDue: false, budget: false });
     const push = service();
     // Monday the 23rd.
     await morningNotes(db, new Date("2026-11-23T13:05:00Z"), push.fetchImpl);
@@ -363,6 +391,90 @@ describe("phone notifications", () => {
     await afterSync(db, DEMO_USER_ID, new Date("2026-11-23T14:00:00Z"), push.fetchImpl);
     await afterSync(db, DEMO_USER_ID, new Date("2026-11-23T16:00:00Z"), push.fetchImpl);
     expect(push.sent.map((x) => p.read(x.body).title).filter((t) => t === "Your weekly review is ready")).toHaveLength(1);
+    await clear();
+  });
+
+  it("tells you when money comes in: paychecks, refunds and money sent, never money moved between your own accounts", async () => {
+    const p = phone(1);
+    await addDevice(me, p, "iPhone");
+    await setNotifySettings(me, { moneyIn: true });
+    const own = await db.select().from(accounts).where(eq(accounts.userId, DEMO_USER_ID));
+    const checking = own.find((a) => a.subtype === "checking")!;
+    const savings = own.find((a) => a.subtype === "savings")!;
+    const card = own.find((a) => a.type === "credit")!;
+    const row = (id: string, accountId: string, amount: number, name: string, category: string, pending = false) => ({ id, userId: DEMO_USER_ID, accountId, plaidTransactionId: `test-${id}`, date: "2026-11-19", name, rawName: name, amount, category, pending });
+    await db.insert(transactions).values([
+      row("in-partner", checking.id, 75000, "CASH APP*JORDAN", "transfer"),
+      row("in-move-out", savings.id, -20000, "TRANSFER TO CHECKING", "transfer"),
+      row("in-move-in", checking.id, 20000, "TRANSFER FROM SAVINGS", "transfer"),
+      row("in-refund", card.id, 2500, "TARGET", "shopping"),
+      row("in-venmo", checking.id, 4000, "VENMO CASHOUT", "income", true),
+      row("in-roundup", savings.id, 37, "ROUNDUP", "transfer"),
+    ]);
+    const push = service();
+    await afterSync(db, DEMO_USER_ID, new Date("2026-11-19T20:00:00Z"), push.fetchImpl);
+    const notes = push.sent.map((x) => p.read(x.body));
+    expect(notes.map((n) => n.title).sort()).toEqual(["Money in", "Money in", "Refund from Target"]);
+    expect(notes.find((n) => n.title === "Refund from Target")!.body).toBe(`$25.00 back on ${card.name}.`);
+    expect(notes.some((n) => n.body.startsWith("$750.00 from ") && n.body.endsWith(`into ${checking.name}.`))).toBe(true);
+    expect(notes.some((n) => n.body.startsWith("$40.00 from "))).toBe(true);
+    expect(notes.every((n) => n.url === "/transactions")).toBe(true);
+    // The pending deposit settling is the same money: no second note.
+    await db.update(transactions).set({ pending: false }).where(eq(transactions.id, "in-venmo"));
+    await afterSync(db, DEMO_USER_ID, new Date("2026-11-19T21:00:00Z"), push.fetchImpl);
+    expect(push.sent).toHaveLength(3);
+    await db.delete(transactions).where(inArray(transactions.id, ["in-partner", "in-move-out", "in-move-in", "in-refund", "in-venmo", "in-roundup"]));
+    await clear();
+  });
+
+  it("says when a budget is close (80%) and again when it's over, once each", async () => {
+    const p = phone(1);
+    await addDevice(me, p, "iPhone");
+    await setNotifySettings(me, { budget: true });
+    // Health: $70.74 of $85 is 83%.
+    await setBudget(ctx, "health", 8500);
+    const push = service();
+    await afterSync(db, DEMO_USER_ID, new Date("2026-11-19T20:00:00Z"), push.fetchImpl);
+    await afterSync(db, DEMO_USER_ID, new Date("2026-11-19T21:00:00Z"), push.fetchImpl);
+    const notes = push.sent.map((x) => p.read(x.body));
+    expect(notes.map((n) => n.title).sort()).toEqual(["Entertainment is over budget", "Groceries is over budget", "Health is close to its budget", "Shopping is over budget"]);
+    expect(notes.find((n) => n.title.startsWith("Health"))).toEqual({ title: "Health is close to its budget", body: "$71 of $85 spent, $14 left for November.", url: "/budget?category=health", tag: "budget:health" });
+    expect(notes.find((n) => n.title.startsWith("Shopping"))!.body).toBe("$34 over: $284 of $250 in November.");
+    // Going over afterwards is its own note.
+    await setBudget(ctx, "health", 7000);
+    await afterSync(db, DEMO_USER_ID, new Date("2026-11-19T22:00:00Z"), push.fetchImpl);
+    expect(p.read(push.sent[push.sent.length - 1].body).title).toBe("Health is over budget");
+    expect(push.sent).toHaveLength(5);
+    await setBudget(ctx, "health", 9000);
+    await clear();
+  });
+
+  it("reminds you the day before a bill is due, in one note", async () => {
+    const p = phone(1);
+    await addDevice(me, p, "iPhone");
+    await setNotifySettings(me, { billDue: true });
+    const push = service();
+    // Friday the 20th, 10 a.m.: Adobe is due on the 21st.
+    await afterSync(db, DEMO_USER_ID, new Date("2026-11-20T15:00:00Z"), push.fetchImpl);
+    await afterSync(db, DEMO_USER_ID, new Date("2026-11-20T17:00:00Z"), push.fetchImpl);
+    expect(push.sent.map((x) => p.read(x.body))).toEqual([{ title: "Adobe Creative Cloud is due tomorrow", body: "$22.99.", url: `/bills?open=${encodeURIComponent("out:adobe creative cloud")}`, tag: "due" }]);
+    await clear();
+  });
+
+  it("never buzzes at night: what's waiting goes out after 8 a.m.", async () => {
+    const p = phone(1);
+    await addDevice(me, p, "iPhone");
+    await setNotifySettings(me, { moneyIn: true, billDue: true, budget: true });
+    const loan = (await getRecurring(ctx)).series.find((s) => s.name === "Cedar Lending Student Loan")!;
+    await setRecurringOverride(ctx, loan.key, { notifyPaid: true });
+    const push = service();
+    // 11 p.m. on the 19th in New York.
+    await afterSync(db, DEMO_USER_ID, new Date("2026-11-20T04:00:00Z"), push.fetchImpl);
+    expect(push.sent).toHaveLength(0);
+    expect(await morningNotes(db, new Date("2026-11-20T04:00:00Z"), push.fetchImpl)).toEqual({ people: 0 });
+    // 8:30 the next morning, it all comes.
+    await afterSync(db, DEMO_USER_ID, new Date("2026-11-20T13:30:00Z"), push.fetchImpl);
+    expect(push.sent.map((x) => p.read(x.body).title)).toContain("Cedar Lending Student Loan is paid");
     await clear();
   });
 

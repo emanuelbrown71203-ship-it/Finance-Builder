@@ -274,7 +274,7 @@ export function NotificationsSection() {
 
   return (
     <Sheet id="notifications" className="scroll-mt-4">
-      <SheetHeader title="Notifications" hint="A tap on the shoulder when a bill you pick is paid, when money is short for one coming up, and on Monday mornings." />
+      <SheetHeader title="Notifications" hint="A tap on the shoulder when money comes in, a bill is due or paid, a budget gets close, or money is short. Only between 8 a.m. and 9 p.m." />
 
       {device.state === "home-screen" && (
         <p className="mb-3 rounded-2xl bg-sunk px-3.5 py-3 text-small text-ink-2">On an iPhone or iPad, notifications work once Passbook is on your home screen. Add it (see “Use it like an app” below), open it from there, and turn them on here.</p>
@@ -313,6 +313,15 @@ export function NotificationsSection() {
 
       {settings && (
         <>
+          <Row title="Money coming in" detail="Paychecks, refunds, and money people send you, like the other half of the rent.">
+            <Switch checked={settings.moneyIn} onChange={(on) => void setKind({ moneyIn: on })} label="Money coming in" />
+          </Row>
+          <Row title="Bill due tomorrow" detail="The day before a bill, Extra or card minimum is due.">
+            <Switch checked={settings.billDue} onChange={(on) => void setKind({ billDue: on })} label="Bill due tomorrow" />
+          </Row>
+          <Row title="Budget close or over" detail="When a budget reaches 80%, and again if it goes over.">
+            <Switch checked={settings.budget} onChange={(on) => void setKind({ budget: on })} label="Budget close or over" />
+          </Row>
           <Row title="Not enough for a bill" detail="When checking has less than the bills it pays in the next 3 days.">
             <Switch checked={settings.lowBalance} onChange={(on) => void setKind({ lowBalance: on })} label="Not enough for a bill" />
           </Row>

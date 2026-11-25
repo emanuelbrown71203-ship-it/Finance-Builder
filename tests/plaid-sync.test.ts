@@ -5,7 +5,7 @@ import { accounts, balanceSnapshots, holdings, items, transactions, users } from
 import type { Ctx } from "@/server/auth";
 import { decryptSecret, encryptSecret } from "@/server/crypto";
 import { updateTransaction } from "@/server/mutations";
-import { syncItem, type PlaidLike } from "@/server/plaid";
+import { refreshItem, syncAllForUser, syncItem, type PlaidLike } from "@/server/plaid";
 import { getNetWorth, getOverview } from "@/server/queries";
 
 /**
@@ -22,8 +22,8 @@ const now = new Date("2026-11-19T15:00:00Z");
 
 type Page = { added?: object[]; modified?: object[]; removed?: { transaction_id: string }[]; next_cursor: string; has_more?: boolean };
 
-function fakePlaid(script: { pages: Page[]; cardBalance: number; failWith?: string }) {
-  const calls = { cursors: [] as (string | undefined)[] };
+function fakePlaid(script: { pages: Page[]; cardBalance: number; failWith?: string; refreshFails?: string }) {
+  const calls = { cursors: [] as (string | undefined)[], refreshes: [] as string[] };
   const reply = <T,>(data: T) => Promise.resolve({ data }) as never;
   const client: PlaidLike = {
     accountsGet: () =>
@@ -47,6 +47,10 @@ function fakePlaid(script: { pages: Page[]; cardBalance: number; failWith?: stri
         holdings: [{ account_id: "p-ira", security_id: "sec-1", quantity: 40, institution_price: 300, institution_value: 12000, cost_basis: 9000 }],
         securities: [{ security_id: "sec-1", ticker_symbol: "VTI", name: "Vanguard Total Stock Market ETF", type: "etf" }],
       }),
+    transactionsRefresh: (request: { access_token: string }) => {
+      calls.refreshes.push(request.access_token);
+      return script.refreshFails ? (Promise.reject({ response: { data: { error_code: script.refreshFails, error_message: "not enabled" } } }) as never) : reply({ request_id: "r1" });
+    },
     liabilitiesGet: () =>
       reply({ liabilities: { credit: [{ account_id: "p-card", next_payment_due_date: "2026-12-05", minimum_payment_amount: 25, aprs: [{ apr_type: "purchase_apr", apr_percentage: 19.99 }] }], student: null, mortgage: null } }),
   } as unknown as PlaidLike;
@@ -186,6 +190,30 @@ describe("bank sync", () => {
     expect(card.balance).toBe(-32500);
   });
 
+  it("pull to refresh asks the bank to check now, at most every five minutes, and never fails the refresh", async () => {
+    await db.update(items).set({ refreshedAt: null }).where(eq(items.id, ITEM));
+    const t0 = new Date("2026-11-19T19:00:00Z");
+    const { client, calls } = fakePlaid({ cardBalance: 325, pages: [{ next_cursor: "c3" }, { next_cursor: "c3" }, { next_cursor: "c3" }] });
+    expect(await refreshItem(db, ITEM, client, t0)).toBe(true);
+    expect(calls.refreshes).toEqual(["access-sandbox-123"]);
+    // Again a minute later: not asked again.
+    expect(await refreshItem(db, ITEM, client, new Date(t0.getTime() + 60_000))).toBe(false);
+    expect(calls.refreshes).toHaveLength(1);
+    // Five minutes on, it can be.
+    expect(await refreshItem(db, ITEM, client, new Date(t0.getTime() + 5 * 60_000))).toBe(true);
+    // A bank or plan without on-demand checks: the refresh carries on with what Plaid has.
+    await db.update(items).set({ refreshedAt: null }).where(eq(items.id, ITEM));
+    const off = fakePlaid({ cardBalance: 325, pages: [{ next_cursor: "c3" }], refreshFails: "PRODUCTS_NOT_SUPPORTED" });
+    expect(await syncAllForUser(db, USER, { refresh: true, client: off.client })).toEqual({ refreshing: false });
+    expect(off.calls.refreshes).toHaveLength(1);
+    expect(off.calls.cursors).toEqual(["c3"]);
+    // The follow-up look a little later doesn't ask the bank again.
+    await db.update(items).set({ refreshedAt: null }).where(eq(items.id, ITEM));
+    const later = fakePlaid({ cardBalance: 325, pages: [{ next_cursor: "c3" }] });
+    expect(await syncAllForUser(db, USER, { refresh: false, client: later.client })).toEqual({ refreshing: false });
+    expect(later.calls.refreshes).toHaveLength(0);
+  });
+
   it("flags the connection when the bank asks for a new sign-in", async () => {
     const { client } = fakePlaid({ cardBalance: 0, pages: [], failWith: "ITEM_LOGIN_REQUIRED" });
     await syncItem(db, ITEM, client, now);
@@ -193,5 +221,14 @@ describe("bank sync", () => {
     expect(item.status).toBe("needs_reauth");
     expect(item.cursor).toBe("c3");
     expect((await getOverview(ctx)).sync.needsAttention).toBe(1);
+  });
+});
+
+describe("on-demand checks", () => {
+  it("never asks a bank that needs a new sign-in", async () => {
+    const { client, calls } = fakePlaid({ cardBalance: 0, pages: [] });
+    await db.update(items).set({ refreshedAt: null }).where(eq(items.id, ITEM));
+    expect(await refreshItem(db, ITEM, client, new Date("2026-11-19T20:00:00Z"))).toBe(false);
+    expect(calls.refreshes).toHaveLength(0);
   });
 });

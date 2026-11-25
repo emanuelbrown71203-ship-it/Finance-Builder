@@ -48,6 +48,14 @@ export const DELETE = withUser(async (ctx, request) => {
   return { ok: true };
 });
 
-const Settings = z.object({ lowBalance: z.boolean().optional(), weeklyReview: z.boolean().optional(), noSpend: z.boolean().optional(), amounts: z.boolean().optional() });
+const Settings = z.object({
+  lowBalance: z.boolean().optional(),
+  weeklyReview: z.boolean().optional(),
+  noSpend: z.boolean().optional(),
+  amounts: z.boolean().optional(),
+  moneyIn: z.boolean().optional(),
+  billDue: z.boolean().optional(),
+  budget: z.boolean().optional(),
+});
 
 export const PUT = withUser(async (ctx, request) => ({ settings: await setNotifySettings(ctx, await readBody(request, Settings)) }));

@@ -51,6 +51,8 @@ export const items = pgTable(
     status: text("status").notNull().default("ok"),
     error: text("error"),
     lastSyncedAt: timestamp("last_synced_at", { withTimezone: true }),
+    /** When the person last had Plaid check this bank on demand (pull to refresh): at most every few minutes. */
+    refreshedAt: timestamp("refreshed_at", { withTimezone: true }),
     createdAt: createdAt(),
   },
   (t) => [index("items_user_idx").on(t.userId)],
@@ -353,6 +355,12 @@ export const userSettings = pgTable("user_settings", {
   notifyNoSpend: boolean("notify_no_spend").notNull().default(true),
   /** Dollar amounts in notes, which show on the lock screen. Off: notes only say what happened. */
   notifyAmounts: boolean("notify_amounts").notNull().default(true),
+  /** Paychecks, refunds and money sent to the person arriving. */
+  notifyMoneyIn: boolean("notify_money_in").notNull().default(true),
+  /** The day before a bill, Extra or card minimum is due. */
+  notifyBillDue: boolean("notify_bill_due").notNull().default(true),
+  /** A budget category at 80%, and again if it goes over. */
+  notifyBudget: boolean("notify_budget").notNull().default(true),
 });
 
 /** A passkey: Face ID, Touch ID or a security key registered for sign-in. Only the public half is stored. */

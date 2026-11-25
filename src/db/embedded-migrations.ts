@@ -115,5 +115,9 @@ export const MIGRATION_STATEMENTS: string[] = [
   "CREATE UNIQUE INDEX \"notifications_sent_ref_idx\" ON \"notifications_sent\" USING btree (\"user_id\",\"ref\");",
   "CREATE UNIQUE INDEX \"push_removed_idx\" ON \"push_removed\" USING btree (\"user_id\",\"endpoint_hash\");",
   "CREATE UNIQUE INDEX \"push_endpoint_idx\" ON \"push_subscriptions\" USING btree (\"endpoint_hash\");",
-  "CREATE INDEX \"push_user_idx\" ON \"push_subscriptions\" USING btree (\"user_id\");"
+  "CREATE INDEX \"push_user_idx\" ON \"push_subscriptions\" USING btree (\"user_id\");",
+  "ALTER TABLE \"items\" ADD COLUMN \"refreshed_at\" timestamp with time zone;",
+  "ALTER TABLE \"user_settings\" ADD COLUMN \"notify_money_in\" boolean DEFAULT true NOT NULL;",
+  "ALTER TABLE \"user_settings\" ADD COLUMN \"notify_bill_due\" boolean DEFAULT true NOT NULL;",
+  "ALTER TABLE \"user_settings\" ADD COLUMN \"notify_budget\" boolean DEFAULT true NOT NULL;"
 ];

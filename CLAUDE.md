@@ -90,6 +90,11 @@ for it to be remembered and used whenever an app is built.
   screen lists them separately. A new screen joins a place (as a tab, a screen in Wealth's sheet, or a
   row on You), and Home stays short.
 - Bank access tokens are stored encrypted. The app can read accounts and can never move money.
+- **Pull to refresh asks the banks to check now** (Plaid `/transactions/refresh`, `refreshItem`), at most
+  once every five minutes per bank (`items.refreshed_at`, claimed atomically), only on a pull or the
+  refresh button. Plaid otherwise checks 1 to 4 times a day. The owner agreed to it: it's included on the
+  Plaid Trial plan but billed per call on paid plans, so never call it on a schedule or in a loop. New data
+  arrives through the webhook; the app looks again 30 and 90 seconds after a pull (`syncNow`).
 - **Card payments vary and needn't be in full** (the owner pays big balances down over time, and not
   the same amount every month). Paying a card is a transfer, so the amount never changes spending or
   "left to spend" (purchases count when they're made). "Coming up", its total and Nickel's purchase
@@ -142,9 +147,12 @@ for it to be remembered and used whenever an app is built.
   `src/lib/notifications.ts`): a bill the person follows is paid ("Tell me when it's paid" on the bill, or the
   list in Settings: `recurring_overrides.notify_paid`, settled payments only, after each bank sync),
   checking is short for bills it pays in the next 3 days (card-paid bills don't count, a card's minimum
-  does), Monday's weekly review, and the no-spend week's first day. The last three can be switched off
-  (`user_settings.notify_*`); the morning ones come with the first bank update after 8 a.m. (`afterSync`),
-  and from a daily Vercel cron when `CRON_SECRET` is set (`vercel.json`, `/api/cron/notify`, GET only
+  does), money in (paychecks, refunds, money sent; never a move between the person's own accounts or a
+  round-up; a pending deposit is told about once, since its row survives settling), a budget at 80% and
+  again over, bills due tomorrow (one note), Monday's weekly review, and the no-spend week's first day.
+  All but bills paid can be switched off (`user_settings.notify_*`). **Never between 9 p.m. and 8 a.m.**:
+  what came in overnight goes out with the first bank update after 8 (`afterSync`). The morning ones also
+  come from a daily Vercel cron when `CRON_SECRET` is set (`vercel.json`, `/api/cron/notify`, GET only
   because the scheduler can't POST; 404 until the secret exists). Each note goes
   out once (`notifications_sent`). Push is written out by hand in `src/server/webpush.ts` (RFC 8291/8292,
   tested against the RFC's worked example): the site's push key is derived from `TOKEN_ENCRYPTION_KEY`

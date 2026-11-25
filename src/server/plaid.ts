@@ -1,5 +1,5 @@
 import { timingSafeEqual } from "node:crypto";
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { decodeProtectedHeader, importJWK, jwtVerify, type JWK } from "jose";
 import { Configuration, CountryCode, PlaidApi, PlaidEnvironments, Products, type AccountBase, type Transaction as PlaidTransaction } from "plaid/legacy";
 import type { DB } from "@/db";
@@ -23,7 +23,7 @@ import { afterSync } from "./notifications";
  * has something new and we sync again.
  */
 
-export type PlaidLike = Pick<PlaidApi, "accountsGet" | "transactionsSync" | "investmentsHoldingsGet" | "liabilitiesGet">;
+export type PlaidLike = Pick<PlaidApi, "accountsGet" | "transactionsSync" | "investmentsHoldingsGet" | "liabilitiesGet" | "transactionsRefresh">;
 
 let cached: PlaidApi | null = null;
 
@@ -244,9 +244,49 @@ export async function syncItem(db: DB, itemId: string, client: PlaidLike = plaid
   }
 }
 
-export async function syncAllForUser(db: DB, userId: string): Promise<void> {
+/** How often one bank can be asked to check for new transactions on demand. */
+const REFRESH_EVERY_MS = 5 * 60_000;
+
+/**
+ * Asks Plaid to check a bank for new transactions now, instead of at its next scheduled check (Plaid
+ * checks one to four times a day). Plaid answers at once and fetches in the background; anything new
+ * arrives a little later through the webhook. Only when the person pulls to refresh, and at most once
+ * every five minutes per bank: each call can be billed on a paid Plaid plan (it's included on the Trial
+ * plan the owner uses, and they agreed to it). It never fails a refresh: a bank or plan that doesn't offer
+ * it simply waits for the schedule. Returns whether Plaid took the request.
+ */
+export async function refreshItem(db: DB, itemId: string, client: PlaidLike = plaidClient(), now: Date = new Date()): Promise<boolean> {
+  const [item] = await db.select().from(items).where(eq(items.id, itemId)).limit(1);
+  if (!item?.accessTokenEnc || item.status === "needs_reauth") return false;
+  if (item.refreshedAt && now.getTime() - item.refreshedAt.getTime() < REFRESH_EVERY_MS) return false;
+  // Noted first, so two pulls at once can't both ask.
+  const claimed = await db
+    .update(items)
+    .set({ refreshedAt: now })
+    .where(and(eq(items.id, item.id), item.refreshedAt ? eq(items.refreshedAt, item.refreshedAt) : isNull(items.refreshedAt)))
+    .returning({ id: items.id });
+  if (claimed.length === 0) return false;
+  try {
+    await call(() => client.transactionsRefresh({ access_token: decryptSecret(item.accessTokenEnc!, bankOwner(item.userId)) }));
+    return true;
+  } catch (error) {
+    console.error("Plaid on-demand refresh skipped:", describeError(error));
+    return false;
+  }
+}
+
+/**
+ * "Refresh now": with `refresh`, first asks each bank to check for anything new (see refreshItem), then
+ * syncs what Plaid has. Says whether any bank is still checking, so the app can look again shortly.
+ */
+export async function syncAllForUser(db: DB, userId: string, options: { refresh?: boolean; client?: PlaidLike } = {}): Promise<{ refreshing: boolean }> {
   const rows = await db.select({ id: items.id }).from(items).where(eq(items.userId, userId));
-  for (const row of rows) await syncItem(db, row.id);
+  let refreshing = false;
+  if (options.refresh) {
+    for (const row of rows) if (await refreshItem(db, row.id, options.client)) refreshing = true;
+  }
+  for (const row of rows) await syncItem(db, row.id, options.client);
+  return { refreshing };
 }
 
 /** Upserts the item’s accounts and returns plaid_account_id → our account id. */

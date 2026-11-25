@@ -6,7 +6,7 @@ import { dollars, dollarsExact } from "./money";
  * can be tested on its own. Every note opens the thing it's about.
  */
 
-export type NoteKind = "bill" | "low" | "review" | "nospend" | "test";
+export type NoteKind = "bill" | "low" | "review" | "nospend" | "in" | "due" | "budget" | "test";
 
 export type Note = {
   kind: NoteKind;
@@ -97,6 +97,71 @@ export function noSpendStartNote(p: { month: string; end: ISODate; left: number 
     body: `Bills only through ${formatShort(p.end)}.${!amounts ? ` Whatever’s left of ${month} on the 1st can go to savings.` : p.left > 0 ? ` About ${dollars(p.left)} of ${month} is left, and whatever’s still there on the 1st can go to savings.` : " Every day you skip spending helps."}`,
     url: "/",
     tag: "nospend",
+  };
+}
+
+export type MoneyInFact = { txId: string; kind: "paycheck" | "refund" | "deposit"; name: string; amount: number; accountName: string };
+
+/** A paycheck, a refund, or money someone sent (the partner's half of the rent) arrived. */
+export function moneyInNote(p: MoneyInFact, amounts = true): Note {
+  const money = amounts ? `${dollarsExact(p.amount)} ` : "";
+  const into = p.accountName ? `into ${p.accountName}` : "";
+  const title = p.kind === "paycheck" ? "Paycheck arrived" : p.kind === "refund" ? `Refund from ${p.name}` : "Money in";
+  const body =
+    p.kind === "paycheck"
+      ? `${money}${into}`.trim()
+      : p.kind === "refund"
+        ? `${money}back${p.accountName ? ` on ${p.accountName}` : ""}`
+        : `${money}from ${p.name}${into ? ` ${into}` : ""}`;
+  return { kind: "in", ref: `in:${p.txId}`, title, body: `${body.charAt(0).toUpperCase()}${body.slice(1)}.`, url: "/transactions", tag: `in:${p.txId}` };
+}
+
+export type DueTomorrowFact = { key: string; name: string; amount: number; share: number | null };
+
+/** The day before: the bills, Extras and card minimums due tomorrow, in one note. Null when there are none. */
+export function billsDueNote(p: { tomorrow: ISODate; bills: DueTomorrowFact[] }, amounts = true): Note | null {
+  const bills = [...p.bills].sort((a, b) => a.amount - b.amount);
+  if (bills.length === 0) return null;
+  const amount = (b: DueTomorrowFact) => `${dollarsExact(-b.amount)}${b.share === null ? "" : b.share === 0.5 ? " (your half)" : " (your part)"}`;
+  const first = bills[0];
+  if (bills.length === 1) {
+    return { kind: "due", ref: `due:${p.tomorrow}`, title: `${first.name} is due tomorrow`, body: amounts ? `${amount(first)}.` : "Open Passbook to see it.", url: billHref(first.key), tag: "due" };
+  }
+  const shown = bills.slice(0, 4);
+  const more = bills.length > shown.length ? ` and ${bills.length - shown.length} more` : "";
+  const total = bills.reduce((s, b) => s - b.amount, 0);
+  const body = amounts ? `${shown.map((b) => `${b.name} ${amount(b)}`).join(" · ")}${more}. ${dollarsExact(total)} in all.` : `${shown.map((b) => b.name).join(", ")}${more}.`;
+  return { kind: "due", ref: `due:${p.tomorrow}`, title: `${bills.length} bills due tomorrow`, body, url: "/bills", tag: "due" };
+}
+
+export type BudgetFact = { category: string; label: string; month: string; budget: number; spent: number };
+
+/**
+ * A budget category at 80% of its budget ("close"), and again once it's over. Null below 80%. `budget`
+ * is the month's limit plus anything carried in.
+ */
+export function budgetNote(p: BudgetFact, amounts = true): Note | null {
+  const month = monthName(p.month);
+  const over = p.budget <= 0 ? p.spent > 0 : p.spent > p.budget;
+  const close = !over && p.budget > 0 && p.spent >= p.budget * 0.8;
+  if (!over && !close) return null;
+  const level = over ? "over" : "close";
+  const body = !amounts
+    ? over
+      ? `Over its budget for ${month}.`
+      : `Most of ${month}’s budget is spent.`
+    : over
+      ? p.budget <= 0
+        ? `${dollars(p.spent)} spent, with nothing planned for it in ${month}.`
+        : `${dollars(p.spent - p.budget)} over: ${dollars(p.spent)} of ${dollars(p.budget)} in ${month}.`
+      : `${dollars(p.spent)} of ${dollars(p.budget)} spent, ${dollars(p.budget - p.spent)} left for ${month}.`;
+  return {
+    kind: "budget",
+    ref: `budget-${level}:${p.month}:${p.category}`,
+    title: over ? `${p.label} is over budget` : `${p.label} is close to its budget`,
+    body,
+    url: `/budget?category=${encodeURIComponent(p.category)}`,
+    tag: `budget:${p.category}`,
   };
 }
 

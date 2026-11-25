@@ -3,6 +3,7 @@
 import { nickelReact } from "./nickel/store";
 import { ArrowDown, Check, RefreshCw } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { toast } from "./ui";
 import { send } from "./use-api";
 
 /*
@@ -38,14 +39,28 @@ async function newerVersionIsOut(): Promise<boolean> {
   }
 }
 
+let followUps: ReturnType<typeof setTimeout>[] = [];
+
+/**
+ * Asks every linked bank for anything new, then reloads every screen's data. The banks take a little
+ * while to answer, so when one is still checking the app looks again after half a minute and after a
+ * minute and a half (without asking the banks again).
+ */
+export async function syncNow(): Promise<void> {
+  const result = await send<{ ok: true; refreshing?: boolean }>("POST", "/api/sync").catch(() => null);
+  if (!result?.refreshing) return;
+  toast("Asked your banks for anything new. It can take a minute to come in.");
+  for (const t of followUps) clearTimeout(t);
+  followUps = [30_000, 90_000].map((ms) => setTimeout(() => void send("POST", "/api/sync", { refresh: false }).catch(() => {}), ms));
+}
+
 /** Refresh everything. Resolves "reload" when a newer app version is being loaded instead. */
 export async function refreshApp(): Promise<"reload" | "done"> {
   if (await newerVersionIsOut()) {
     window.location.reload();
     return "reload";
   }
-  // Pulls the latest from every linked bank, then reloads every screen's data.
-  await send("POST", "/api/sync").catch(() => {});
+  await syncNow();
   nickelReact({ type: "refreshed" });
   return "done";
 }
