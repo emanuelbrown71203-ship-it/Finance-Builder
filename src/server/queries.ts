@@ -444,7 +444,14 @@ function budgetFor(ctx: Ctx, bundle: RecurringBundle, limits: Limit[], goalList:
   const billIds = billIdsOf(bundle);
   const rows = categoryBudgets({ month, today: ctx.today, history: bundle.history, billIds, limits });
   const monthPlan = buildMonthPlan({ month, today: ctx.today, transactions: bundle.history.filter((t) => monthOf(t.date) === month), recurring: plannedSeries(bundle), savingsPlanned: savingPlanned(goalList), billIds, usualIncome: usualIncome(bundle.history, month), incomeAdjust: bundle.incomeAdjust });
-  const plan = { ...budgetPlan({ income: monthPlan.incomeExpected, bills: monthPlan.billsExpected, saving: monthPlan.savingsPlanned, rows }), everydaySpent: monthPlan.everydaySpent, leftToSpend: monthPlan.leftToSpend };
+  const plan = {
+    ...budgetPlan({ income: monthPlan.incomeExpected, bills: monthPlan.billsExpected, saving: monthPlan.savingsPlanned, rows }),
+    everydaySpent: monthPlan.everydaySpent,
+    leftToSpend: monthPlan.leftToSpend,
+    incomeReceived: monthPlan.incomeReceived,
+    billsPaid: monthPlan.billsPaid,
+    perDay: monthPlan.perDay,
+  };
   return { rows, monthPlan, plan };
 }
 

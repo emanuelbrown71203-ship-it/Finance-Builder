@@ -196,6 +196,11 @@ export type BudgetPlanView = {
   everydaySpent: number;
   /** The same number as Home's "left to spend". */
   leftToSpend: number;
+  /** What has come in so far (the rest of `income` is still expected), and what bills have been paid (the rest of `bills` is still due). */
+  incomeReceived: number;
+  billsPaid: number;
+  /** What's free to spend, spread over the days left. */
+  perDay: number;
 };
 
 /** One paycheck in a month: came in, or still expected (at the usual, or what the owner said it'll be). */

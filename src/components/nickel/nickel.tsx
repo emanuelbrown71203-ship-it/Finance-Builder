@@ -1103,9 +1103,9 @@ function NickelDo({ today, goals, loans, talksBack, onDone, onBill, onGoal, onLe
       const { answer: a } = await getJson<{ answer: Answer | null }>(`/api/nickel/ask?q=${encodeURIComponent(said.slice(0, 300))}${last ? `&last=${encodeURIComponent(JSON.stringify(last))}` : ""}`);
       if (!alive.current) return;
       if (!a) {
-        const miss = "I didn’t catch that. Ask me what’s left to spend, what’s due, what you’ve spent on something, how a goal is doing, or “can I afford…?”. Or tell me to add a bill or a goal.";
+        const miss = "I didn’t catch that. Ask me what’s free to spend, what’s due, what you’ve spent on something, how a goal is doing, or “can I afford…?”. Or tell me to add a bill or a goal.";
         setHint(miss);
-        answer("I didn’t catch that. Try asking what’s left to spend, or tell me to add a bill.", byVoice);
+        answer("I didn’t catch that. Try asking what’s free to spend, or tell me to add a bill.", byVoice);
       } else {
         setReply(a);
         lastTalk = { youSaid: said, reply: a, at: Date.now() };
@@ -1232,7 +1232,7 @@ function NickelDo({ today, goals, loans, talksBack, onDone, onBill, onGoal, onLe
             <button type="button" className={chip} onClick={onGoal}>
               New goal
             </button>
-            <button type="button" className={chip} onClick={() => void handle("what's left to spend?", false)}>
+            <button type="button" className={chip} onClick={() => void handle("what's free to spend?", false)}>
               What’s left?
             </button>
           </div>

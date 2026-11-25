@@ -37,7 +37,7 @@ function WeekAhead({ ahead }: { ahead: NonNullable<RecapPayload["ahead"]> }) {
       <p className="mb-3 text-ink-2">
         {ahead.leftToSpend >= 0 ? (
           <>
-            <span className="tabular font-bold text-ink">{dollars(ahead.leftToSpend)}</span> left to spend this month, about {dollars(ahead.perDay)} a day.
+            <span className="tabular font-bold text-ink">{dollars(ahead.leftToSpend)}</span> free to spend this month, about {dollars(ahead.perDay)} a day.
           </>
         ) : (
           <>

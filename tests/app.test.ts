@@ -1133,7 +1133,7 @@ describe("changes Nickel and Claude make when asked", () => {
 describe("asking Nickel", () => {
   it("answers everyday questions and purchase questions from the household's numbers", async () => {
     const left = await askNickel(ctx, "what's left to spend?");
-    expect(left?.text).toMatch(/left this month|past what’s left/);
+    expect(left?.text).toMatch(/free to spend this month|^You’re over by/);
     const due = await askNickel(ctx, "what bills are coming up this month?");
     expect(due?.text).toMatch(/due the rest of this month|Nothing due/);
     const rent = await askNickel(ctx, "when is rent due?");

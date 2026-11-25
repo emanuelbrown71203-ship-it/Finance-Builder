@@ -87,9 +87,9 @@ export function BillForm({ today, draft, editing, via = "you", onDone, onCancel 
       {frequency !== "once" && <Segmented<"bill" | "subscription"> full label="A bill you need, or an extra" value={kind} onChange={setKind} options={[{ value: "bill", label: "Bill (a need)" }, { value: "subscription", label: "Extra (a want)" }]} />}
       <p className="rounded-2xl bg-sky px-3.5 py-3 text-small text-sky-ink">
         {frequency === "once"
-          ? `It shows in what’s coming up${cents ? ` and takes ${dollars(cents)} off what’s left to spend` : ""} until its date.`
+          ? `It shows in what’s coming up${cents ? ` and counts as spoken for, ${dollars(cents)} off what’s free to spend` : ""} until its date.`
           : kind === "bill"
-            ? `It shows with your bills and is set aside from what’s left to spend each time it’s due. If the bank also shows it later, you can remove this one.`
+            ? `It shows with your bills and counts as spoken for each time it’s due. If the bank also shows it later, you can remove this one.`
             : `It shows with your Extras as a reminder. Like any spending, it counts against your budget when the charge comes through.`}
       </p>
       {error && <ErrorNote message={error} />}

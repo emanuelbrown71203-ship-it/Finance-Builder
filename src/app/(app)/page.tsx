@@ -13,6 +13,7 @@ import { LiveStatus } from "@/components/shell";
 import { markRecapSeen, weekId } from "@/components/recap";
 import { TxList } from "@/components/transactions";
 import { NoSpendCard } from "@/components/no-spend";
+import { MonthLedger } from "@/components/month-money";
 import { Blocks, Button, EmptyState, ErrorNote, Fold, PageHeader, Sheet, SheetHeader, Skeleton, Tag, cx } from "@/components/ui";
 import { LIVE_INTERVAL, useApi, useNow } from "@/components/use-api";
 import { category } from "@/lib/categories";
@@ -34,21 +35,6 @@ function More({ href, children }: { href: string; children: ReactNode }) {
       {children}
       <ChevronRight size={15} />
     </Link>
-  );
-}
-
-function PlanLine({ label, amount, note, sign }: { label: string; amount: number; note?: string; sign: "+" | "−" }) {
-  return (
-    <div className="flex items-baseline justify-between gap-4 py-2.5">
-      <dt>
-        {label}
-        {note && <span className="block text-small opacity-75">{note}</span>}
-      </dt>
-      <dd className="tabular whitespace-nowrap font-bold">
-        {sign === "−" && "−"}
-        {dollars(amount)}
-      </dd>
-    </div>
   );
 }
 
@@ -75,13 +61,13 @@ function Hero({ data }: { data: Overview }) {
         </span>
       </div>
       <p className="figure hero-figure mt-3 text-[clamp(3rem,15vw,4.75rem)]">{dollars(Math.abs(plan.leftToSpend))}</p>
-      <h2 className="display mt-2 text-title">{over ? "over what this month can cover" : "left to spend this month"}</h2>
+      <h2 className="display mt-2 text-title">{over ? "over this month’s money" : "free to spend this month"}</h2>
       <p className="mt-1.5 max-w-[46ch] opacity-90">
         {over
-          ? `Spending is ahead of what came in after bills and savings. Holding back until ${lastDay} closes the gap.`
+          ? `Spending has gone past what came in, after bills and savings. Holding off until ${lastDay} keeps it from growing.`
           : plan.daysLeft > 1
-            ? `That’s ${dollars(plan.perDay)} a day through ${lastDay}. Every bill and savings goal is already covered.`
-            : "Every bill and savings goal for the month is already covered."}
+            ? `After every bill and your savings. That’s ${dollars(plan.perDay)} a day through ${lastDay}.`
+            : "After every bill and your savings for the month."}
       </p>
 
       {toSpend > 0 && (
@@ -89,18 +75,15 @@ function Hero({ data }: { data: Overview }) {
           {/* The tick is where spending would be today at an even pace. */}
           <Blocks share={spentShare} color="var(--hero-figure)" label="Spent so far this month" blocks={14} height={12} valueNow={Math.min(plan.everydaySpent, toSpend)} valueMax={toSpend} marker={dayShare} />
           <p className="mt-2 text-small opacity-90">
-            <span className="tabular font-bold">{dollars(plan.everydaySpent)}</span> spent of <span className="tabular font-bold">{dollars(toSpend)}</span>. {ahead ? "That’s under" : "That’s over"} the even pace of <span className="tabular">{dollars(evenPace)}</span> by today.
+            <span className="tabular font-bold">{dollars(plan.everydaySpent)}</span> spent of the <span className="tabular font-bold">{dollars(toSpend)}</span> there is for everyday spending. {ahead ? "That’s under" : "That’s over"} the even pace of <span className="tabular">{dollars(evenPace)}</span> by today.
           </p>
         </div>
       )}
 
-      <Fold title="How this is worked out" className="hero-rule mt-4 border-t" summary={`${dollars(plan.incomeExpected)} in`}>
-        <dl className="hero-rules pb-1">
-          <PlanLine label="Money in this month" amount={plan.incomeExpected} sign="+" note={plan.incomeExpected > plan.incomeReceived ? `${dollars(plan.incomeReceived)} in, ${dollars(plan.incomeExpected - plan.incomeReceived)} still expected` : undefined} />
-          <PlanLine label="Bills you must pay" amount={plan.billsExpected} sign="−" note={plan.billsExpected > plan.billsPaid ? `${dollars(plan.billsPaid)} paid, ${dollars(plan.billsExpected - plan.billsPaid)} still due` : undefined} />
-          <PlanLine label="Set aside for goals" amount={plan.savingsPlanned} sign="−" />
-          <PlanLine label="Spent so far" amount={plan.everydaySpent} sign="−" />
-        </dl>
+      <Fold title="Where this month’s money is" className="hero-rule mt-4 border-t" summary={`${dollars(plan.incomeReceived)} came in`}>
+        <div className="pb-1">
+          <MonthLedger f={plan} when="now" tone="hero" />
+        </div>
         <Link href="/budget" className="mb-2 inline-flex min-h-11 items-center gap-1 font-bold underline underline-offset-4">
           See it all in your budget <ChevronRight size={16} />
         </Link>

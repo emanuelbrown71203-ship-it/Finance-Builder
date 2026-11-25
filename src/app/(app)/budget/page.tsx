@@ -17,6 +17,7 @@ import { TxList } from "@/components/transactions";
 import { GoalDialog, type GoalSheet } from "@/components/goals";
 import { PixelIcon } from "@/components/pixel-icons";
 import { addMonthsToMonth, dayOfMonth, formatShort, monthEnd, monthName, monthOf } from "@/lib/dates";
+import { MonthBar, MonthLedger, type MonthFigures } from "@/components/month-money";
 import { WINS } from "@/lib/game/progress";
 import { dollars, dollarsExact, parseDollarsToCents } from "@/lib/money";
 import type { BudgetPayload, BudgetRow, Me, TransactionsPayload } from "@/lib/types";
@@ -37,10 +38,37 @@ const restore = (cat: string, before: Previous) => send("PUT", "/api/budget", { 
 
 function statusLine(row: BudgetRow, data: BudgetPayload): string {
   if (row.left === null) return row.average > 0 ? `Usually ${dollars(row.average)} a month` : "New this month";
-  if (row.status === "over") return data.isCurrent ? `${dollars(Math.max(0, row.spent))} spent so far` : `${dollars(Math.max(0, row.spent))} spent`;
-  if (!data.isCurrent) return `${dollars(row.left)} to spare`;
-  if (row.status === "watch") return `On pace for about ${dollars(row.forecast)}`;
-  return row.perDay !== null && data.daysLeft > 1 ? `${dollars(row.perDay)} a day for ${data.daysLeft} days` : "On track";
+  const spent = `${dollars(Math.max(0, row.spent))} spent of ${dollars(available(row))}`;
+  if (row.left < 0 || !data.isCurrent) return spent;
+  if (row.status === "watch") return `${spent}. On pace for about ${dollars(row.forecast)}`;
+  return row.perDay !== null && data.daysLeft > 1 ? `${spent}. About ${dollars(row.perDay)} a day left` : spent;
+}
+
+/** Above the budgets: what's left in them, how much is over and where, and whether they fit the month's money. */
+function BudgetsSummary({ data }: { data: BudgetPayload }) {
+  const limited = data.rows.filter((r) => r.limit !== null);
+  const overRows = limited.filter((r) => r.left !== null && r.left < 0);
+  const overBy = overRows.reduce((s, r) => s - (r.left ?? 0), 0);
+  const left = limited.reduce((s, r) => s + Math.max(0, r.left ?? 0), 0);
+  const names = overRows.map((r) => category(r.category).label);
+  const unplanned = data.plan.unplanned;
+  return (
+    <div className="mb-3 flex flex-col gap-2">
+      <div className="grid grid-cols-2 gap-2">
+        <div className="rounded-2xl bg-sunk px-3.5 py-2.5">
+          <p className="text-small text-ink-3">Left in your budgets</p>
+          <p className="tabular text-lead font-bold">{dollars(left)}</p>
+        </div>
+        <div className={cx("rounded-2xl px-3.5 py-2.5", overBy > 0 ? "bg-pink text-pink-ink" : "bg-sunk")}>
+          <p className={cx("text-small", overBy > 0 ? "" : "text-ink-3")}>{overBy > 0 ? `Over, in ${overRows.length} ${overRows.length === 1 ? "budget" : "budgets"}` : "Over budget"}</p>
+          <p className="tabular text-lead font-bold">{overBy > 0 ? dollars(overBy) : "None"}</p>
+        </div>
+      </div>
+      {overBy > 0 && <p className="text-small text-ink-2">Over: {names.length <= 3 ? names.join(", ") : `${names.slice(0, 3).join(", ")} and ${names.length - 3} more`}. That spending still counts in “Already spent” above.</p>}
+      {data.isCurrent && unplanned > 2000 && <p className="text-small text-ink-2">{dollars(unplanned)} of this month’s money has no budget yet. Raise a limit, or put it toward a goal.</p>}
+      {data.isCurrent && unplanned < 0 && <p className="rounded-control bg-pink px-3.5 py-3 text-small text-pink-ink">Your budgets add up to {dollars(-unplanned)} more than this month’s money, after bills and savings. Lowering a limit or two would make them fit.</p>}
+    </div>
+  );
 }
 
 function CategoryRow({ row, data, onOpen }: { row: BudgetRow; data: BudgetPayload; onOpen: () => void }) {
@@ -54,8 +82,19 @@ function CategoryRow({ row, data, onOpen }: { row: BudgetRow; data: BudgetPayloa
           <span className="flex items-baseline justify-between gap-3">
             <span className="min-w-0 break-words font-bold leading-snug">{name}</span>
             <span className="tabular shrink-0">
-              <span className={cx("font-bold", row.left !== null && row.left < 0 && "text-bad")}>{row.left === null ? dollars(Math.max(0, row.spent)) : row.left < 0 ? `${dollars(-row.left)} over` : `${dollars(row.left)} left`}</span>
-              <span className="text-small text-ink-3"> {row.limit === null ? "spent" : `of ${dollars(available(row))}`}</span>
+              {row.left === null ? (
+                <>
+                  <span className="font-bold">{dollars(Math.max(0, row.spent))}</span>
+                  <span className="text-small text-ink-3"> spent</span>
+                </>
+              ) : row.left < 0 ? (
+                <span className="font-bold text-bad">Over by {dollars(-row.left)}</span>
+              ) : (
+                <>
+                  <span className="font-bold">{dollars(row.left)}</span>
+                  <span className="text-small text-ink-3"> left</span>
+                </>
+              )}
             </span>
           </span>
           {row.limit !== null && (
@@ -63,13 +102,17 @@ function CategoryRow({ row, data, onOpen }: { row: BudgetRow; data: BudgetPayloa
               <BudgetBar row={row} />
             </span>
           )}
-          <span className="mt-1.5 flex min-w-0 items-center gap-1.5 text-small text-ink-3">
-            {row.limit !== null && <Tag tone={s.tone}>{s.label}</Tag>}
-            <span className="truncate">{statusLine(row, data)}</span>
+          <span className="mt-1.5 flex min-w-0 items-start gap-1.5 text-small text-ink-3">
+            {row.limit !== null && (
+              <Tag tone={s.tone} className="shrink-0">
+                {s.label}
+              </Tag>
+            )}
+            <span className="min-w-0">{statusLine(row, data)}</span>
           </span>
           {row.rollover && row.carried !== 0 && (
             <span className="mt-1 flex items-center gap-1 text-micro text-ink-3">
-              <RotateCw size={12} aria-hidden /> {row.carried > 0 ? `${dollars(row.carried)} carried over` : `${dollars(-row.carried)} overspent last time, taken off`}
+              <RotateCw size={12} aria-hidden /> {row.carried > 0 ? `${dollars(row.limit ?? 0)} budget plus ${dollars(row.carried)} carried over` : `${dollars(row.limit ?? 0)} budget less ${dollars(-row.carried)} overspent last time`}
             </span>
           )}
         </span>
@@ -79,75 +122,38 @@ function CategoryRow({ row, data, onOpen }: { row: BudgetRow; data: BudgetPayloa
   );
 }
 
-/** Where the month's money goes, as one bar and its parts. */
-function PlanCard({ data, onPaychecks }: { data: BudgetPayload; onPaychecks: () => void }) {
-  const past = data.month < monthOf(data.today);
+/**
+ * The month at a glance, in four plain parts: what came in, what's already spent, what's spoken for (bills
+ * still to pay and savings: promised, not spent yet), and what's free to spend, or how much it's over.
+ * The same number as Home's.
+ */
+function MonthCard({ data, onPaychecks }: { data: BudgetPayload; onPaychecks: () => void }) {
+  const current = monthOf(data.today);
+  const when = data.month < current ? "past" : data.month > current ? "future" : "now";
   const p = data.plan;
-  const limited = data.rows.filter((r) => r.limit !== null);
-  const leftInBudgets = limited.reduce((s, r) => s + (r.left ?? 0), 0);
-  const perDay = limited.reduce((s, r) => s + (r.perDay ?? 0), 0);
-  const parts = [
-    { label: "Bills you must pay", amount: p.bills, color: "var(--c-bills)" },
-    { label: "Saving for goals", amount: p.saving, color: "var(--c-savings)" },
-    { label: "Everyday budgets", amount: p.budgeted, color: "var(--accent)" },
-    { label: p.unplanned >= 0 ? "Not planned yet" : "More than comes in", amount: Math.abs(p.unplanned), color: p.unplanned >= 0 ? "var(--line)" : "var(--bad)" },
-  ];
-  const whole = Math.max(1, parts.reduce((s, x) => s + x.amount, 0));
+  const f: MonthFigures = { month: data.month, incomeExpected: p.income, incomeReceived: p.incomeReceived, billsExpected: p.bills, billsPaid: p.billsPaid, savingsPlanned: p.saving, everydaySpent: p.everydaySpent, leftToSpend: p.leftToSpend, days: data.monthPlan?.days };
+  const over = p.leftToSpend < 0;
+  const month = monthName(data.month);
+  const explain =
+    when === "past"
+      ? over
+        ? `${month} spent ${dollars(-p.leftToSpend)} more than came in, after bills and savings.`
+        : `What ${month} had left after every bill, your savings and your spending.`
+      : when === "future"
+        ? `What ${month} should leave after the bills and savings expected, before any spending.`
+        : over
+          ? `Spending has gone past what this month’s money covers, after bills and savings. Holding off for the rest of ${month} keeps it from growing.`
+          : `After every bill and your savings.${data.daysLeft > 1 ? ` About ${dollars(p.perDay)} a day for the ${data.daysLeft} days left.` : ""}`;
   return (
     <Sheet>
-      {limited.length > 0 ? (
-        <>
-          <p className="text-small font-bold text-ink-2">{data.isCurrent ? "Left in your budgets" : `Left at the end of ${monthName(data.month)}`}</p>
-          <p className={cx("figure mt-2 text-[clamp(2.75rem,13vw,3.75rem)]", leftInBudgets < 0 && "text-bad")}>{leftInBudgets < 0 ? `−${dollars(-leftInBudgets)}` : dollars(leftInBudgets)}</p>
-          <p className="mt-1.5 text-ink-2">
-            {data.isCurrent && data.daysLeft > 1 && leftInBudgets > 0 ? `About ${dollars(perDay)} a day across your budgets for the ${data.daysLeft} days left. ` : ""}
-            {dollars(p.budgetedSpent)} spent of {dollars(p.budgeted + p.carried)} in your budgets{p.unbudgetedSpent > 0 ? `, and ${dollars(p.unbudgetedSpent)} where there’s no limit` : ""}.
-          </p>
-        </>
-      ) : (
-        <>
-          <p className="text-small font-bold text-ink-2">Everyday spending in {monthName(data.month)}</p>
-          <p className="figure mt-2 text-[clamp(2.75rem,13vw,3.75rem)]">{dollars(data.totalSpent)}</p>
-          <p className="mt-1.5 text-ink-2">Bills are counted separately, in the plan below. Extras like Netflix count here.</p>
-        </>
-      )}
-
-      <div className="mt-5" aria-hidden>
-        <div className="flex h-4 w-full gap-[3px] overflow-hidden rounded-[3px]">
-          {parts.map((x) => x.amount > 0 && <span key={x.label} className="block-on h-full rounded-[2px]" style={{ width: `${(x.amount / whole) * 100}%`, background: x.color }} />)}
-        </div>
+      <p className="text-small font-bold text-ink-2">{when === "past" ? month : when === "future" ? `${month}, planned` : `${month} so far`}</p>
+      <p className={cx("mt-2 text-small font-bold", over ? "text-bad" : "text-ink-2")}>{over ? "Over by" : when === "past" ? "Left over" : "Free to spend"}</p>
+      <p className={cx("figure mt-1 text-[clamp(2.75rem,13vw,3.75rem)]", over && "text-bad")}>{dollars(Math.abs(p.leftToSpend))}</p>
+      <p className="mt-1.5 text-ink-2">{explain}</p>
+      <MonthBar f={f} className="mt-5" />
+      <div className="mt-2">
+        <MonthLedger f={f} when={when} onPaychecks={data.paychecks.length > 0 ? onPaychecks : undefined} />
       </div>
-      {/* Tap it to see the month's paychecks and set a coming one lighter (missed days). */}
-      <button type="button" onClick={onPaychecks} disabled={data.paychecks.length === 0} className="mt-3 flex w-full items-baseline justify-between gap-4 border-b border-line-soft py-2.5 text-left enabled:active:bg-sunk">
-        <span className="font-bold">
-          {past ? "Money in" : `Expected in ${data.isCurrent ? "this month" : monthName(data.month)}`}
-          {data.isCurrent && p.income > data.income && <span className="block text-small font-normal text-ink-3">{dollars(data.income)} in so far; the rest is paychecks still to come</span>}
-          {data.paychecks.length > 0 && <span className="block text-small font-bold text-accent-text">{past ? "See paychecks" : "Paychecks: change a lighter one"}</span>}
-        </span>
-        <span className="tabular font-bold">{dollars(p.income)}</span>
-      </button>
-      <dl className="divide-y divide-line-soft">
-        {parts.map((x) => (
-          <div key={x.label} className="flex items-baseline justify-between gap-4 py-2.5">
-            <dt className="flex items-center gap-2">
-              <span aria-hidden className="size-2.5 shrink-0 rounded-[2px]" style={{ background: x.color }} />
-              {x.label}
-            </dt>
-            <dd className={cx("tabular", x.label === "More than comes in" && "font-bold text-bad")}>{dollars(x.amount)}</dd>
-          </div>
-        ))}
-        {p.carried !== 0 && (
-          <div className="flex items-baseline justify-between gap-4 py-2.5 text-ink-2">
-            <dt className="flex items-center gap-2">
-              <RotateCw size={12} aria-hidden className="mx-px" />
-              {p.carried > 0 ? "Carried over into budgets" : "Overspent last time, taken off"}
-            </dt>
-            <dd className="tabular">{dollars(Math.abs(p.carried))}</dd>
-          </div>
-        )}
-      </dl>
-      {data.isCurrent && p.unplanned > 2000 && limited.length > 0 && <p className="mt-2 rounded-control bg-sunk px-3.5 py-3 text-small text-ink-2">{dollars(p.unplanned)} has no job yet. Raise a limit, or put it toward a goal in Wealth.</p>}
-      {data.isCurrent && p.unplanned < 0 && <p className="mt-2 rounded-control bg-pink px-3.5 py-3 text-small text-pink-ink">Your plan asks for {dollars(-p.unplanned)} more than comes in this month. Lowering a limit or two would close the gap.</p>}
     </Sheet>
   );
 }
@@ -193,7 +199,7 @@ function MonthAheadCard({ data, ahead }: { data: BudgetPayload; ahead: NonNullab
           {ahead.forecastLeft >= 0 ? `About ${dollars(ahead.forecastLeft)} left at the end of ${month}` : `About ${dollars(-ahead.forecastLeft)} short by the end of ${month}`}
         </p>
         <p className="mt-0.5 text-small">
-          {ahead.forecast > 0 ? `If you spend like usual: ${dollars(ahead.leftNow)} left to spend now, less about ${dollars(ahead.forecast)} more spending. ` : ""}
+          {ahead.forecast > 0 ? `If you spend like usual: ${dollars(ahead.leftNow)} free to spend now, less about ${dollars(ahead.forecast)} more spending. ` : ""}
           {ahead.forecastLeft > 0 ? "That’s what can go to savings." : "Skipping a few buys before the no-spend week closes the gap."}
         </p>
       </div>
@@ -314,7 +320,7 @@ function SavingsRow({ data, onOpen }: { data: BudgetPayload; onOpen: () => void 
         <span className="min-w-0 flex-1">
           <span className="block font-bold">Savings</span>
           <span className="block text-small text-ink-3">
-            {goals.length === 0 ? "Put money aside each month" : planned > 0 ? `${dollars(Math.max(0, putAside))} of ${dollars(planned)} in${data.isCurrent ? " so far" : ""}` : "No monthly amount yet"}
+            {goals.length === 0 ? "Put money aside each month" : planned > 0 ? `${dollars(Math.max(0, putAside))} of ${dollars(planned)} put aside${data.isCurrent ? " so far" : ""}` : "No monthly amount yet"}
           </span>
           {planned > 0 && (
             <span className="mt-1.5 block">
@@ -337,8 +343,8 @@ function SavingsDialog({ data, open, onClose, onGoal }: { data: BudgetPayload; o
       <div className="flex flex-col gap-4">
         <p className="text-ink-2">
           {goals.length === 0
-            ? "Pick something to save for and how much to put aside each month. It comes out of your month first, before everyday budgets, so “left to spend” already allows for it."
-            : `${dollars(data.plan.saving)} a month goes to your goals first, before everyday budgets, so “left to spend” already allows for it. Change a goal’s monthly amount, or record money you put in.`}
+            ? "Pick something to save for and how much to put aside each month. It comes out of your month first, before everyday budgets, so it’s spoken for before “free to spend”."
+            : `${dollars(data.plan.saving)} a month goes to your goals first, before everyday budgets, so it’s spoken for before “free to spend”. Change a goal’s monthly amount, or record money you put in.`}
         </p>
         {goals.length > 0 && (
           <ul className="flex flex-col gap-2">
@@ -730,11 +736,11 @@ function Budget() {
               </div>
             </Sheet>
           )}
-          <PlanCard data={data} onPaychecks={() => setPaychecksOpen(true)} />
+          <MonthCard data={data} onPaychecks={() => setPaychecksOpen(true)} />
           {data.ahead && <MonthAheadCard data={data} ahead={data.ahead} />}
           {data.monthPlan && (
             <Sheet>
-              <SheetHeader title="Spending pace" hint="What’s left to spend as the month goes on, against spending it evenly." />
+              <SheetHeader title="Spending pace" hint="What’s free to spend as the month goes on, against spending it evenly." />
               <Runway plan={data.monthPlan} height={220} />
             </Sheet>
           )}
@@ -742,7 +748,8 @@ function Budget() {
 
         <div className="flex flex-col gap-4">
           <Sheet>
-            <SheetHeader title="Budgets" hint={limited.length > 0 ? "Savings first, then everyday spending. The tick on each bar is where you’d be today spending evenly." : undefined} />
+            <SheetHeader title="Budgets" hint={limited.length > 0 ? "What’s left under the limit you set for each kind of everyday spending. Bills aren’t in here: they’re in “Spoken for” above. The tick on each bar is where you’d be today, spending evenly." : undefined} />
+            {limited.length > 0 && <BudgetsSummary data={data} />}
             <ul className="mb-1 border-b border-line-soft pb-1">
               <SavingsRow data={data} onOpen={() => setSavingsOpen(true)} />
             </ul>

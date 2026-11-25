@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { answerQuestion, judgePurchase, type Answer, type Snapshot } from "@/lib/nickel/answers";
+import { answerQuestion, judgePurchase, planIn, type Answer, type Snapshot } from "@/lib/nickel/answers";
 
 const snap: Snapshot = {
   today: "2026-11-21",
@@ -35,11 +35,22 @@ const snap: Snapshot = {
 const ask = (q: string) => answerQuestion(q, snap) as Answer;
 
 describe("answering everyday questions from the person's own numbers", () => {
-  it("says what's left to spend, however it's asked", () => {
-    for (const q of ["What's left to spend?", "how am I doing this month", "How much can I spend per day", "what’s left"]) {
-      expect(ask(q).text, q).toBe("After bills and goals there’s $1,234.56 left this month: about $123.46 a day for 10 days.");
+  it("says what's free to spend, however it's asked", () => {
+    for (const q of ["What's left to spend?", "what's free to spend?", "how am I doing this month", "How much can I spend per day", "what’s left"]) {
+      expect(ask(q).text, q).toBe("$1,234.56 is free to spend this month, after every bill and your savings: about $123.46 a day for 10 days.");
     }
-    expect((answerQuestion("what's left", { ...snap, leftToSpend: -5_000 }) as Answer).text).toMatch(/past what’s left/);
+    expect((answerQuestion("what's left", { ...snap, leftToSpend: -5_000 }) as Answer).text).toMatch(/^You’re over by \$50 this month, with 10 days to go/);
+  });
+
+  it("says how much is over, and what's spoken for, in the owner's words", () => {
+    const over = { ...snap, leftToSpend: -41_200, spending: [{ category: "groceries", label: "Groceries", spent: 74_149, limit: 65_000 }, { category: "dining", label: "Restaurants & coffee", spent: 10_000, limit: 28_000 }] };
+    expect((answerQuestion("how much am I over?", over) as Answer).text).toBe("You’re over by $412 this month: spending has gone past what came in, after bills and savings. Over budget: Groceries by $91.49.");
+    expect(ask("am I over?").text).toBe("You’re not over: $1,234.56 is still free to spend this month.");
+    const withMonth = { ...snap, month: { billsPaid: 99_900, everyday: 86_100, billsDue: 102_600, saving: 12_400 } };
+    expect((answerQuestion("what's spoken for?", withMonth) as Answer).text).toBe(
+      "$8,538.96 came in this month ($5,692.64 so far, $2,846.32 still coming). $1,860 is already spent ($999 on bills, $861 everyday). $1,150 is spoken for ($1,026 for bills still to pay, $124 for savings). That leaves $1,234.56 free to spend.",
+    );
+    expect((answerQuestion("give me the breakdown", withMonth) as Answer).text).toMatch(/is spoken for/);
   });
 
   it("knows what's coming up and when a named bill is due", () => {
@@ -228,5 +239,59 @@ describe("the things a review caught", () => {
     expect(ask("what bills are due before payday").text).toMatch(/due before payday on Nov 27/);
     expect(ask("how much did I spend for the month").text).toMatch(/spent so far this month/);
     expect((answerQuestion("how much did I spend on dining last month", { ...snap, spending: [{ ...snap.spending[0], lastMonth: 41_000 }] }) as Answer).text).toBe("You spent $410 on Restaurants & coffee last month.");
+  });
+});
+
+describe("buying on a payment plan", () => {
+  it("reads the plan from the words: pay in 4 every two weeks unless said otherwise", () => {
+    expect(planIn("can i afford it on a payment plan")).toEqual({ count: 4, everyDays: 14 });
+    expect(planIn("what if i pay it in 4")).toEqual({ count: 4, everyDays: 14 });
+    expect(planIn("split it into 3 payments")).toEqual({ count: 3, everyDays: 14 });
+    expect(planIn("can i get it with affirm")).toEqual({ count: 4, everyDays: 14 });
+    expect(planIn("a laptop over 6 months")).toEqual({ count: 6, everyDays: 30 });
+    expect(planIn("12 monthly payments")).toEqual({ count: 12, everyDays: 30 });
+    expect(planIn("pay it off over 8 weeks")).toEqual({ count: 4, everyDays: 14 });
+    expect(planIn("can i afford a 300 jacket")).toBeNull();
+  });
+
+  it("judges the payments, not the whole price, and names the thing even when asked about 'them'", () => {
+    const a = ask("I need new headphones $250. Can I afford them if I put them on a payment plan");
+    expect(a.verdict).toEqual({ amount: 25_000, item: "headphones", verdict: "yes", plan: { count: 4, everyDays: 14 } });
+    expect(a.text).toMatch(/^(Yes, that fits\.|Paws up: that fits\.|Yes\. Woof!) \$62\.50 today, then \$62\.50 every two weeks until Jan 2 \(4 payments\)\. This month that leaves \$1,172\.06, about \$117\.20 a day\. Only take it if it’s 0% interest\.$/);
+    const monthly = ask("can I afford a $1,200 laptop over 6 months");
+    expect(monthly.text).toContain("$200 today, then $200 every month until Apr 21 (6 payments). This month that leaves $1,034.56, about $103.45 a day.");
+  });
+
+  it("says when the cards are already costing interest: 0% only, paid from checking", () => {
+    const withCosts = { ...snap, costs: { thisMonth: 17_787, thisYear: 60_000, interestYear: 40_000, feesYear: 20_000 } };
+    expect((answerQuestion("can I afford $250 headphones on a payment plan", withCosts) as Answer).text).toMatch(/Only take it at 0% interest, paid from checking, not a card: your cards already cost \$177\.87 in interest and fees this month\.$/);
+  });
+
+  it("puts bills first: a plan that leaves checking short before payday is a no", () => {
+    const tight = { ...snap, cash: 10_000 };
+    const a = answerQuestion("can I afford $250 headphones on a payment plan", tight) as Answer;
+    expect(a.verdict?.verdict).toBe("no");
+    expect(a.text).toMatch(/Even split up, the headphones would leave checking \$106\.99 short of the \$144\.49 in bills due before payday on Nov 27\. That puts the household’s bills at risk\./);
+  });
+
+  it("keeps the no-spend week: the first payment would land in it, and so would any purchase", () => {
+    const lastWeek = { ...snap, today: "2026-11-25" };
+    const plan = answerQuestion("can I afford $250 headphones on a payment plan", lastWeek) as Answer;
+    expect(plan.verdict?.verdict).toBe("wait");
+    expect(plan.text).toMatch(/It’s your no-spend week through Nov 30, and the first \$62\.50 would come out today\. Start the plan on Dec 1 or later and ask me again\./);
+    const pizza = answerQuestion("can I afford a $40 pizza", lastWeek) as Answer;
+    expect(pizza.verdict?.verdict).toBe("wait");
+    expect(pizza.text).toMatch(/It’s your no-spend week through Nov 30: bills only\. The pizza can wait until Dec 1/);
+  });
+
+  it("looks again when asked 'what if I pay it in 4', and holds to the plan answer when pushed", () => {
+    const first = ask("can I afford a $2,000 couch");
+    expect(first.verdict?.verdict).toBe("no");
+    const split = answerQuestion("what if I pay it in 4", snap, first.verdict) as Answer;
+    expect(split.verdict).toEqual({ amount: 200_000, item: "couch", verdict: "yes", plan: { count: 4, everyDays: 14 } });
+    expect(split.text).toMatch(/^On a payment plan, that changes things\. .* \$500 today, then \$500 every two weeks until Jan 2 \(4 payments\)\./);
+    const pushed = answerQuestion("are you sure?", snap, split.verdict) as Answer;
+    expect(pushed.verdict?.verdict).toBe("yes");
+    expect(pushed.text).toContain("$500 today");
   });
 });

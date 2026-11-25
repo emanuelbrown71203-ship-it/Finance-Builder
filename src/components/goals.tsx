@@ -211,7 +211,7 @@ function GoalForm({ goal, today, onClose, onDeleted, onSaved }: { goal: GoalView
           To have {dollars(targetCents ?? 0)} by {formatShort(targetDate)}, {savedCents > 0 ? `on top of ${dollars(savedCents)} already saved, ` : ""}that’s <span className="font-bold">{dollars(suggested)} a month</span>.
         </p>
       )}
-      <Field label="Set aside each month" hint={suggested ? `Leave blank to use ${dollars(suggested)}. It’s counted in your monthly plan before “left to spend”.` : "Counted in your monthly plan before “left to spend”."}>
+      <Field label="Set aside each month" hint={suggested ? `Leave blank to use ${dollars(suggested)}. It’s counted as spoken for, before “free to spend”.` : "Counted as spoken for, before “free to spend”."}>
         {(id) => <MoneyInput id={id} value={monthly} onChange={(e) => setMonthly(e.target.value)} placeholder={suggested ? String(suggested / 100) : "0"} />}
       </Field>
       {error && <ErrorNote message={error} />}

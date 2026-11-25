@@ -112,6 +112,12 @@ export async function askNickel(ctx: Ctx, question: string, last: LastVerdict | 
     daysLeft: overview.plan.daysLeft,
     incomeReceived: overview.plan.incomeReceived,
     incomeExpected: overview.plan.incomeExpected,
+    month: {
+      billsPaid: overview.plan.billsPaid,
+      everyday: overview.plan.everydaySpent,
+      billsDue: Math.max(0, overview.plan.billsExpected - overview.plan.billsPaid),
+      saving: overview.plan.savingsPlanned,
+    },
     // Repeating bills, plus card payments that are coming due.
     bills: [
       ...recurring.series.filter((s) => s.kind !== "income").map((s) => ({ name: s.name, nextDate: s.nextDate, amount: s.amount, active: s.active, category: s.category })),

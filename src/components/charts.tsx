@@ -334,7 +334,7 @@ export function Runway({ plan, height = 250 }: { plan: MonthPlan; height?: numbe
         {day && activeDay !== null && width > 0 && (
           <Tooltip x={x(activeDay)} width={width}>
             <p className="font-semibold">{formatShort(day.date)}</p>
-            {activeDay <= todayIndex && <p className="tabular text-micro text-ink-3">{dollars(left[activeDay])} left to spend</p>}
+            {activeDay <= todayIndex && <p className="tabular text-micro text-ink-3">{dollars(left[activeDay])} free to spend</p>}
             {day.events.length === 0 && <p className="mt-1 text-micro text-ink-3">{day.projected ? "Nothing expected" : "No activity"}</p>}
             {[...day.events]
               .sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount))
@@ -353,7 +353,7 @@ export function Runway({ plan, height = 250 }: { plan: MonthPlan; height?: numbe
         )}
       </div>
       <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 pl-[46px]">
-        <LegendKey color="var(--series-1)" label="Left to spend" />
+        <LegendKey color="var(--series-1)" label="Free to spend" />
         <LegendKey color="var(--series-muted)" label="Even pace" dashed />
         <LegendKey color="var(--series-3)" label="Money in" shape="dot" />
         <LegendKey color="var(--series-5)" label="Bill" shape="square" />

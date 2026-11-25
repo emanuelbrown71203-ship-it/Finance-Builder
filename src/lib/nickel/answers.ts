@@ -1,4 +1,5 @@
-import { diffDays, formatShort, monthEnd, monthOf, type ISODate } from "../dates";
+import { addDays, addMonths, diffDays, formatShort, monthEnd, monthOf, type ISODate } from "../dates";
+import { noSpendWeekOf } from "../finance/nospend";
 
 /*
  * Answering everyday questions said or typed to Nickel ("what's left to
@@ -38,11 +39,13 @@ export type Snapshot = {
   extras?: { name: string; monthly: number }[];
   /** What interest and fees have cost: this month and this year. */
   costs?: { thisMonth: number; thisYear: number; interestYear: number; feesYear: number };
+  /** The month in the owner's words: already spent (bills paid, everyday) and spoken for (bills still due, savings). */
+  month?: { billsPaid: number; everyday: number; billsDue: number; saving: number };
 };
 
 export type Verdict = "yes" | "wait" | "no";
 /** What Nickel last decided about a purchase, so he can hold his ground when pushed. */
-export type LastVerdict = { amount: number; item: string; verdict: Verdict };
+export type LastVerdict = { amount: number; item: string; verdict: Verdict; plan?: PaymentPlan };
 
 export type Answer = { text: string; href?: string; link?: string; verdict?: LastVerdict };
 
@@ -134,15 +137,16 @@ const INVESTING = /\b(stocks?|shares?|bitcoin|btc|crypto|ethereum|eth|etfs?|inde
 const PURCHASE = /\b(can i afford|afford|should i (buy|get|spend|order|book|splurge)|is it (ok|okay|fine|smart|wise|a good idea) to (buy|spend|get|book)|thinking (of|about) (buying|getting|booking)|i want to (buy|get|book)|worth (buying|getting)|ok to spend|okay to spend|good idea to (buy|get|spend))\b/;
 const PUSHBACK = /\b(but|please|come on|are you sure|really|just this once|i want it|i need it|on sale|i deserve|treat myself|it'?s fine|trust me|change your mind|reconsider|you'?re wrong|why not|pretty please|i promise|it'?s worth it|i'?ll be fine|let me|seriously)\b/;
 
-const ITEM_STOP = new Set(["on", "for", "at", "in", "this", "next", "today", "tomorrow", "right", "now", "by", "before", "after", "with", "from", "if", "or", "and", "to", "each", "apiece", "off", "until", "when", "because"]);
+const ITEM_STOP = new Set(["on", "for", "at", "in", "this", "next", "today", "tomorrow", "right", "now", "by", "before", "after", "with", "from", "if", "or", "and", "to", "each", "apiece", "off", "until", "when", "because", "over", "can", "could", "should", "would", "will", "is", "are", "do", "does", "but", "so"]);
 const ITEM_SKIP = new Set(["a", "an", "the", "some", "this", "that", "those", "these", "my", "new", "it"]);
+/** "Can I afford them": the thing was named earlier in what was said. */
+const PRONOUN = new Set(["them", "it", "they", "one"]);
 
-/** What's being bought: the few words after "buy" / "afford", without prices, dates or filler. */
-function itemIn(q: string): string {
-  const cleaned = q.replace(/\$\s?\d[\d,]*(?:\.\d{1,2})?\s?k?|\b\d[\d,]*(?:\.\d{1,2})?\s?(?:k|grand|thousand)?\s*(?:dollars|bucks)\b/gi, " ").replace(/\s+/g, " ");
-  const m = /\b(?:afford|buy|get|order|book|spend on|buying|getting|booking|splurge on)\b\s*(.*)$/.exec(cleaned);
+/** The few words naming a thing, from the start of `rest`, without prices or filler. Empty when it starts with "them" or "it". */
+function wordsFrom(rest: string): string {
   const words: string[] = [];
-  for (const w of (m?.[1] ?? "").split(" ").filter(Boolean)) {
+  for (const w of rest.split(" ").filter(Boolean)) {
+    if (PRONOUN.has(w) && words.length === 0) return "";
     if (ITEM_STOP.has(w) && words.length > 0) break;
     // Prices and amounts aren't part of the name ("25 000 car" is a car).
     if (ITEM_SKIP.has(w) || ITEM_STOP.has(w) || /^\d[\d.]*k?$/.test(w) || /^(grand|thousand|dollars?|bucks)$/.test(w)) continue;
@@ -152,6 +156,89 @@ function itemIn(q: string): string {
   return words.join(" ").slice(0, 40);
 }
 
+/** What's being bought: the few words after "buy" / "afford", or after "I need" when it's "can I afford them". */
+function itemIn(q: string): string {
+  const cleaned = q.replace(/\$\s?\d[\d,]*(?:\.\d{1,2})?\s?k?|\b\d[\d,]*(?:\.\d{1,2})?\s?(?:k|grand|thousand)?\s*(?:dollars|bucks)\b/gi, " ").replace(/\s+/g, " ");
+  const bought = /\b(?:afford|buy|get|order|book|spend on|buying|getting|booking|splurge on)\b\s*(.*)$/.exec(cleaned);
+  const named = bought ? wordsFrom(bought[1]) : "";
+  if (named) return named;
+  const wanted = /\b(?:need|want|eyeing|looking at)\b\s*(.*)$/.exec(cleaned);
+  return wanted ? wordsFrom(wanted[1]) : "";
+}
+
+/* ---------- payment plans ---------- */
+
+/** Paying in parts: "on a payment plan", "pay in 4", "over 6 months", "with Affirm", "12 monthly payments". */
+const PLAN = /\b(payment plans?|pay(ing)? (it |them |that )?(off )?(in|over) (installments?|parts|time|\d+|two|three|four|six|twelve)|in (installments?|\d+ payments)|installments?|financ(e|ed|ing)|afterpay|klarna|affirm|sezzle|split (it|them|the cost|the payments?|into)|monthly payments?|buy now pay later|bnpl|\d+ payments|over (\d{1,2}|two|three|four|six|twelve) ?(months?|weeks?))\b/;
+
+export type PaymentPlan = { count: number; everyDays: 14 | 30 };
+
+const NUMBER_WORDS: Record<string, number> = { two: 2, three: 3, four: 4, six: 6, twelve: 12 };
+const toCount = (word: string) => {
+  const n = NUMBER_WORDS[word] ?? Number(word);
+  return Number.isFinite(n) ? Math.min(24, Math.max(2, Math.round(n))) : 4;
+};
+
+/** The plan's shape from the words. Pay in 4, every two weeks (the usual "buy now, pay later"), unless said otherwise. */
+export function planIn(q: string): PaymentPlan | null {
+  if (!PLAN.test(q)) return null;
+  const months = /\b(\d{1,2}|two|three|four|six|twelve) ?(?:months?|monthly payments?)\b/.exec(q);
+  if (months) return { count: toCount(months[1]), everyDays: 30 };
+  const weeks = /\b(\d{1,2}) ?weeks?\b/.exec(q);
+  if (weeks) return { count: toCount(String(Number(weeks[1]) / 2)), everyDays: 14 };
+  const count = /\b(?:in|into) (\d{1,2}|two|three|four|six|twelve)\b|\b(\d{1,2}|two|three|four|six|twelve) (?:payments|installments|parts)\b/.exec(q);
+  return { count: count ? toCount(count[1] ?? count[2]) : 4, everyDays: /\bmonthly\b/.test(q) ? 30 : 14 };
+}
+
+/** Whether today is in the month's no-spend week (the last seven days), and when it ends. */
+function noSpendNow(today: ISODate): ISODate | null {
+  const week = noSpendWeekOf(monthOf(today));
+  return today >= week.start && today <= week.end ? week.end : null;
+}
+
+/** Bills and Extras due from today until payday (or the month's end, with no payday known). */
+function dueBeforePayday(s: Snapshot): number {
+  return s.bills.filter((b) => b.active && b.nextDate >= s.today && b.nextDate <= (s.nextPayday ?? s.today.slice(0, 8) + "31")).reduce((sum, b) => sum + Math.abs(b.amount), 0);
+}
+
+/**
+ * Nickel's straight answer about buying something on a payment plan. He judges the payments, not the
+ * whole price: the first one comes out today, the rest on their dates. Bills before payday come first,
+ * then the no-spend week (the owner's own goal: the first payment would land in it), then what's left of
+ * this month after the payments that fall in it. The same headstrong yes / not yet / no as any purchase.
+ */
+export function judgePlan(amount: number, item: string, plan: PaymentPlan, s: Snapshot): { verdict: Verdict; reason: string } {
+  const what = item ? `the ${item}` : "that";
+  const What = `${what[0].toUpperCase()}${what.slice(1)}`;
+  const each = Math.ceil(amount / plan.count);
+  const dates = Array.from({ length: plan.count }, (_, i) => (plan.everyDays === 30 ? addMonths(s.today, i) : addDays(s.today, i * 14)));
+  const schedule = `${money(each)} today, then ${money(each)} every ${plan.everyDays === 30 ? "month" : "two weeks"} until ${formatShort(dates[dates.length - 1])} (${plan.count} payments)`;
+  const end = monthEnd(monthOf(s.today));
+  const thisMonth = dates.filter((d) => d <= end).length * each;
+  const beforePayday = dates.filter((d) => !s.nextPayday || d < s.nextPayday).length * each;
+  const due = dueBeforePayday(s);
+  const cashAfter = s.cash === null ? Infinity : s.cash - beforePayday - due;
+  if (cashAfter < 0) {
+    return { verdict: "no", reason: `Even split up, ${what} would leave checking ${money(cashAfter)} short of the ${money(due)} in bills due before ${s.nextPayday ? `payday on ${formatShort(s.nextPayday)}` : "the month ends"}. That puts the household’s bills at risk.` };
+  }
+  const noSpendEnds = noSpendNow(s.today);
+  if (noSpendEnds) {
+    return { verdict: "wait", reason: `It’s your no-spend week through ${formatShort(noSpendEnds)}, and the first ${money(each)} would come out today. Start the plan on ${formatShort(addDays(noSpendEnds, 1))} or later and ask me again.` };
+  }
+  const after = s.leftToSpend - thisMonth;
+  const days = Math.max(1, s.daysLeft);
+  if (after < 0) {
+    return { verdict: "no", reason: `Even the ${money(thisMonth)} due this month would put it ${money(after)} past what’s left after bills and goals.` };
+  }
+  const perDayAfter = Math.floor(after / days);
+  if (perDayAfter < Math.max(1_000, Math.round(s.perDay * 0.4))) {
+    return { verdict: "wait", reason: `${What} would cost ${money(thisMonth)} this month, leaving ${money(after)} for ${days} days, about ${money(perDayAfter)} a day.${s.nextPayday ? ` After payday on ${formatShort(s.nextPayday)} it’s an easier yes.` : ""}` };
+  }
+  const costs = s.costs?.thisMonth ?? 0;
+  const careful = costs >= 1_000 ? ` Only take it at 0% interest, paid from checking, not a card: your cards already cost ${money(costs)} in interest and fees this month.` : " Only take it if it’s 0% interest.";
+  return { verdict: "yes", reason: `${schedule}. This month that leaves ${money(after)}, about ${money(perDayAfter)} a day.${careful}` };
+}
+
 /**
  * Nickel's straight answer about spending `amount`, from the household's own
  * numbers: yes, not yet, or no, with the reason in numbers. He decides on the
@@ -159,13 +246,17 @@ function itemIn(q: string): string {
  */
 export function judgePurchase(amount: number, item: string, s: Snapshot): { verdict: Verdict; reason: string } {
   const what = item ? `the ${item}` : "that";
-  const due = s.bills.filter((b) => b.active && b.nextDate >= s.today && b.nextDate <= (s.nextPayday ?? s.today.slice(0, 8) + "31")).reduce((sum, b) => sum + Math.abs(b.amount), 0);
+  const due = dueBeforePayday(s);
   // Without a checking account to go by (cards only, or none linked) there's no cash test, only the month's plan.
   const cashAfter = s.cash === null ? Infinity : s.cash - amount - due;
   const after = s.leftToSpend - amount;
   const days = Math.max(1, s.daysLeft);
   if (cashAfter < 0) {
     return { verdict: "no", reason: `Paying for ${what} would leave checking ${money(cashAfter)} short of the ${money(due)} in bills and Extras due before ${s.nextPayday ? `payday on ${formatShort(s.nextPayday)}` : "the month ends"}. That puts the household’s bills at risk.` };
+  }
+  const noSpendEnds = noSpendNow(s.today);
+  if (noSpendEnds && after >= 0) {
+    return { verdict: "wait", reason: `It’s your no-spend week through ${formatShort(noSpendEnds)}: bills only. ${what[0].toUpperCase()}${what.slice(1)} can wait until ${formatShort(addDays(noSpendEnds, 1))}, and whatever’s left of the month goes to savings.` };
   }
   if (after < 0) {
     return { verdict: "no", reason: `${what[0].toUpperCase()}${what.slice(1)} would put this month ${money(after)} past what’s left after bills and goals${s.savings >= amount ? ", and paying from savings would set your goals back" : ""}.` };
@@ -206,14 +297,17 @@ export function answerQuestion(question: string, s: Snapshot, last?: LastVerdict
   }
   // A purchase: a straight answer from the numbers, and he holds to it unless the numbers change.
   const followUp = last !== null && last !== undefined && /\b(what about|how about|and if|if it'?s|if it was|what if)\b/.test(q);
-  if (PURCHASE.test(q) || followUp) {
-    const amount = amountIn(question, followUp);
-    if (amount === null && !followUp) return { text: "How much is it? Ask me like “can I afford a $300 jacket?”" };
+  const asked = planIn(q);
+  if (PURCHASE.test(q) || followUp || asked) {
+    // "What if I pay it in 4?" after a purchase answer: the same price, on a plan.
+    const plan = asked ?? (followUp ? (last?.plan ?? null) : null);
+    const amount = amountIn(question, followUp) ?? (asked && last ? last.amount : null);
+    if (amount === null && !followUp && (PURCHASE.test(q) || asked)) return { text: asked ? "How much is it? Ask me like “can I afford $250 headphones on a payment plan?”" : "How much is it? Ask me like “can I afford a $300 jacket?”" };
     if (amount !== null) {
       const item = itemIn(q) || last?.item || "";
-      const { verdict, reason } = judgePurchase(amount, item, s);
-      const changed = last && last.verdict !== verdict ? `At ${money(amount)}, that changes things. ` : "";
-      return { text: `${changed}${pick(OPENERS[verdict], seed)} ${reason}`, verdict: { amount, item, verdict }, href: "/", link: "See the month" };
+      const { verdict, reason } = plan ? judgePlan(amount, item, plan, s) : judgePurchase(amount, item, s);
+      const changed = last && last.verdict !== verdict ? `${plan && !last.plan ? "On a payment plan" : `At ${money(amount)}`}, that changes things. ` : "";
+      return { text: `${changed}${pick(OPENERS[verdict], seed)} ${reason}`, verdict: { amount, item, verdict, ...(plan ? { plan } : {}) }, href: "/", link: "See the month" };
     }
   }
 
@@ -222,7 +316,7 @@ export function answerQuestion(question: string, s: Snapshot, last?: LastVerdict
   }
   if (/\b(good (boy|dog|bot|nickel)|thank(s| you)|love you|cute)\b/.test(q)) return { text: "*happy beeps* Anytime! Woof!" };
   if (/\b(who are you|what can you do|what do you do|help|how do you work)\b/.test(q)) {
-    return { text: "I’m a robot dog who reads your numbers. Ask me what’s left to spend, what’s due, what you spent on something or at a store (this week, this month or last), how much you owe or have, whether you’re over budget, or “can I afford…?”. Or tell me to add a bill or a goal. I’m not a financial advisor, just a very good boy." };
+    return { text: "I’m a robot dog who reads your numbers. Ask me what’s free to spend, what’s spoken for, how much you’re over, what’s due, what you spent on something or at a store (this week, this month or last), how much you owe or have, whether you’re over budget, or “can I afford…?” (on a payment plan too). Or tell me to add a bill or a goal. I’m not a financial advisor, just a very good boy." };
   }
 
   // Net worth ("is Netflix worth it" isn't about net worth).
@@ -321,10 +415,29 @@ export function answerQuestion(question: string, s: Snapshot, last?: LastVerdict
   }
 
   // What's left to spend: the question asked most ("what's left to spend" is about the month, not past spending).
-  const leftQ = /\b(left|how am i doing|how'?s (my|the|this) month|how is (my|the|this) month|afford|per day|a day|remaining)\b/.test(q) || /\bcan i (spend|buy)\b/.test(q);
+  // Over: by how much this month, and in which budgets.
+  const overBudgets = s.spending.filter((r) => r.limit !== null && r.spent > r.limit).map((r) => `${r.label} by ${money(r.spent - (r.limit ?? 0))}`);
+  const budgetsOver = overBudgets.length ? ` Over budget: ${overBudgets.join(", ")}.` : "";
+  if (/\b(how much (am i|i'?m) over|am i over|i'?m over|over by|how far over)\b/.test(q)) {
+    if (s.leftToSpend < 0) return { text: `You’re over by ${money(s.leftToSpend)} this month: spending has gone past what came in, after bills and savings.${budgetsOver}`, href: "/budget", link: "See the month" };
+    return { text: `You’re not over: ${money(s.leftToSpend)} is still free to spend this month.${budgetsOver}`, href: "/budget", link: "See the month" };
+  }
+  // Where the month's money is: came in, already spent, spoken for, free.
+  if (s.month && /\b(spoken for|where('?s| is| did) (my|the|all my) money|break ?down|already spent|promised|set aside|where am i at)\b/.test(q)) {
+    const m = s.month;
+    const still = s.incomeExpected - s.incomeReceived;
+    const cameIn = `${money(s.incomeExpected)} came in this month${still > 0 ? ` (${money(s.incomeReceived)} so far, ${money(still)} still coming)` : ""}`;
+    const end = s.leftToSpend < 0 ? `That’s over by ${money(s.leftToSpend)}.` : `That leaves ${money(s.leftToSpend)} free to spend.`;
+    return {
+      text: `${cameIn}. ${money(m.billsPaid + m.everyday)} is already spent (${money(m.billsPaid)} on bills, ${money(m.everyday)} everyday). ${money(m.billsDue + m.saving)} is spoken for (${money(m.billsDue)} for bills still to pay, ${money(m.saving)} for savings). ${end}`,
+      href: "/budget",
+      link: "See the month",
+    };
+  }
+  const leftQ = /\b(left|free to spend|free|how am i doing|how'?s (my|the|this) month|how is (my|the|this) month|afford|per day|a day|remaining)\b/.test(q) || /\bcan i (spend|buy)\b/.test(q);
   if (leftQ) {
-    if (s.leftToSpend < 0) return { text: `This month is ${money(s.leftToSpend)} past what’s left after bills and goals, with ${s.daysLeft} days to go.`, href: "/", link: "See the month" };
-    return { text: `After bills and goals there’s ${money(s.leftToSpend)} left this month: about ${money(s.perDay)} a day for ${s.daysLeft} days.`, href: "/", link: "See the month" };
+    if (s.leftToSpend < 0) return { text: `You’re over by ${money(s.leftToSpend)} this month, with ${s.daysLeft} days to go: spending has gone past what came in, after bills and savings.${budgetsOver}`, href: "/", link: "See the month" };
+    return { text: `${money(s.leftToSpend)} is free to spend this month, after every bill and your savings: about ${money(s.perDay)} a day for ${s.daysLeft} days.`, href: "/", link: "See the month" };
   }
 
   // Spending in a category, or at a place.
@@ -395,13 +508,13 @@ export function answerQuestion(question: string, s: Snapshot, last?: LastVerdict
 
   // Pushing back on a purchase answer, and nothing else was asked: he holds his ground.
   if (last && PUSHBACK.test(q)) {
-    const { verdict, reason } = judgePurchase(last.amount, last.item, s);
+    const { verdict, reason } = last.plan ? judgePlan(last.amount, last.item, last.plan, s) : judgePurchase(last.amount, last.item, s);
     if (verdict !== last.verdict) return { text: `The numbers have moved since I last looked. ${pick(OPENERS[verdict], seed)} ${reason}`, verdict: { ...last, verdict }, href: "/", link: "See the month" };
     return { text: `${pick(HOLDING[verdict], seed)} ${reason}`, verdict: { ...last, verdict }, href: "/", link: "See the month" };
   }
 
   if (/\bbudget\b/.test(q)) {
-    return { text: `After bills and goals there’s ${money(s.leftToSpend)} left this month: about ${money(s.perDay)} a day for ${s.daysLeft} days.`, href: "/budget", link: "See budget" };
+    return { text: `${money(s.leftToSpend)} is free to spend this month, after every bill and your savings: about ${money(s.perDay)} a day for ${s.daysLeft} days.`, href: "/budget", link: "See budget" };
   }
 
   return null;

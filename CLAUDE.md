@@ -179,7 +179,18 @@ for it to be remembered and used whenever an app is built.
 - **Asked about a purchase ("can I afford…?", "should I buy…?"), Nickel is headstrong**, at the owner's
   request: a straight yes / not yet / no from the household's numbers (`judgePurchase` in
   `src/lib/nickel/answers.ts`), with the reason in numbers, and a plain warning when bills would be at
-  risk. Pleading or asking again never changes it; only new numbers (a different price) do.
+  risk. Pleading or asking again never changes it; only new numbers (a different price) do. **On a
+  payment plan** ("pay in 4", "over 6 months", "with Affirm": `planIn`, `judgePlan`) he judges the
+  payments, not the price: the first today, the rest every two weeks (or month), bills before payday
+  first, then this month's share, and says to take it only at 0% and paid from checking when cards are
+  costing interest. **In the no-spend week any purchase is "not yet"** (the owner's own goal), unless
+  bills are at risk ("no").
+- **The month is explained the same way everywhere, in the owner's words** (`src/components/month-money.tsx`,
+  on Home and Budget): Came in (so far, and still coming) − Already spent (bills, everyday) − Spoken for
+  (bills still to pay, savings: promised, not spent yet) = **Free to spend**, or **Over by $X** in red.
+  "Free to spend" is the one number (Home's and Budget's are the same; "Left in your budgets" is only the
+  budgets' own total). Budgets say "Over by $X" plainly with "$Y spent of $Z" under it. Nickel answers
+  "what's spoken for?", "how much am I over?" and "what's free to spend?" the same way.
 - His instructions and questions are understood by rules (`src/lib/nickel/commands.ts`,
   `answers.ts`); talking uses the phone's own speech recognition and voice (`voice.ts`). "Chat with
   Claude" opens the owner's own Claude app. A built-in AI chat would send data to an outside service:
