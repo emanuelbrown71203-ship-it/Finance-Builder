@@ -6,7 +6,7 @@ import { dollars, dollarsExact } from "./money";
  * can be tested on its own. Every note opens the thing it's about.
  */
 
-export type NoteKind = "bill" | "low" | "review" | "nospend" | "in" | "due" | "budget" | "test";
+export type NoteKind = "bill" | "low" | "review" | "nospend" | "in" | "due" | "budget" | "save" | "test";
 
 export type Note = {
   kind: NoteKind;
@@ -162,6 +162,26 @@ export function budgetNote(p: BudgetFact, amounts = true): Note | null {
     body,
     url: `/budget?category=${encodeURIComponent(p.category)}`,
     tag: `budget:${p.category}`,
+  };
+}
+
+export type SaveFact = { goalId: string; goalName: string; date: ISODate; remaining: number; fromPaycheck: boolean; account: string | null };
+
+/**
+ * A paycheck's savings still to put aside: the day after payday ("time to save"), and once more two days
+ * later ("still to save"). Opens the to-do itself.
+ */
+export function saveNote(p: SaveFact, again: boolean, amounts = true): Note {
+  const money = amounts ? `${dollarsExact(p.remaining)} ` : "";
+  const from = p.fromPaycheck ? ` from your ${formatShort(p.date)} paycheck` : "";
+  const how = p.account ? `Move it into ${p.account} and it ticks itself off.` : "Tap to mark it done, save less or skip it.";
+  return {
+    kind: "save",
+    ref: `${again ? "save-again" : "save"}:${p.goalId}:${p.date}`,
+    title: again ? `Still to save for ${p.goalName}` : `Time to save for ${p.goalName}`,
+    body: `${amounts ? `Put ${money.trim()} toward it${from}.` : `Put this paycheck’s savings toward it.`} ${how}`,
+    url: `/budget?save=${encodeURIComponent(`${p.goalId}|${p.date}`)}`,
+    tag: `save:${p.goalId}`,
   };
 }
 

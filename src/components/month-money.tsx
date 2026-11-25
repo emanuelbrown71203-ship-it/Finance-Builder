@@ -25,6 +25,8 @@ export type MonthFigures = {
   leftToSpend: number;
   /** Day by day (this month only), to name the bills and paychecks still to come. */
   days?: PlanDay[];
+  /** Of the savings, what's already been put aside. */
+  savingsDone?: number;
 };
 
 export function monthMoney(f: MonthFigures) {
@@ -125,7 +127,7 @@ export function MonthLedger({ f, when, onPaychecks, tone = "sheet" }: { f: Month
   const spokenNote =
     m.spokenFor === 0
       ? "Nothing: every bill is paid, and nothing is set aside for goals"
-      : [m.billsDue > 0 ? `${dollars(m.billsDue)} for bills still to pay${bills ? ` (${bills})` : ""}` : "", m.saving > 0 ? `${dollars(m.saving)} for your savings goals` : ""].filter(Boolean).join(", ");
+      : [m.billsDue > 0 ? `${dollars(m.billsDue)} for bills still to pay${bills ? ` (${bills})` : ""}` : "", m.saving > 0 ? `${dollars(m.saving)} for your savings goals${f.savingsDone ? ` (${dollars(Math.min(f.savingsDone, m.saving))} put aside)` : ""}` : ""].filter(Boolean).join(", ");
   const cameIn = (
     <Line sign="+" label="Came in" amount={m.cameIn} note={cameInNote} tone={tone}>
       {onPaychecks && (

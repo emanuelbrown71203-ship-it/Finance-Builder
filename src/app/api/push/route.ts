@@ -56,6 +56,7 @@ const Settings = z.object({
   moneyIn: z.boolean().optional(),
   billDue: z.boolean().optional(),
   budget: z.boolean().optional(),
+  savings: z.boolean().optional(),
 });
 
 export const PUT = withUser(async (ctx, request) => ({ settings: await setNotifySettings(ctx, await readBody(request, Settings)) }));

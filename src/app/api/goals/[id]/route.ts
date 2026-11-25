@@ -14,6 +14,8 @@ const Body = z.object({
   targetDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
   /** A savings account (a SoFi vault) whose balance is what's saved, or null to stop following it. */
   accountId: z.string().min(1).max(100).nullable().optional(),
+  /** Save a share of each paycheck (0.05 = 5%), or null for a set amount a month. */
+  paycheckShare: z.number().min(0.001).max(0.5).nullable().optional(),
   /** Cents to add to (or, when negative, take out of) what’s saved. */
   add: z.number().int().min(-100_000_000_000).max(100_000_000_000).optional(),
 });

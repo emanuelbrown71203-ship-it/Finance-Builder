@@ -112,6 +112,12 @@ export async function askNickel(ctx: Ctx, question: string, last: LastVerdict | 
     daysLeft: overview.plan.daysLeft,
     incomeReceived: overview.plan.incomeReceived,
     incomeExpected: overview.plan.incomeExpected,
+    saving: {
+      planned: budget.savings.totals.planned,
+      saved: budget.savings.totals.saved,
+      toDo: budget.savings.totals.toDo,
+      todos: budget.savings.todos.map((t) => ({ goalName: t.goalName, date: t.date, remaining: Math.max(0, t.amount - t.saved), status: t.status })),
+    },
     month: {
       billsPaid: overview.plan.billsPaid,
       everyday: overview.plan.everydaySpent,

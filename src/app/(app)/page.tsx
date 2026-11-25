@@ -1,6 +1,6 @@
 "use client";
 
-import { CalendarCheck, CalendarClock, ChevronRight, CircleCheck, Gauge, Landmark, PieChart, RefreshCcw, Sparkles, Tag as TagIcon, type LucideIcon } from "lucide-react";
+import { CalendarCheck, CalendarClock, ChevronRight, CircleCheck, Gauge, Landmark, PieChart, PiggyBank, RefreshCcw, Sparkles, Tag as TagIcon, type LucideIcon } from "lucide-react";
 import Link from "next/link";
 import { useSyncExternalStore, type ReactNode } from "react";
 import { BillRow, billHref } from "@/components/bills";
@@ -100,6 +100,7 @@ const ATTENTION: Record<AttentionItem["kind"], { icon: LucideIcon; tone: string 
   pace: { icon: Gauge, tone: "bg-canary text-canary-ink" },
   renewal: { icon: RefreshCcw, tone: "bg-canary text-canary-ink" },
   new: { icon: Sparkles, tone: "bg-sky text-sky-ink" },
+  save: { icon: PiggyBank, tone: "bg-mint text-mint-ink" },
 };
 
 /** Whether this week's recap is ready and not opened yet (kept on this device). */

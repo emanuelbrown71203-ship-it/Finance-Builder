@@ -2,14 +2,14 @@ import { createDecipheriv, createECDH, createHmac } from "node:crypto";
 import { and, eq, inArray } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { getDb, type DB } from "@/db";
-import { accounts, notificationsSent, pushRemoved, pushSubscriptions, recurringOverrides, sessions, transactions, userSettings, users } from "@/db/schema";
+import { accounts, goals as goalsTable, notificationsSent, pushRemoved, pushSubscriptions, recurringOverrides, sessions, transactions, userSettings, users } from "@/db/schema";
 import { seedDemo } from "@/db/seed";
 import { DEMO_USER_ID, SESSION_COOKIE } from "@/lib/config";
 import { billPaidNote, billsDueNote, budgetNote, lowBalanceNote, moneyInNote, noSpendStartNote, reviewNote, whenDue } from "@/lib/notifications";
 import type { Ctx } from "@/server/auth";
 import { endSession, signOutEverywhere } from "@/server/auth";
 import { sha256 } from "@/server/crypto";
-import { setBudget, setRecurringOverride } from "@/server/mutations";
+import { createGoal, markSavingDone, setBudget, setRecurringOverride } from "@/server/mutations";
 import { addDevice, afterSync, getNotifySettings, listDevices, morningNotes, removedDevices, removeDevice, sendTest, setNotifySettings } from "@/server/notifications";
 import { getRecurring, notifyFacts } from "@/server/queries";
 
@@ -134,7 +134,7 @@ async function clear() {
   await db.update(recurringOverrides).set({ notifyPaid: false }).where(eq(recurringOverrides.userId, DEMO_USER_ID));
   await db.delete(userSettings).where(eq(userSettings.userId, DEMO_USER_ID));
   // The older checks count notes one kind at a time; the newer kinds are switched on where they're tested.
-  await db.insert(userSettings).values({ userId: DEMO_USER_ID, notifyMoneyIn: false, notifyBillDue: false, notifyBudget: false });
+  await db.insert(userSettings).values({ userId: DEMO_USER_ID, notifyMoneyIn: false, notifyBillDue: false, notifyBudget: false, notifySavings: false });
 }
 
 beforeAll(async () => {
@@ -275,8 +275,8 @@ describe("phone notifications", () => {
     const p = phone(1);
     await addDevice(me, p, "iPhone");
     await db.delete(userSettings).where(eq(userSettings.userId, DEMO_USER_ID));
-    expect(await getNotifySettings(db, DEMO_USER_ID)).toEqual({ lowBalance: true, weeklyReview: true, noSpend: true, amounts: true, moneyIn: true, billDue: true, budget: true });
-    await setNotifySettings(me, { moneyIn: false, billDue: false, budget: false });
+    expect(await getNotifySettings(db, DEMO_USER_ID)).toEqual({ lowBalance: true, weeklyReview: true, noSpend: true, amounts: true, moneyIn: true, billDue: true, budget: true, savings: true });
+    await setNotifySettings(me, { moneyIn: false, billDue: false, budget: false, savings: false });
     const push = service();
     // Monday the 23rd.
     await morningNotes(db, new Date("2026-11-23T13:05:00Z"), push.fetchImpl);
@@ -461,6 +461,35 @@ describe("phone notifications", () => {
     await clear();
   });
 
+  it("reminds you to put a paycheck's savings aside the day after payday, and once more two days later", async () => {
+    const p = phone(1);
+    await addDevice(me, p, "iPhone");
+    await setNotifySettings(me, { savings: true });
+    const goalId = await createGoal(ctx, { name: "Test: Car", target: 5_000_000, saved: 0, monthlyContribution: 0, targetDate: null, accountId: null, paycheckShare: 0.1 });
+    const push = service();
+    // The Nov 13 paycheck is in: on the 14th, one note.
+    await afterSync(db, DEMO_USER_ID, new Date("2026-11-14T15:00:00Z"), push.fetchImpl);
+    await afterSync(db, DEMO_USER_ID, new Date("2026-11-14T18:00:00Z"), push.fetchImpl);
+    const first = push.sent.map((x) => p.read(x.body)).filter((n) => n.title.includes("Test: Car"));
+    expect(first).toEqual([{ title: "Time to save for Test: Car", body: "Put $284.63 toward it from your Nov 13 paycheck. Tap to mark it done, save less or skip it.", url: `/budget?save=${encodeURIComponent(`${goalId}|2026-11-13`)}`, tag: `save:${goalId}` }]);
+    // On the 16th, still not done: once more.
+    await afterSync(db, DEMO_USER_ID, new Date("2026-11-16T15:00:00Z"), push.fetchImpl);
+    const titles = push.sent.map((x) => p.read(x.body).title).filter((t) => t.includes("Test: Car"));
+    expect(titles).toEqual(["Time to save for Test: Car", "Still to save for Test: Car"]);
+    // A to-do already days old when reminders start gets just the one "still to save" note.
+    await db.delete(notificationsSent).where(eq(notificationsSent.userId, DEMO_USER_ID));
+    const fresh = push.sent.length;
+    await afterSync(db, DEMO_USER_ID, new Date("2026-11-18T15:00:00Z"), push.fetchImpl);
+    expect(push.sent.slice(fresh).map((x) => p.read(x.body).title).filter((t) => t.includes("Test: Car"))).toEqual(["Still to save for Test: Car"]);
+    // Done: no more.
+    await markSavingDone(ctx, goalId, "2026-11-13", 28_463);
+    const before = push.sent.length;
+    await afterSync(db, DEMO_USER_ID, new Date("2026-11-19T20:00:00Z"), push.fetchImpl);
+    expect(push.sent.slice(before).map((x) => p.read(x.body).title).filter((t) => t.includes("Test: Car"))).toEqual([]);
+    await db.delete(goalsTable).where(eq(goalsTable.id, goalId));
+    await clear();
+  });
+
   it("never buzzes at night: what's waiting goes out after 8 a.m.", async () => {
     const p = phone(1);
     await addDevice(me, p, "iPhone");
@@ -485,7 +514,7 @@ describe("phone notifications", () => {
     await addDevice(me, b, "iPad");
     const push = service();
     expect(await sendTest(me, undefined, push.fetchImpl)).toEqual({ sent: 2, devices: 2 });
-    expect(a.read(push.sent[0].body).title).toBe("Notifications are on");
+    expect(a.read(push.sent.find((x) => x.url === a.endpoint)!.body).title).toBe("Notifications are on");
     // Not recorded: it can be sent again.
     expect(await sendTest(me, undefined, push.fetchImpl)).toEqual({ sent: 2, devices: 2 });
     await signOutEverywhere(me);

@@ -1,3 +1,4 @@
+import type { SavingsView } from "@/server/queries";
 import type { NameSource } from "./finance/names";
 import type { UserCategory } from "./categories";
 import type { ISODate } from "./dates";
@@ -69,6 +70,10 @@ export type GoalView = {
   target: number;
   saved: number;
   monthlyContribution: number;
+  /** Saved as a share of each paycheck (0.05 = 5%) instead of a set amount a month. */
+  paycheckShare: number | null;
+  /** Paychecks where the person saved less, or skipped (amount 0). */
+  marks: { date: ISODate; amount: number }[];
   targetDate: ISODate | null;
   /** When the goal is reached at the current pace. Null if never. */
   projectedDate: ISODate | null;
@@ -156,7 +161,7 @@ export type UpcomingBill = {
 export type NetWorthPoint = { date: ISODate; assets: number; debts: number; net: number };
 
 /** Something on Home that wants the person's attention, with where to go to deal with it. */
-export type AttentionItem = { kind: "bank" | "due" | "price" | "budget" | "pace" | "renewal" | "new"; title: string; detail: string; href: string };
+export type AttentionItem = { kind: "bank" | "due" | "price" | "budget" | "pace" | "renewal" | "new" | "save"; title: string; detail: string; href: string };
 
 export type Overview = {
   today: ISODate;
@@ -226,8 +231,8 @@ export type BudgetPayload = {
   monthPlan: MonthPlan | null;
   /** This month only, while some everyday spending has no limit: a starting budget from what's usually spent. */
   suggestion: { limits: { category: string; limit: number }[]; trimmed: boolean; room: number } | null;
-  /** Saving, as part of the budget: the goals (each with its monthly amount) and what's been put toward them this month. */
-  savings: { goals: GoalView[]; putAside: number };
+  /** Saving, as part of the budget: the goals, what's been put toward them, and this month's savings to-dos (one per goal per paycheck). */
+  savings: { goals: GoalView[]; putAside: number } & SavingsView;
   /** The month's paychecks, in and still expected; an expected one can be set lighter. */
   paychecks: Paycheck[];
   /** This month and later ones: the month split at each payday, with a forecast of spending. */

@@ -1,8 +1,8 @@
 import { and, eq, inArray, isNull, lt, ne, sql } from "drizzle-orm";
-import { accounts, balanceSnapshots, budgets, categoryRules, debtPlans, goalDeposits, goals, incomeAdjustments, recurringOverrides, transactions, userSettings } from "@/db/schema";
+import { accounts, balanceSnapshots, budgets, categoryRules, debtPlans, goalDeposits, goals, incomeAdjustments, recurringOverrides, savingMarks, transactions, userSettings } from "@/db/schema";
 import { category as categoryOf } from "@/lib/categories";
 import { isUsableCategory } from "./categories";
-import { addDays, monthOf } from "@/lib/dates";
+import { addDays, diffDays, monthOf } from "@/lib/dates";
 import { cleanName, validName } from "@/lib/finance/names";
 import { merchantKey } from "@/lib/finance/recurring";
 import type { Ctx } from "./auth";
@@ -223,7 +223,10 @@ export async function setBudgets(ctx: Ctx, changes: BudgetChange[]): Promise<{ p
   return { previous };
 }
 
-type GoalInput = { name: string; target: number; saved: number; monthlyContribution: number; targetDate: string | null; accountId?: string | null };
+type GoalInput = { name: string; target: number; saved: number; monthlyContribution: number; targetDate: string | null; accountId?: string | null; paycheckShare?: number | null };
+
+/** A paycheck share (0.05) as stored: hundredths of a percent (500), or null for a set amount a month. */
+const toBp = (share: number | null | undefined) => (share === undefined ? undefined : share === null || share <= 0 ? null : Math.round(share * 10_000));
 
 /** A goal can follow only the person's own savings-type account (a vault, savings, cash management). */
 async function checkFollowed(ctx: Ctx, accountId: string | null | undefined): Promise<void> {
@@ -238,7 +241,8 @@ export async function createGoal(ctx: Ctx, input: GoalInput): Promise<string> {
   await checkFollowed(ctx, input.accountId);
   const id = crypto.randomUUID();
   // Following an account, its balance is what's saved: nothing typed in counts.
-  await ctx.db.insert(goals).values({ id, userId: ctx.userId, ...input, saved: input.accountId ? 0 : input.saved, accountId: input.accountId ?? null });
+  const { paycheckShare, ...fields } = input;
+  await ctx.db.insert(goals).values({ id, userId: ctx.userId, ...fields, saved: input.accountId ? 0 : input.saved, accountId: input.accountId ?? null, paycheckBp: toBp(paycheckShare) ?? null });
   await win(ctx, "goal", id, input.name);
   if (input.saved > 0 && !input.accountId) await goalMilestones(ctx, { id, name: input.name, target: input.target }, 0, input.saved);
   return id;
@@ -252,7 +256,9 @@ const MAX_DEPOSITS = 2000;
  * the deposit's id, which is what Undo removes.
  */
 export async function updateGoal(ctx: Ctx, id: string, patch: Partial<GoalInput> & { add?: number }): Promise<{ depositId: string | null }> {
-  const { add, ...fields } = patch;
+  const { add, paycheckShare, ...rest } = patch;
+  const bp = toBp(paycheckShare);
+  const fields = { ...rest, ...(bp !== undefined ? { paycheckBp: bp } : {}) };
   await checkFollowed(ctx, fields.accountId);
   type Moved = { goal: { id: string; name: string; target: number }; before: number; after: number };
   let moved: Moved | null = null;
@@ -294,6 +300,45 @@ export async function updateGoal(ctx: Ctx, id: string, patch: Partial<GoalInput>
     await goalMilestones(ctx, done.goal, done.before, done.after);
   }
   return result;
+}
+
+/* ---------- savings to-dos ---------- */
+
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+/** One of the person's own goals, or a 404. */
+async function ownGoal(ctx: Ctx, goalId: string) {
+  const [goal] = await ctx.db.select({ id: goals.id, name: goals.name, accountId: goals.accountId }).from(goals).where(and(eq(goals.id, goalId), eq(goals.userId, ctx.userId))).limit(1);
+  if (!goal) throw new HttpError(404, "Goal not found.");
+  return goal;
+}
+
+/**
+ * "Save less this time" (an amount) or "skip this one" (0) for one paycheck's savings toward a goal, or
+ * null to go back to the plan. Returns what it was before, for Undo.
+ */
+export async function setSavingMark(ctx: Ctx, goalId: string, date: string, amount: number | null): Promise<{ previous: number | null }> {
+  await ownGoal(ctx, goalId);
+  if (!ISO_DATE.test(date) || Math.abs(diffDays(date, ctx.today)) > 62) throw new HttpError(400, "That paycheck isn’t one Passbook can change.");
+  if (amount !== null && (!Number.isSafeInteger(amount) || amount < 0 || amount > 100_000_000_00)) throw new HttpError(400, "That amount isn’t right.");
+  const mine = and(eq(savingMarks.userId, ctx.userId), eq(savingMarks.goalId, goalId), eq(savingMarks.date, date));
+  const [before] = await ctx.db.select({ amount: savingMarks.amount }).from(savingMarks).where(mine).limit(1);
+  if (amount === null) await ctx.db.delete(savingMarks).where(mine);
+  else await ctx.db.insert(savingMarks).values({ id: crypto.randomUUID(), userId: ctx.userId, goalId, date, amount }).onConflictDoUpdate({ target: [savingMarks.goalId, savingMarks.date], set: { amount } });
+  return { previous: before?.amount ?? null };
+}
+
+/**
+ * "I put it aside": records what's still to go toward a goal from one paycheck as money put in today
+ * (Undo removes that deposit). A goal that follows an account ticks off on its own when the money shows
+ * there, so it can't be marked by hand.
+ */
+export async function markSavingDone(ctx: Ctx, goalId: string, date: string, remaining: number): Promise<{ depositId: string | null }> {
+  const goal = await ownGoal(ctx, goalId);
+  if (goal.accountId) throw new HttpError(400, "This goal follows an account: it ticks itself off when the money shows there. Pull down to refresh after moving it.");
+  if (!Number.isSafeInteger(remaining) || remaining <= 0) throw new HttpError(400, "That one’s already done.");
+  if (!ISO_DATE.test(date)) throw new HttpError(400, "That paycheck isn’t one Passbook can change.");
+  return updateGoal(ctx, goalId, { add: remaining });
 }
 
 /**

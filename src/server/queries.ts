@@ -1,15 +1,16 @@
 import { and, asc, desc, eq, gte, ilike, inArray, isNull, lte, ne, or, sql } from "drizzle-orm";
-import { accounts, balanceSnapshots, budgets, debtPlans, goalDeposits, goals, holdings, incomeAdjustments, items, playerWins, recurringOverrides, transactions, userSettings, type Account } from "@/db/schema";
+import { accounts, balanceSnapshots, budgets, debtPlans, goalDeposits, goals, holdings, incomeAdjustments, items, playerWins, recurringOverrides, savingMarks, transactions, userSettings, type Account } from "@/db/schema";
 import { category, isNecessity } from "@/lib/categories";
 import { DEFAULT_TIMEZONE } from "@/lib/config";
-import { addDays, addMonths, addMonthsToMonth, dayOfMonth, daysInMonth, diffDays, eachDay, formatDistance, formatShort, monthEnd, monthOf, monthStart, todayIn, weekday, type ISODate } from "@/lib/dates";
+import { addDays, addMonths, addMonthsToMonth, dayOfMonth, daysInMonth, diffDays, eachDay, formatDistance, formatShort, monthEnd, monthName, monthOf, monthStart, todayIn, weekday, type ISODate } from "@/lib/dates";
 import { goalIdeas, goalPlan } from "@/lib/finance/goalplan";
 import { dollars, dollarsExact } from "@/lib/money";
-import type { BudgetFact, DueFact, DueTomorrowFact, MoneyInFact, PaidFact } from "@/lib/notifications";
+import type { BudgetFact, DueFact, DueTomorrowFact, MoneyInFact, PaidFact, SaveFact } from "@/lib/notifications";
 import { buildMonthPlan, spendingByCategory, type MonthPlan } from "@/lib/finance/plan";
 import { budgetPlan, categoryBudgets, monthProgress, suggestLimits, type Limit } from "@/lib/finance/budget";
 import { payoffPlan, payoffOrder, recentMonthlyPaydown, type Debt, type Strategy } from "@/lib/finance/payoff";
 import { noSpendWeek, noSpendWeekOf } from "@/lib/finance/nospend";
+import { overdueSaving, savingHabit, savingTodos, savingTotals, type PutIn, type SavingGoal, type SavingHabit, type SavingMark, type SavingTodo, type SavingTotals } from "@/lib/finance/savings";
 import { monthAhead, spendingShape, type MonthAhead } from "@/lib/finance/forecast";
 import { FREQUENCY_LABEL, detectRecurring, monthlyEquivalent, seriesKeyFor, upcomingBetween, type RecurringKind } from "@/lib/finance/recurring";
 import { cancelHelp, isKnownSubscription } from "@/lib/finance/subscriptions";
@@ -383,7 +384,87 @@ export async function carriedNow(ctx: Ctx, categoryKey: string): Promise<number>
 }
 
 /** What goals are set to put aside this month. */
-const savingPlanned = (goalList: GoalView[]) => goalList.filter((g) => g.saved < g.target).reduce((s, g) => s + g.monthlyContribution, 0);
+const savingGoals = (goalList: GoalView[]): SavingGoal[] =>
+  goalList.map((g) => ({ id: g.id, name: g.name, monthlyContribution: g.monthlyContribution, paycheckShare: g.paycheckShare, reached: g.saved >= g.target, account: g.account }));
+const savingMarksOf = (goalList: GoalView[]): SavingMark[] => goalList.flatMap((g) => g.marks.map((m) => ({ goalId: g.id, date: m.date, amount: m.amount })));
+
+/** The month's savings to-dos, one per goal per paycheck, before anything has gone in. */
+function plannedSavings(bundle: RecurringBundle, goalList: GoalView[], month: string, today: ISODate) {
+  return savingTodos({ month, today, goals: savingGoals(goalList), paychecks: paychecksFor(bundle, month, today), marks: savingMarksOf(goalList) });
+}
+
+export type SavingsView = {
+  todos: SavingTodo[];
+  totals: SavingTotals;
+  /** A habit already in place (5% of each paycheck into a vault) that no goal follows yet, and the goal it suits. */
+  habit: (SavingHabit & { goalId: string | null; goalName: string | null }) | null;
+  /** This month only: what's in checking, and the bills it pays before payday, for "can I move it now?". */
+  cash: { checking: number; billsBeforePayday: number; nextPayday: ISODate | null } | null;
+};
+
+/**
+ * The month's savings to-dos with what's gone in: money moved into the account a goal follows (a dollar or
+ * more, so round-ups don't tick things off by accident), or recorded toward a goal by hand. Also a saving
+ * habit worth following, and the cash check for moving money now.
+ */
+export async function savingsFor(ctx: Ctx, bundle: RecurringBundle, goalList: GoalView[], month: string): Promise<SavingsView> {
+  const start = monthStart(month);
+  const end = monthEnd(month);
+  const followed = [...new Set(goalList.flatMap((g) => (g.account ? [g.account.id] : [])))];
+  const savingsAccounts = bundle.accounts.filter((a) => a.type === "depository" && a.subtype !== "checking");
+  const watched = [...new Set([...followed, ...savingsAccounts.map((a) => a.id)])];
+  const since = addDays(ctx.today, -70) < start ? addDays(ctx.today, -70) : start;
+  const [deposits, moves] = await Promise.all([
+    ctx.db
+      .select({ goalId: goalDeposits.goalId, date: goalDeposits.date, amount: goalDeposits.amount })
+      .from(goalDeposits)
+      .where(and(eq(goalDeposits.userId, ctx.userId), gte(goalDeposits.date, start), lte(goalDeposits.date, end))),
+    watched.length
+      ? ctx.db
+          .select({ accountId: transactions.accountId, date: transactions.date, amount: transactions.amount })
+          .from(transactions)
+          .where(and(eq(transactions.userId, ctx.userId), inArray(transactions.accountId, watched), eq(transactions.category, "transfer"), gte(transactions.date, since), gte(transactions.amount, 100)))
+      : Promise.resolve([] as { accountId: string; date: string; amount: number }[]),
+  ]);
+  const linked = new Map(goalList.flatMap((g) => (g.account ? [[g.id, g.account.id] as const] : [])));
+  const putIn: PutIn[] = [
+    ...deposits.filter((d) => !linked.has(d.goalId)),
+    ...[...linked].flatMap(([goalId, accountId]) => moves.filter((m) => m.accountId === accountId && m.date >= start && m.date <= end).map((m) => ({ goalId, date: m.date, amount: m.amount }))),
+  ];
+  const todos = savingTodos({ month, today: ctx.today, goals: savingGoals(goalList), paychecks: paychecksFor(bundle, month, ctx.today), marks: savingMarksOf(goalList), putIn });
+
+  // A habit no goal follows yet: offer it to the goal that sounds like it, or the first one following nothing.
+  const paySeries = bundle.series.filter((s) => s.kind === "income" && !/\b(interest|dividends?)\b/i.test(`${s.name} ${s.bankName}`));
+  const paid = paySeries.flatMap((s) => s.history.filter((h) => h.amount > 0 && h.date >= addDays(ctx.today, -70)).map((h) => ({ date: h.date, amount: h.amount })));
+  const names = new Map(savingsAccounts.map((a) => [a.id, a.name]));
+  const found = savingHabit(paid, moves.filter((m) => names.has(m.accountId)).map((m) => ({ accountId: m.accountId, accountName: names.get(m.accountId)!, date: m.date, amount: m.amount })));
+  let habit: SavingsView["habit"] = null;
+  if (found && !goalList.some((g) => g.account?.id === found.accountId && g.paycheckShare !== null && Math.abs(g.paycheckShare - found.share) < 0.001)) {
+    const words = found.accountName.toLowerCase().split(/\W+/).filter((w) => w.length > 3 && w !== "fund" && w !== "savings");
+    const open = goalList.filter((g) => g.saved < g.target);
+    const goal = open.find((g) => g.account?.id === found.accountId) ?? open.find((g) => !g.account && words.some((w) => g.name.toLowerCase().includes(w))) ?? open.find((g) => !g.account && g.monthlyContribution === 0 && g.paycheckShare === null) ?? null;
+    habit = { ...found, goalId: goal?.id ?? null, goalName: goal?.name ?? null };
+  }
+
+  let cash: SavingsView["cash"] = null;
+  if (month === monthOf(ctx.today)) {
+    const checking = bundle.accounts.filter((a) => a.type === "depository" && a.subtype === "checking");
+    if (checking.length) {
+      const nextPayday = paydaysFrom(bundle, addDays(ctx.today, 1), addDays(ctx.today, 45)).dates[0] ?? null;
+      const accountById = new Map(bundle.accounts.map((a) => [a.id, a]));
+      const seriesByKey = new Map(bundle.series.map((x) => [x.key, x]));
+      const days = nextPayday ? Math.max(0, diffDays(nextPayday, ctx.today) - 1) : diffDays(end, ctx.today);
+      const billsBeforePayday = upcomingBills(bundle, ctx.today, days)
+        .filter((b) => b.kind === "card" || !accountById.get(seriesByKey.get(b.key)?.accountId ?? "") || accountById.get(seriesByKey.get(b.key)!.accountId)!.type === "depository")
+        .reduce((sum, b) => sum - b.amount, 0);
+      cash = { checking: checking.reduce((sum, a) => sum + (a.available ?? a.balance), 0), billsBeforePayday, nextPayday };
+    }
+  }
+  return { todos, totals: savingTotals(todos), habit, cash };
+}
+
+/** What goes to savings in a month: each goal's share of each paycheck or its monthly amount, as the person changed it. */
+const savingPlanned = (bundle: RecurringBundle, goalList: GoalView[], month: string, today: ISODate) => plannedSavings(bundle, goalList, month, today).reduce((s, t) => s + t.amount, 0);
 
 /** Everything the budget screen and Home need for one month, from one load. */
 /**
@@ -443,7 +524,7 @@ function usualIncome(history: { date: string; amount: number; category: string }
 function budgetFor(ctx: Ctx, bundle: RecurringBundle, limits: Limit[], goalList: GoalView[], month: string) {
   const billIds = billIdsOf(bundle);
   const rows = categoryBudgets({ month, today: ctx.today, history: bundle.history, billIds, limits });
-  const monthPlan = buildMonthPlan({ month, today: ctx.today, transactions: bundle.history.filter((t) => monthOf(t.date) === month), recurring: plannedSeries(bundle), savingsPlanned: savingPlanned(goalList), billIds, usualIncome: usualIncome(bundle.history, month), incomeAdjust: bundle.incomeAdjust });
+  const monthPlan = buildMonthPlan({ month, today: ctx.today, transactions: bundle.history.filter((t) => monthOf(t.date) === month), recurring: plannedSeries(bundle), savingsPlanned: savingPlanned(bundle, goalList, month, ctx.today), billIds, usualIncome: usualIncome(bundle.history, month), incomeAdjust: bundle.incomeAdjust });
   const plan = {
     ...budgetPlan({ income: monthPlan.incomeExpected, bills: monthPlan.billsExpected, saving: monthPlan.savingsPlanned, rows }),
     everydaySpent: monthPlan.everydaySpent,
@@ -491,7 +572,7 @@ export async function getBudget(ctx: Ctx, month: string): Promise<BudgetPayload>
     monthPlan: progress.isCurrent ? monthPlan : null,
     suggestion: suggested && missing.length > 0 ? { limits: suggested.limits, trimmed: suggested.trimmed, room } : null,
     // Saving is part of the budget: the goals' monthly amounts are set aside first, and what's gone in this month.
-    savings: { goals: goalList, putAside: deposits.filter((d) => monthOf(d.date) === month).reduce((s, d) => s + d.amount, 0) },
+    savings: { goals: goalList, putAside: deposits.filter((d) => monthOf(d.date) === month).reduce((s, d) => s + d.amount, 0), ...(await savingsFor(ctx, bundle, goalList, month)) },
     paychecks: paychecksFor(bundle, month, ctx.today),
     // The month ahead (this month and later ones): split at each payday, with a forecast of spending.
     ahead: month >= monthOf(ctx.today) ? aheadFor(bundle, month, monthPlan) : null,
@@ -612,7 +693,7 @@ function planFor(g: GoalRow, deposits: DepositRow[], today: ISODate, paydays: IS
   });
 }
 
-function goalView(g: GoalRow, plan: ReturnType<typeof goalPlan>, accountNames: Map<string, string> = new Map()): GoalView {
+function goalView(g: GoalRow, plan: ReturnType<typeof goalPlan>, accountNames: Map<string, string> = new Map(), marks: { date: ISODate; amount: number }[] = []): GoalView {
   const accountName = g.accountId ? accountNames.get(g.accountId) : undefined;
   return {
     id: g.id,
@@ -621,6 +702,8 @@ function goalView(g: GoalRow, plan: ReturnType<typeof goalPlan>, accountNames: M
     target: g.target,
     saved: g.saved,
     monthlyContribution: g.monthlyContribution,
+    paycheckShare: g.paycheckBp ? g.paycheckBp / 10_000 : null,
+    marks,
     targetDate: g.targetDate,
     projectedDate: plan.projectedDate,
     status: plan.status,
@@ -643,12 +726,13 @@ function paydaysFrom(bundle: RecurringBundle, today: ISODate, until: ISODate): {
 }
 
 async function listGoals(ctx: Ctx, paydays: ISODate[] = []): Promise<GoalView[]> {
-  const [found, saved] = await Promise.all([
+  const [found, saved, marks] = await Promise.all([
     ctx.db.select().from(goals).where(eq(goals.userId, ctx.userId)).orderBy(asc(goals.createdAt), asc(goals.id)),
     ctx.db.select().from(goalDeposits).where(eq(goalDeposits.userId, ctx.userId)),
+    ctx.db.select({ goalId: savingMarks.goalId, date: savingMarks.date, amount: savingMarks.amount }).from(savingMarks).where(and(eq(savingMarks.userId, ctx.userId), gte(savingMarks.date, addMonths(ctx.today, -3)))),
   ]);
   const { rows, deposits, names } = await followAccounts(ctx, found, saved);
-  return rows.map((g) => goalView(g, planFor(g, deposits.filter((d) => d.goalId === g.id), ctx.today, paydays), names));
+  return rows.map((g) => goalView(g, planFor(g, deposits.filter((d) => d.goalId === g.id), ctx.today, paydays), names, marks.filter((m) => m.goalId === g.id).map((m) => ({ date: m.date, amount: m.amount }))));
 }
 
 /**
@@ -820,6 +904,22 @@ export async function getOverview(ctx: Ctx): Promise<Overview> {
   for (const bill of due.filter((b) => diffDays(b.date, ctx.today) <= 2)) {
     attention.push({ kind: "due", title: `${bill.name} is due ${formatDistance(bill.date, ctx.today)}`, detail: `${dollarsExact(-bill.amount)}${bill.share ? ", your part" : bill.estimated ? ", based on past bills" : ""}`, href: bill.kind === "card" ? "/debt" : `/bills?open=${encodeURIComponent(bill.key)}` });
   }
+  // Savings still to put aside from paychecks that are in (from the day after, so an automatic transfer has
+  // had time to show): one line per goal, right after bills, opening its earliest to-do.
+  if (goalList.length > 0) {
+    const owed = (await savingsFor(ctx, bundle, goalList, month)).todos.filter((x) => overdueSaving(x, ctx.today));
+    for (const goalId of [...new Set(owed.map((t) => t.goalId))]) {
+      const mine = owed.filter((t) => t.goalId === goalId);
+      const first = mine[0];
+      const dates = mine.map((t) => formatShort(t.date));
+      attention.push({
+        kind: "save",
+        title: `Put ${dollarsExact(mine.reduce((sum, t) => sum + t.amount - t.saved, 0))} toward ${first.goalName}`,
+        detail: `${first.paycheck !== null ? `From your ${dates.length === 1 ? dates[0] : `${dates.slice(0, -1).join(", ")} and ${dates[dates.length - 1]}`} ${dates.length === 1 ? "paycheck" : "paychecks"}` : `For ${monthName(month)}`}. Tap to mark it done, save less or skip it.`,
+        href: `/budget?save=${encodeURIComponent(`${first.goalId}|${first.date}`)}`,
+      });
+    }
+  }
   for (const s of bundle.series) {
     if (s.active && s.priceChange && s.priceChange.to < s.priceChange.from) {
       attention.push({ kind: "price", title: `${s.name} raised its price`, detail: `${dollarsExact(-s.priceChange.from)} to ${dollarsExact(-s.priceChange.to)}, ${dollars((s.priceChange.from - s.priceChange.to) * 12)} more a year`, href: `/bills?open=${encodeURIComponent(s.key)}` });
@@ -833,6 +933,7 @@ export async function getOverview(ctx: Ctx): Promise<Overview> {
   for (const p of bundle.possible) {
     attention.push({ kind: "new", title: `${p.name} looks like a new subscription`, detail: `${dollarsExact(-p.amount)} on ${formatShort(p.date)}`, href: `/bills?possible=${encodeURIComponent(p.key)}` });
   }
+
   for (const row of rows) {
     const name = category(row.category).label;
     if (row.status === "over" && row.left !== null) {
@@ -890,6 +991,8 @@ export async function notifyFacts(ctx: Ctx): Promise<{
   moneyIn: MoneyInFact[];
   dueTomorrow: DueTomorrowFact[];
   budgets: BudgetFact[];
+  /** Savings still to put aside from paychecks that are in, and how long each has waited. */
+  savings: (SaveFact & { waited: number })[];
 }> {
   const [bundle, limits, goalList, nameFor, recent] = await Promise.all([
     loadRecurring(ctx),
@@ -952,6 +1055,9 @@ export async function notifyFacts(ctx: Ctx): Promise<{
     .rows.filter((r) => r.limit !== null)
     .map((r) => ({ category: r.category, label: category(r.category).label, month, budget: (r.limit ?? 0) + r.carried, spent: r.spent }));
 
+  const owed = goalList.length ? (await savingsFor(ctx, bundle, goalList, month)).todos.filter((t) => overdueSaving(t, ctx.today)) : [];
+  const savings = owed.map((t) => ({ goalId: t.goalId, goalName: t.goalName, date: t.date, remaining: t.amount - t.saved, fromPaycheck: t.paycheck !== null, account: t.account?.name ?? null, waited: diffDays(ctx.today, t.date) }));
+
   return {
     today: ctx.today,
     paid: [...paid.values()],
@@ -961,6 +1067,7 @@ export async function notifyFacts(ctx: Ctx): Promise<{
     moneyIn,
     dueTomorrow,
     budgets,
+    savings,
   };
 }
 

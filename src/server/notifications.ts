@@ -4,7 +4,7 @@ import { notificationsSent, pushRemoved, pushSubscriptions, sessions, userSettin
 import { DEFAULT_TIMEZONE, isDemoMode } from "@/lib/config";
 import { addDays, monthOf, todayIn, weekday } from "@/lib/dates";
 import { noSpendWeekOf } from "@/lib/finance/nospend";
-import { TEST_NOTE, billPaidNote, billsDueNote, budgetNote, lowBalanceNote, moneyInNote, noSpendStartNote, reviewNote, type Note } from "@/lib/notifications";
+import { TEST_NOTE, billPaidNote, billsDueNote, budgetNote, lowBalanceNote, moneyInNote, noSpendStartNote, reviewNote, saveNote, type Note } from "@/lib/notifications";
 import { IDLE_DAYS, type Ctx } from "./auth";
 import { loadUserCategories } from "./categories";
 import { withCategories } from "./category-scope";
@@ -34,7 +34,7 @@ const MAX_DEVICES = 10;
 /** Refusals in a row (other than "gone") before a device is dropped. */
 const MAX_FAILURES = 20;
 
-export type NotifySettings = { lowBalance: boolean; weeklyReview: boolean; noSpend: boolean; amounts: boolean; moneyIn: boolean; billDue: boolean; budget: boolean };
+export type NotifySettings = { lowBalance: boolean; weeklyReview: boolean; noSpend: boolean; amounts: boolean; moneyIn: boolean; billDue: boolean; budget: boolean; savings: boolean };
 export type PushDevice = { id: string; label: string; createdAt: string; lastSentAt: string | null; match: string };
 
 /** A short fingerprint of a push address, so a browser can tell whether it's one of the devices listed. */
@@ -116,11 +116,12 @@ export async function getNotifySettings(db: DB, userId: string): Promise<NotifyS
       moneyIn: userSettings.notifyMoneyIn,
       billDue: userSettings.notifyBillDue,
       budget: userSettings.notifyBudget,
+      savings: userSettings.notifySavings,
     })
     .from(userSettings)
     .where(eq(userSettings.userId, userId))
     .limit(1);
-  return row ?? { lowBalance: true, weeklyReview: true, noSpend: true, amounts: true, moneyIn: true, billDue: true, budget: true };
+  return row ?? { lowBalance: true, weeklyReview: true, noSpend: true, amounts: true, moneyIn: true, billDue: true, budget: true, savings: true };
 }
 
 export async function setNotifySettings(ctx: Ctx, patch: Partial<NotifySettings>): Promise<NotifySettings> {
@@ -132,6 +133,7 @@ export async function setNotifySettings(ctx: Ctx, patch: Partial<NotifySettings>
     ...(patch.moneyIn !== undefined ? { notifyMoneyIn: patch.moneyIn } : {}),
     ...(patch.billDue !== undefined ? { notifyBillDue: patch.billDue } : {}),
     ...(patch.budget !== undefined ? { notifyBudget: patch.budget } : {}),
+    ...(patch.savings !== undefined ? { notifySavings: patch.savings } : {}),
   };
   if (Object.keys(set).length) await ctx.db.insert(userSettings).values({ userId: ctx.userId, ...set }).onConflictDoUpdate({ target: userSettings.userId, set });
   return getNotifySettings(ctx.db, ctx.userId);
@@ -261,6 +263,12 @@ async function billNotes(ctx: Ctx, settings: NotifySettings, fetchImpl: typeof f
   if (settings.moneyIn) for (const m of facts.moneyIn) await send(moneyInNote(m, settings.amounts), { ttl: 2 * 86_400 });
   if (settings.budget) for (const b of facts.budgets) await send(budgetNote(b, settings.amounts), { ttl: 86_400 });
   if (settings.billDue) await send(billsDueNote({ tomorrow: addDays(facts.today, 1), bills: facts.dueTomorrow }, settings.amounts), { ttl: 12 * 3600 });
+  // Savings from a paycheck that's in: the day after payday, and once more two days later.
+  if (settings.savings) {
+    // One note at a time: one already waiting three days or more (like when reminders first start) only
+    // gets the "still to save" one.
+    for (const s of facts.savings) await send(saveNote(s, s.waited >= 3, settings.amounts), { ttl: 86_400 });
+  }
   if (settings.lowBalance && facts.cash !== null) {
     await send(lowBalanceNote({ today: facts.today, cash: facts.cash, cashName: facts.cashName, due: facts.due }, settings.amounts), { ttl: 86_400, urgency: "high" });
   }

@@ -319,6 +319,9 @@ export function NotificationsSection() {
           <Row title="Bill due tomorrow" detail="The day before a bill, Extra or card minimum is due.">
             <Switch checked={settings.billDue} onChange={(on) => void setKind({ billDue: on })} label="Bill due tomorrow" />
           </Row>
+          <Row title="Savings to put aside" detail="The day after payday, if that paycheck’s savings haven’t gone in yet, and once more two days later.">
+            <Switch checked={settings.savings} onChange={(on) => void setKind({ savings: on })} label="Savings to put aside" />
+          </Row>
           <Row title="Budget close or over" detail="When a budget reaches 80%, and again if it goes over.">
             <Switch checked={settings.budget} onChange={(on) => void setKind({ budget: on })} label="Budget close or over" />
           </Row>

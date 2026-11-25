@@ -14,6 +14,8 @@ const Body = z.object({
   targetDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().default(null),
   /** A savings account (a SoFi vault) whose balance is what's saved. */
   accountId: z.string().min(1).max(100).nullable().default(null),
+  /** Save a share of each paycheck (0.05 = 5%) instead of a set amount a month. */
+  paycheckShare: z.number().min(0.001).max(0.5).nullable().default(null),
 });
 
 export const POST = withUser(async (ctx, request) => {

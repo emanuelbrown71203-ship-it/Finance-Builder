@@ -122,8 +122,18 @@ for it to be remembered and used whenever an app is built.
   worked out from the month plan's days). Home shows a card from three days before (one block per day,
   green when clear) and for a week after, with "Put $X in savings" (a goal deposit; it can't move money).
   A whole clean week is a win (`nospendweek`, 75 XP, the Clean Week badge); Nickel cheers it on.
-- **Savings is the budget's first line**: the goals' monthly amounts (set aside before everyday budgets),
-  what's gone toward them this month, and a sheet to change a goal's monthly amount, add money, or start one.
+- **Savings is a to-do each paycheck** (`src/lib/finance/savings.ts`, `savingsFor`; the Savings card on
+  Budget). A goal saves a share of each paycheck (`goals.paycheck_bp`, the owner puts 5% of each check into
+  the Emergency Fund vault) or a set amount a month split across the month's paychecks. Each paycheck's
+  savings is a to-do, counted as spoken for, that ticks itself off as money goes in: transfers of a dollar or
+  more into the account the goal follows, or money recorded by hand ("I put it aside", Undo removes the
+  deposit). "Save less this time" and "Skip this one" are kept in `saving_marks` (0 = skipped), with Undo.
+  Each to-do says whether it fits ("Can you?": the month's free to spend, and checking against bills before
+  payday). Reminders: Home's "Needs a look" (one line per goal, right after bills) and a phone note the day
+  after payday and once more two days later, never on payday itself (an automatic transfer may take a day).
+  A habit already in place (the same share of each paycheck into one savings account on payday,
+  `savingHabit`) is offered in one tap: the goal follows that account at that share. Nickel answers "how am I
+  doing on savings?" and "can I save $X more?".
 - **Bills seen twice count.** Rent, utilities, insurance or a loan charged two months running at about
   the same amount is a bill (banks send only a few months at first); other charges need three. Interest
   and fees are never bills. The Bills screen lists what bills and Extras charged this month and last

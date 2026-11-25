@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronLeft, ChevronRight, RotateCw, Sparkles } from "lucide-react";
+import { ChevronLeft, ChevronRight, Circle, CircleCheck, CircleDashed, CircleMinus, Clock, RotateCw, Sparkles } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useState, useSyncExternalStore } from "react";
@@ -15,9 +15,9 @@ import { send, useApi } from "@/components/use-api";
 import { budgetCategories, category } from "@/lib/categories";
 import { TxList } from "@/components/transactions";
 import { GoalDialog, type GoalSheet } from "@/components/goals";
-import { PixelIcon } from "@/components/pixel-icons";
 import { addMonthsToMonth, dayOfMonth, formatShort, monthEnd, monthName, monthOf } from "@/lib/dates";
 import { MonthBar, MonthLedger, type MonthFigures } from "@/components/month-money";
+import { sharePercent, type SavingTodo } from "@/lib/finance/savings";
 import { WINS } from "@/lib/game/progress";
 import { dollars, dollarsExact, parseDollarsToCents } from "@/lib/money";
 import type { BudgetPayload, BudgetRow, Me, TransactionsPayload } from "@/lib/types";
@@ -131,7 +131,7 @@ function MonthCard({ data, onPaychecks }: { data: BudgetPayload; onPaychecks: ()
   const current = monthOf(data.today);
   const when = data.month < current ? "past" : data.month > current ? "future" : "now";
   const p = data.plan;
-  const f: MonthFigures = { month: data.month, incomeExpected: p.income, incomeReceived: p.incomeReceived, billsExpected: p.bills, billsPaid: p.billsPaid, savingsPlanned: p.saving, everydaySpent: p.everydaySpent, leftToSpend: p.leftToSpend, days: data.monthPlan?.days };
+  const f: MonthFigures = { month: data.month, incomeExpected: p.income, incomeReceived: p.incomeReceived, billsExpected: p.bills, billsPaid: p.billsPaid, savingsPlanned: p.saving, everydaySpent: p.everydaySpent, leftToSpend: p.leftToSpend, days: data.monthPlan?.days, savingsDone: data.savings.totals.saved };
   const over = p.leftToSpend < 0;
   const month = monthName(data.month);
   const explain =
@@ -307,31 +307,239 @@ function PaycheckRow({ paycheck: p }: { paycheck: BudgetPayload["paychecks"][num
  * Savings, as the budget's first line: what the goals set aside each month (taken out before everyday
  * budgets, like a bill) and what's gone toward them this month. With no goal yet, it's where to start one.
  */
-function SavingsRow({ data, onOpen }: { data: BudgetPayload; onOpen: () => void }) {
-  const { goals, putAside } = data.savings;
-  const planned = data.plan.saving;
-  const share = planned > 0 ? Math.min(1, Math.max(0, putAside) / planned) : 0;
+const SAVING_STATUS: Record<SavingTodo["status"], { icon: typeof Circle; label: string; className: string }> = {
+  done: { icon: CircleCheck, label: "Done", className: "text-mint-ink" },
+  partly: { icon: CircleDashed, label: "Part done", className: "text-accent-text" },
+  todo: { icon: Circle, label: "To do", className: "text-accent-text" },
+  coming: { icon: Clock, label: "Coming", className: "text-ink-3" },
+  skipped: { icon: CircleMinus, label: "Skipped", className: "text-ink-3" },
+};
+
+/** Where one to-do's money comes from: "5% of your Nov 25 paycheck", "From your Nov 25 paycheck", "For November". */
+function savingSource(t: SavingTodo): string {
+  if (t.share !== null) return `${sharePercent(t.share)} of your ${formatShort(t.date)} paycheck`;
+  if (t.paycheck !== null) return `From your ${formatShort(t.date)} paycheck`;
+  return `For ${monthName(t.date.slice(0, 7))}`;
+}
+
+/**
+ * Savings as a to-do each paycheck: what each goal gets from each paycheck, ticked off when the money goes
+ * in (on its own for a goal that follows an account), with a habit already in place offered in one tap.
+ */
+function SavingsCard({ data, onOpen, onPlan, onGoal }: { data: BudgetPayload; onOpen: (t: SavingTodo) => void; onPlan: () => void; onGoal: (sheet: GoalSheet) => void }) {
+  const { todos, totals, habit, goals } = data.savings;
+  const [busy, setBusy] = useState(false);
+  const month = monthName(data.month);
+  const followHabit = async () => {
+    if (!habit) return;
+    if (!habit.goalId) return onGoal({ kind: "new" });
+    setBusy(true);
+    try {
+      const goal = goals.find((g) => g.id === habit.goalId);
+      await send("PATCH", `/api/goals/${habit.goalId}`, { accountId: habit.accountId, paycheckShare: habit.share });
+      toast(`“${habit.goalName}” now follows ${habit.accountName}, at ${sharePercent(habit.share)} of each paycheck`, {
+        action: goal ? { label: "Undo", run: () => send("PATCH", `/api/goals/${goal.id}`, { accountId: goal.account?.id ?? null, paycheckShare: goal.paycheckShare }) } : undefined,
+      });
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Couldn’t change that. Try again.", { tone: "error" });
+    } finally {
+      setBusy(false);
+    }
+  };
   return (
-    <li>
-      <button type="button" onClick={onOpen} className="flex min-h-[64px] w-full items-center gap-3 rounded-2xl px-2 py-2 text-left transition-colors hover:bg-sunk active:bg-sunk">
-        <span aria-hidden className="inline-flex size-10 shrink-0 items-center justify-center rounded-xl bg-[var(--c-savings)] text-sheet">
-          <PixelIcon name="savings" size={20} />
-        </span>
-        <span className="min-w-0 flex-1">
-          <span className="block font-bold">Savings</span>
-          <span className="block text-small text-ink-3">
-            {goals.length === 0 ? "Put money aside each month" : planned > 0 ? `${dollars(Math.max(0, putAside))} of ${dollars(planned)} put aside${data.isCurrent ? " so far" : ""}` : "No monthly amount yet"}
-          </span>
-          {planned > 0 && (
-            <span className="mt-1.5 block">
-              <Blocks share={share} color="var(--c-savings)" label="Saved toward goals this month" height={8} />
-            </span>
+    <Sheet>
+      <SheetHeader
+        title="Savings"
+        hint={goals.length === 0 ? undefined : `What goes to your goals from each paycheck. It’s spoken for before “free to spend”, and ticks off when the money goes in.`}
+        action={
+          <Button size="sm" onClick={onPlan}>
+            {goals.length === 0 ? "Start" : "Change plan"}
+          </Button>
+        }
+      />
+      {habit && (
+        <div className="mb-3 rounded-2xl bg-mint/60 px-3.5 py-3 text-mint-ink">
+          <p className="font-bold">
+            {sharePercent(habit.share)} of every paycheck already goes into {habit.accountName}
+          </p>
+          <p className="mt-0.5 text-small">
+            {habit.goalName ? `Have “${habit.goalName}” follow it? Each paycheck’s savings will tick off on their own when the money shows.` : "Start a goal that follows it, and each paycheck’s savings will tick off on their own."}
+          </p>
+          <Button size="sm" variant="primary" className="mt-2" disabled={busy} onClick={() => void followHabit()}>
+            {habit.goalName ? `Yes, follow ${habit.accountName}` : "Start a goal"}
+          </Button>
+        </div>
+      )}
+      {goals.length === 0 ? (
+        <p className="text-ink-2">Pick something to save for, and how much of each paycheck (or how much a month) goes to it. Passbook reminds you each payday and ticks it off when it’s done.</p>
+      ) : todos.length === 0 ? (
+        <p className="text-ink-2">No savings planned for {month}. Give a goal a share of each paycheck, or a monthly amount.</p>
+      ) : (
+        <>
+          <div className="flex items-baseline justify-between gap-3">
+            <p className="text-small font-bold text-ink-2">{data.isCurrent ? `${month} so far` : month}</p>
+            <p className="tabular text-small text-ink-2">
+              <span className="font-bold text-ink">{dollars(totals.saved)}</span> of {dollars(totals.planned)} put aside
+            </p>
+          </div>
+          <div className="mt-1.5">
+            <Blocks share={totals.planned > 0 ? Math.min(1, totals.saved / totals.planned) : 0} color="var(--c-savings)" label="Put aside toward goals this month" height={10} />
+          </div>
+          {totals.toDo > 0 && data.isCurrent && <p className="mt-2 text-small font-bold text-accent-text">{dollars(totals.toDo)} still to put aside from paychecks that are in.</p>}
+          <ul className="mt-2">
+            {todos.map((t) => {
+              const st = SAVING_STATUS[t.status];
+              const Icon = st.icon;
+              return (
+                <li key={`${t.goalId}|${t.date}`} className="border-b border-line-soft last:border-0">
+                  <button type="button" onClick={() => onOpen(t)} className="-mx-1 flex w-[calc(100%+0.5rem)] items-center gap-3 rounded-2xl px-1 py-2.5 text-left active:bg-sunk">
+                    <Icon size={22} aria-hidden className={cx("shrink-0", st.className)} />
+                    <span className="min-w-0 flex-1">
+                      <span className="flex items-baseline justify-between gap-3">
+                        <span className={cx("min-w-0 break-words font-bold", t.status === "skipped" && "text-ink-3 line-through")}>{t.goalName}</span>
+                        <span className={cx("tabular shrink-0 font-bold", t.status === "done" && "text-mint-ink")}>{dollarsExact(t.amount)}</span>
+                      </span>
+                      <span className="block text-small text-ink-3">
+                        {savingSource(t)} · <span className={cx("font-bold", st.className)}>{t.status === "partly" ? `${dollarsExact(t.saved)} in` : st.label}</span>
+                        {t.changed && t.status !== "skipped" ? " · changed" : ""}
+                      </span>
+                    </span>
+                    <ChevronRight size={16} aria-hidden className="shrink-0 text-ink-3" />
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        </>
+      )}
+    </Sheet>
+  );
+}
+
+/**
+ * One paycheck's savings toward a goal: whether it can be done (the month's money, and checking before
+ * payday), then mark it done, save less this time, skip it, or go back to the plan. Every change has Undo.
+ */
+function SavingTodoDialog({ data, todo, onClose }: { data: BudgetPayload; todo: SavingTodo | null; onClose: () => void }) {
+  return (
+    <Dialog open={todo !== null} onClose={onClose} title={todo ? todo.goalName : ""}>
+      {todo && <SavingTodoDetail key={`${todo.goalId}|${todo.date}|${todo.amount}|${todo.saved}`} data={data} todo={todo} onClose={onClose} />}
+    </Dialog>
+  );
+}
+
+function SavingTodoDetail({ data, todo: t, onClose }: { data: BudgetPayload; todo: SavingTodo; onClose: () => void }) {
+  const [less, setLess] = useState(false);
+  const [value, setValue] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const remaining = Math.max(0, t.amount - t.saved);
+  const free = data.plan.leftToSpend;
+  const cash = data.savings.cash;
+  const afterCash = cash ? cash.checking - remaining - cash.billsBeforePayday : null;
+  const open = t.status === "todo" || t.status === "partly" || t.status === "coming";
+
+  const mark = async (amount: number | null, done: string) => {
+    setBusy(true);
+    setError(null);
+    try {
+      const { previous } = await send<{ previous: number | null }>("PUT", "/api/savings", { goalId: t.goalId, date: t.date, amount });
+      toast(done, { action: { label: "Undo", run: () => send("PUT", "/api/savings", { goalId: t.goalId, date: t.date, amount: previous }) } });
+      onClose();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Couldn’t save. Try again.");
+      setBusy(false);
+    }
+  };
+  const putAside = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const { depositId } = await send<{ depositId: string | null }>("POST", "/api/savings", { goalId: t.goalId, date: t.date });
+      toast(`${dollarsExact(remaining)} put toward ${t.goalName}`, depositId ? { action: { label: "Undo", run: () => send("DELETE", `/api/goals/${t.goalId}/deposits/${depositId}`) } } : {});
+      onClose();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Couldn’t save. Try again.");
+      setBusy(false);
+    }
+  };
+  const saveLess = () => {
+    const cents = parseDollarsToCents(value);
+    if (cents === null || cents < 0) return setError("Enter an amount, like 50.");
+    if (cents >= t.planned) return setError(`That’s the plan or more. Leave it at ${dollarsExact(t.planned)}, or enter less.`);
+    void mark(cents, `${t.goalName}: ${dollarsExact(cents)} from this paycheck`);
+  };
+
+  return (
+    <div className="flex flex-col gap-4">
+      <div>
+        <p className="figure text-[2.5rem]">{dollarsExact(t.status === "done" ? t.amount : remaining)}</p>
+        <p className="text-ink-2">
+          {savingSource(t)}
+          {t.changed && t.status !== "skipped" ? ` (planned ${dollarsExact(t.planned)})` : ""}.{" "}
+          {t.status === "done" ? "Done: it’s put aside." : t.status === "partly" ? `${dollarsExact(t.saved)} is in so far.` : t.status === "coming" ? "That paycheck hasn’t come in yet." : t.status === "skipped" ? "You skipped this one." : "Still to put aside."}
+        </p>
+      </div>
+
+      {open && remaining > 0 && (
+        <div className="flex flex-col gap-2">
+          <p className="text-small font-bold text-ink-2">Can you?</p>
+          {free >= 0 ? (
+            <p className="rounded-2xl bg-mint px-3.5 py-3 text-small text-mint-ink">Yes, for the month: it’s already counted, and {dollars(free)} is still free to spend after it.</p>
+          ) : (
+            <p className="rounded-2xl bg-pink px-3.5 py-3 text-small text-pink-ink">
+              This month is over by {dollars(-free)}, with this counted. Saving less or skipping this one brings that down by the same amount{remaining + free > 0 ? `; saving ${dollarsExact(remaining + free)} would keep the month even` : ""}. Holding off on spending lets you save it all.
+            </p>
           )}
-        </span>
-        <span className="tabular shrink-0 font-bold">{goals.length === 0 ? <Tag tone="mint">Start</Tag> : `${dollars(planned)}/mo`}</span>
-        <ChevronRight size={16} aria-hidden className="shrink-0 text-ink-3" />
-      </button>
-    </li>
+          {cash && afterCash !== null && t.status !== "coming" && (
+            <p className={cx("rounded-2xl px-3.5 py-3 text-small", afterCash < 0 ? "bg-canary text-canary-ink" : "bg-sunk text-ink-2")}>
+              {afterCash < 0
+                ? `Not right now from checking: it has ${dollars(cash.checking)}, and ${dollars(cash.billsBeforePayday)} in bills come out before ${cash.nextPayday ? `payday on ${formatShort(cash.nextPayday)}` : "the month ends"}. Moving ${dollarsExact(remaining)} now would leave it ${dollars(-afterCash)} short. Move it after payday, or save less.`
+                : `Checking has ${dollars(cash.checking)}. After this and the ${dollars(cash.billsBeforePayday)} in bills before ${cash.nextPayday ? `payday on ${formatShort(cash.nextPayday)}` : "the month ends"}, it would still have ${dollars(afterCash)}.`}
+            </p>
+          )}
+        </div>
+      )}
+
+      {open && remaining > 0 && t.account && t.status !== "coming" && (
+        <p className="rounded-2xl bg-sunk px-3.5 py-3 text-small text-ink-2">Move {dollarsExact(remaining)} into {t.account.name} in your bank’s app. It ticks itself off when the bank shows it: pull down to refresh afterwards.</p>
+      )}
+
+      {less && (
+        <Field label="Save this much from this paycheck" hint={`The plan is ${dollarsExact(t.planned)}. Only this paycheck changes.`} error={error}>
+          {(id) => <MoneyInput id={id} inputMode="decimal" value={value} onChange={(e) => setValue(e.target.value)} placeholder={String(Math.round(t.planned / 2) / 100)} autoFocus />}
+        </Field>
+      )}
+      {error && !less && <ErrorNote message={error} />}
+
+      <div className="flex flex-wrap justify-end gap-2">
+        {t.changed && (
+          <Button disabled={busy} onClick={() => void mark(null, `${t.goalName}: back to ${dollarsExact(t.planned)}`)}>
+            Back to the plan
+          </Button>
+        )}
+        {open && t.status !== "skipped" && (
+          <Button disabled={busy} onClick={() => void mark(0, `Skipped ${t.goalName} for this paycheck`)}>
+            Skip this one
+          </Button>
+        )}
+        {open && !less && (
+          <Button disabled={busy} onClick={() => setLess(true)}>
+            Save less this time
+          </Button>
+        )}
+        {less && (
+          <Button variant="primary" disabled={busy} onClick={saveLess}>
+            Save {value ? "that" : "less"}
+          </Button>
+        )}
+        {!less && open && remaining > 0 && !t.account && t.status !== "coming" && (
+          <Button variant="primary" disabled={busy} onClick={() => void putAside()}>
+            I put it aside
+          </Button>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -343,8 +551,8 @@ function SavingsDialog({ data, open, onClose, onGoal }: { data: BudgetPayload; o
       <div className="flex flex-col gap-4">
         <p className="text-ink-2">
           {goals.length === 0
-            ? "Pick something to save for and how much to put aside each month. It comes out of your month first, before everyday budgets, so it’s spoken for before “free to spend”."
-            : `${dollars(data.plan.saving)} a month goes to your goals first, before everyday budgets, so it’s spoken for before “free to spend”. Change a goal’s monthly amount, or record money you put in.`}
+            ? "Pick something to save for, and how much of each paycheck (or how much a month) goes to it. It comes out of your month first, before everyday budgets, so it’s spoken for before “free to spend”."
+            : `${dollars(data.plan.saving)} goes to your goals in ${monthName(data.month)}, first, before everyday budgets, so it’s spoken for before “free to spend”. Change a goal’s plan, or record money you put in.`}
         </p>
         {goals.length > 0 && (
           <ul className="flex flex-col gap-2">
@@ -352,7 +560,7 @@ function SavingsDialog({ data, open, onClose, onGoal }: { data: BudgetPayload; o
               <li key={g.id} className="rounded-2xl border border-line-soft p-3">
                 <div className="flex items-baseline justify-between gap-3">
                   <span className="min-w-0 truncate font-bold">{g.name}</span>
-                  <span className="tabular shrink-0 font-bold">{g.monthlyContribution > 0 ? `${dollars(g.monthlyContribution)}/mo` : "No monthly amount"}</span>
+                  <span className="tabular shrink-0 font-bold">{g.paycheckShare ? `${sharePercent(g.paycheckShare)} of each paycheck` : g.monthlyContribution > 0 ? `${dollars(g.monthlyContribution)}/mo` : "No plan yet"}</span>
                 </div>
                 <p className="text-small text-ink-3">
                   {dollars(g.saved)} of {dollars(g.target)} saved
@@ -366,7 +574,7 @@ function SavingsDialog({ data, open, onClose, onGoal }: { data: BudgetPayload; o
                     </Button>
                   )}
                   <Button size="sm" variant="ghost" onClick={() => onGoal({ kind: "edit", goal: g })}>
-                    Change monthly amount
+                    Change plan
                   </Button>
                 </div>
               </li>
@@ -655,6 +863,9 @@ function Budget() {
     setAdding(null);
     router.replace(cat ? `/budget?category=${cat}` : "/budget", { scroll: false });
   };
+  // A savings to-do opens from its row, or from Home's "Put $X toward…" (`?save=<goal>|<date>`).
+  const savingKey = params.get("save");
+  const openSaving = (t: SavingTodo | null) => router.replace(t ? `/budget?save=${encodeURIComponent(`${t.goalId}|${t.date}`)}` : "/budget", { scroll: false });
 
   const header = (
     <>
@@ -737,6 +948,7 @@ function Budget() {
             </Sheet>
           )}
           <MonthCard data={data} onPaychecks={() => setPaychecksOpen(true)} />
+          <SavingsCard data={data} onOpen={(t) => openSaving(t)} onPlan={() => setSavingsOpen(true)} onGoal={setGoalSheet} />
           {data.ahead && <MonthAheadCard data={data} ahead={data.ahead} />}
           {data.monthPlan && (
             <Sheet>
@@ -748,11 +960,8 @@ function Budget() {
 
         <div className="flex flex-col gap-4">
           <Sheet>
-            <SheetHeader title="Budgets" hint={limited.length > 0 ? "What’s left under the limit you set for each kind of everyday spending. Bills aren’t in here: they’re in “Spoken for” above. The tick on each bar is where you’d be today, spending evenly." : undefined} />
+            <SheetHeader title="Budgets" hint={limited.length > 0 ? "What’s left under the limit you set for each kind of everyday spending. Bills and savings aren’t in here: they’re in “Spoken for” above. The tick on each bar is where you’d be today, spending evenly." : undefined} />
             {limited.length > 0 && <BudgetsSummary data={data} />}
-            <ul className="mb-1 border-b border-line-soft pb-1">
-              <SavingsRow data={data} onOpen={() => setSavingsOpen(true)} />
-            </ul>
             {limited.length > 0 ? (
               <ul>
                 {limited.map((r) => (
@@ -818,6 +1027,7 @@ function Budget() {
       </div>
 
       <CategoryDialog row={openRow} data={data} onClose={() => open(null)} />
+      <SavingTodoDialog data={data} todo={savingKey ? (data.savings.todos.find((t) => `${t.goalId}|${t.date}` === savingKey) ?? null) : null} onClose={() => openSaving(null)} />
       <SetupDialog data={data} open={setup} onClose={() => setSetup(false)} />
       <PaychecksDialog data={data} open={paychecksOpen} onClose={() => setPaychecksOpen(false)} />
       <SavingsDialog

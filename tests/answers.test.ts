@@ -295,3 +295,20 @@ describe("buying on a payment plan", () => {
     expect(pushed.text).toContain("$500 today");
   });
 });
+
+describe("savings, each paycheck", () => {
+  const saving = { planned: 40_000, saved: 10_000, toDo: 15_000, todos: [{ goalName: "Emergency Savings", date: "2026-11-10", remaining: 0, status: "done" }, { goalName: "DreamCon", date: "2026-11-10", remaining: 15_000, status: "todo" }, { goalName: "DreamCon", date: "2026-11-24", remaining: 15_000, status: "coming" }] };
+  it("says what's put aside this month and what's still to do", () => {
+    const withSaving = { ...snap, saving };
+    expect((answerQuestion("how am I doing on savings?", withSaving) as Answer).text).toBe("$100 of $400 put aside this month. Still to do: DreamCon $150 (Nov 10 paycheck).");
+    expect((answerQuestion("what should I save this paycheck", withSaving) as Answer).link).toBe("See savings");
+    const allDone = { ...snap, saving: { planned: 40_000, saved: 40_000, toDo: 0, todos: [] } };
+    expect((answerQuestion("did I save this month", allDone) as Answer).text).toBe("$400 of $400 put aside this month. All done! *proud wag*");
+  });
+
+  it("says whether saving more fits, from the month's numbers and checking before payday", () => {
+    expect(ask("can I save $200 more this month?").text).toBe("Yes: $200 more would still leave $1,034.56 free to spend this month, about $103.45 a day. *proud wag*");
+    expect(ask("can I afford to save $2,000?").text).toMatch(/^Not this month: only \$1,234\.56 is free after bills and the savings already planned\. Saving \$1,234\.56 more would keep the month even\./);
+    expect((answerQuestion("can I put aside $300", { ...snap, cash: 30_000 }) as Answer).text).toMatch(/^Not from checking right now/);
+  });
+});

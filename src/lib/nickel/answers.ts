@@ -41,6 +41,8 @@ export type Snapshot = {
   costs?: { thisMonth: number; thisYear: number; interestYear: number; feesYear: number };
   /** The month in the owner's words: already spent (bills paid, everyday) and spoken for (bills still due, savings). */
   month?: { billsPaid: number; everyday: number; billsDue: number; saving: number };
+  /** This month's savings to-dos (one per goal per paycheck): planned, put aside, and what's still to do. */
+  saving?: { planned: number; saved: number; toDo: number; todos: { goalName: string; date: ISODate; remaining: number; status: string }[] };
 };
 
 export type Verdict = "yes" | "wait" | "no";
@@ -295,6 +297,27 @@ export function answerQuestion(question: string, s: Snapshot, last?: LastVerdict
   if (INVESTING.test(q) && (PURCHASE.test(q) || /\b(should i|is it|good idea|worth)\b/.test(q))) {
     return { text: `That’s investing, and I don’t pick investments: I’m a robot dog, not a financial advisor. What I can tell you: after bills and goals there’s ${money(s.leftToSpend)} left this month.`, href: "/investing", link: "See investing" };
   }
+  // Saving more: can the month (and checking before payday) take it? Asked before purchases, since "afford to save" isn't buying.
+  if (/\b(save|saving|put (aside|away)|set aside)\b/.test(q) && /\b(can i|could i|should i|is it ok|afford)\b/.test(q)) {
+    const extra = amountIn(question);
+    if (extra !== null) {
+      const after = s.leftToSpend - extra;
+      const cashAfter = s.cash === null ? Infinity : s.cash - extra - dueBeforePayday(s);
+      if (cashAfter < 0) return { text: `Not from checking right now: ${money(extra)} more would leave it ${money(cashAfter)} short of the bills due before ${s.nextPayday ? `payday on ${formatShort(s.nextPayday)}` : "the month ends"}. After payday it’s a better time.`, href: "/budget", link: "See savings" };
+      if (after < 0) return { text: `Not this month: only ${money(s.leftToSpend)} is free after bills and the savings already planned. ${s.leftToSpend > 0 ? `Saving ${money(s.leftToSpend)} more would keep the month even.` : "Saving what’s planned is the win this month."}`, href: "/budget", link: "See savings" };
+      return { text: `Yes: ${money(extra)} more would still leave ${money(after)} free to spend this month, about ${money(Math.floor(after / Math.max(1, s.daysLeft)))} a day. *proud wag*`, href: "/budget", link: "See savings" };
+    }
+  }
+  // This month's savings to-dos.
+  if (s.saving && /\b(savings? (to ?do|plan|this month|goals? this month|on track|progress)|(did|have) i (save|saved|put)|how much (should|do) i (save|put aside)|what (should|do) i (save|put aside)|left to save|still to save|save this (paycheck|month)|time to save|how('?s| is| am i doing (on|with)) (my )?savings?)\b/.test(q)) {
+    const sv = s.saving;
+    if (sv.planned === 0) return { text: "No savings planned this month yet. Give a goal a share of each paycheck, or a monthly amount, and I’ll keep track.", href: "/budget", link: "See savings" };
+    const waiting = sv.todos.filter((t) => t.status === "todo" || t.status === "partly");
+    if (waiting.length === 0) return { text: `${money(sv.saved)} of ${money(sv.planned)} put aside this month${sv.saved >= sv.planned ? ". All done! *proud wag*" : ". Nothing waiting: the rest comes with paychecks still to come."}`, href: "/budget", link: "See savings" };
+    const list = waiting.slice(0, 3).map((t) => `${t.goalName} ${money(t.remaining)} (${formatShort(t.date)} paycheck)`);
+    return { text: `${money(sv.saved)} of ${money(sv.planned)} put aside this month. Still to do: ${list.join(", ")}${waiting.length > 3 ? ", and more" : ""}.`, href: "/budget", link: "See savings" };
+  }
+
   // A purchase: a straight answer from the numbers, and he holds to it unless the numbers change.
   const followUp = last !== null && last !== undefined && /\b(what about|how about|and if|if it'?s|if it was|what if)\b/.test(q);
   const asked = planIn(q);

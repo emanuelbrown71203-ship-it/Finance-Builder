@@ -119,5 +119,12 @@ export const MIGRATION_STATEMENTS: string[] = [
   "ALTER TABLE \"items\" ADD COLUMN \"refreshed_at\" timestamp with time zone;",
   "ALTER TABLE \"user_settings\" ADD COLUMN \"notify_money_in\" boolean DEFAULT true NOT NULL;",
   "ALTER TABLE \"user_settings\" ADD COLUMN \"notify_bill_due\" boolean DEFAULT true NOT NULL;",
-  "ALTER TABLE \"user_settings\" ADD COLUMN \"notify_budget\" boolean DEFAULT true NOT NULL;"
+  "ALTER TABLE \"user_settings\" ADD COLUMN \"notify_budget\" boolean DEFAULT true NOT NULL;",
+  "CREATE TABLE \"saving_marks\" (\n\t\"id\" text PRIMARY KEY NOT NULL,\n\t\"user_id\" text NOT NULL,\n\t\"goal_id\" text NOT NULL,\n\t\"date\" text NOT NULL,\n\t\"amount\" bigint NOT NULL,\n\t\"created_at\" timestamp with time zone DEFAULT now() NOT NULL\n);",
+  "ALTER TABLE \"goals\" ADD COLUMN \"paycheck_bp\" integer;",
+  "ALTER TABLE \"user_settings\" ADD COLUMN \"notify_savings\" boolean DEFAULT true NOT NULL;",
+  "ALTER TABLE \"saving_marks\" ADD CONSTRAINT \"saving_marks_user_id_users_id_fk\" FOREIGN KEY (\"user_id\") REFERENCES \"public\".\"users\"(\"id\") ON DELETE cascade ON UPDATE no action;",
+  "ALTER TABLE \"saving_marks\" ADD CONSTRAINT \"saving_marks_goal_id_goals_id_fk\" FOREIGN KEY (\"goal_id\") REFERENCES \"public\".\"goals\"(\"id\") ON DELETE cascade ON UPDATE no action;",
+  "CREATE UNIQUE INDEX \"saving_marks_goal_date_idx\" ON \"saving_marks\" USING btree (\"goal_id\",\"date\");",
+  "CREATE INDEX \"saving_marks_user_idx\" ON \"saving_marks\" USING btree (\"user_id\");"
 ];

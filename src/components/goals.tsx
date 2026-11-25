@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { celebrate } from "@/components/celebrate";
-import { Button, Dialog, ErrorNote, Field, Input, MoneyInput, Select, confirm, cx, toast, type Tone } from "@/components/ui";
+import { Button, Dialog, ErrorNote, Field, Input, MoneyInput, Segmented, Select, confirm, cx, toast, type Tone } from "@/components/ui";
 import { nickelReact } from "@/components/nickel/store";
 import { send, useApi } from "@/components/use-api";
 import { formatMedium, formatShort, monthName, type ISODate } from "@/lib/dates";
@@ -129,6 +129,9 @@ function GoalForm({ goal, today, onClose, onDeleted, onSaved }: { goal: GoalView
   const [saved, setSaved] = useState("");
   const [targetDate, setTargetDate] = useState<string>(goal ? (goal.targetDate ?? "") : quickDates(today)[2].date);
   const [monthly, setMonthly] = useState(goal && goal.monthlyContribution > 0 ? String(goal.monthlyContribution / 100) : "");
+  // How it's saved for: a share of each paycheck (like SoFi's "save 5% of each deposit"), or a set amount a month.
+  const [how, setHow] = useState<"month" | "paycheck">(goal?.paycheckShare ? "paycheck" : "month");
+  const [percent, setPercent] = useState(goal?.paycheckShare ? String(Math.round(goal.paycheckShare * 10_000) / 100) : "");
   // A goal can follow a savings account (a SoFi vault): its balance is what's saved, updating on its own.
   const [accountId, setAccountId] = useState(goal?.account?.id ?? "");
   const { data: accountData } = useApi<AccountsPayload>("/api/accounts");
@@ -149,7 +152,9 @@ function GoalForm({ goal, today, onClose, onDeleted, onSaved }: { goal: GoalView
     const monthlyCents = monthly.trim() ? parseDollarsToCents(monthly) : (suggested ?? 0);
     if (startCents === null || monthlyCents === null) return setError("Amounts should be numbers, like 250.");
     if (targetDate && targetDate <= today && targetDate !== (goal?.targetDate ?? "")) return setError("Pick a date after today.");
-    const body = { name, target: targetCents, monthlyContribution: monthlyCents, targetDate: targetDate || null, accountId: accountId || null };
+    const pct = Number(percent.replace(/[%\s]/g, ""));
+    if (how === "paycheck" && !(pct >= 0.1 && pct <= 50)) return setError("Enter the share of each paycheck, like 5 for 5%.");
+    const body = { name, target: targetCents, monthlyContribution: how === "month" ? monthlyCents : (goal?.monthlyContribution ?? 0), paycheckShare: how === "paycheck" ? pct / 100 : null, targetDate: targetDate || null, accountId: accountId || null };
     setBusy(true);
     try {
       if (goal) await send("PATCH", `/api/goals/${goal.id}`, body);
@@ -211,9 +216,33 @@ function GoalForm({ goal, today, onClose, onDeleted, onSaved }: { goal: GoalView
           To have {dollars(targetCents ?? 0)} by {formatShort(targetDate)}, {savedCents > 0 ? `on top of ${dollars(savedCents)} already saved, ` : ""}that’s <span className="font-bold">{dollars(suggested)} a month</span>.
         </p>
       )}
-      <Field label="Set aside each month" hint={suggested ? `Leave blank to use ${dollars(suggested)}. It’s counted as spoken for, before “free to spend”.` : "Counted as spoken for, before “free to spend”."}>
-        {(id) => <MoneyInput id={id} value={monthly} onChange={(e) => setMonthly(e.target.value)} placeholder={suggested ? String(suggested / 100) : "0"} />}
-      </Field>
+      <div>
+        <p className="mb-1.5 text-small font-bold text-ink-2">How do you save for it?</p>
+        <Segmented<"month" | "paycheck">
+          full
+          label="How you save for it"
+          value={how}
+          onChange={setHow}
+          options={[
+            { value: "paycheck", label: "Share of each paycheck" },
+            { value: "month", label: "Set amount a month" },
+          ]}
+        />
+      </div>
+      {how === "paycheck" ? (
+        <Field label="Share of each paycheck" hint="Each paycheck gets a savings to-do for this share of it, ticked off when the money goes in. It’s counted as spoken for, before “free to spend”.">
+          {(id) => (
+            <div className="flex items-center gap-2">
+              <Input id={id} inputMode="decimal" value={percent} onChange={(e) => setPercent(e.target.value)} placeholder="5" className="max-w-[7rem]" />
+              <span className="font-bold text-ink-2">%</span>
+            </div>
+          )}
+        </Field>
+      ) : (
+        <Field label="Set aside each month" hint={suggested ? `Leave blank to use ${dollars(suggested)}. It’s split across the month’s paychecks, and counted as spoken for, before “free to spend”.` : "Split across the month’s paychecks, and counted as spoken for, before “free to spend”."}>
+          {(id) => <MoneyInput id={id} value={monthly} onChange={(e) => setMonthly(e.target.value)} placeholder={suggested ? String(suggested / 100) : "0"} />}
+        </Field>
+      )}
       {error && <ErrorNote message={error} />}
       <div className="flex flex-wrap justify-between gap-2">
         {goal ? (

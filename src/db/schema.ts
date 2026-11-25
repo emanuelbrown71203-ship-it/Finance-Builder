@@ -147,12 +147,32 @@ export const goals = pgTable(
     target: cents("target").notNull(),
     saved: cents("saved").notNull().default(0),
     monthlyContribution: cents("monthly_contribution").notNull().default(0),
+    /** Saved as a share of each paycheck instead of a set amount a month: hundredths of a percent, 500 = 5%. */
+    paycheckBp: integer("paycheck_bp"),
     targetDate: text("target_date"),
     /** A goal that follows a real account (a SoFi vault): its balance is what's saved, updating on its own. */
     accountId: text("account_id").references(() => accounts.id, { onDelete: "set null" }),
     createdAt: createdAt(),
   },
   (t) => [index("goals_user_idx").on(t.userId)],
+);
+
+/**
+ * A change to one paycheck's savings for a goal ("save less this time", "skip this one"). Each paycheck's
+ * savings are worked out from the goal's plan; only these choices are kept. Amount 0 is a skip.
+ */
+export const savingMarks = pgTable(
+  "saving_marks",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    goalId: text("goal_id").notNull().references(() => goals.id, { onDelete: "cascade" }),
+    /** The paycheck (or the 1st of the month, with no paycheck to go by) the savings belong to. */
+    date: text("date").notNull(),
+    amount: cents("amount").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex("saving_marks_goal_date_idx").on(t.goalId, t.date), index("saving_marks_user_idx").on(t.userId)],
 );
 
 /** Each time money is put toward a goal (or taken back out), so progress can be drawn against the plan. */
@@ -361,6 +381,8 @@ export const userSettings = pgTable("user_settings", {
   notifyBillDue: boolean("notify_bill_due").notNull().default(true),
   /** A budget category at 80%, and again if it goes over. */
   notifyBudget: boolean("notify_budget").notNull().default(true),
+  /** A paycheck's savings still to put aside. */
+  notifySavings: boolean("notify_savings").notNull().default(true),
 });
 
 /** A passkey: Face ID, Touch ID or a security key registered for sign-in. Only the public half is stored. */
