@@ -8,7 +8,8 @@ import { APP_NAME } from "@/lib/config";
 import { Logo } from "./shell";
 import { Button, ErrorNote, Field, Input } from "./ui";
 
-export function AuthForm({ mode }: { mode: "login" | "signup" }) {
+/** `open`: whether new accounts can be made (an invite code is set). Closed, sign-up shows a note instead of a form. */
+export function AuthForm({ mode, open = true }: { mode: "login" | "signup"; open?: boolean }) {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -67,6 +68,24 @@ export function AuthForm({ mode }: { mode: "login" | "signup" }) {
   };
 
   const signup = mode === "signup";
+  if (signup && !open) {
+    return (
+      <main className="mx-auto flex min-h-dvh w-full max-w-md flex-col justify-center px-5 py-12">
+        <div className="mb-8 flex items-center gap-2.5">
+          <Logo size={32} />
+          <span className="display text-title">{APP_NAME}</span>
+        </div>
+        <h1 className="display text-headline">New accounts are closed</h1>
+        <p className="mt-2 text-ink-2">Passbook is one household’s app, by invitation only.</p>
+        <p className="mt-5 text-small text-ink-2">
+          Already have an account?{" "}
+          <Link href="/login" className="font-medium text-accent-text hover:underline">
+            Sign in
+          </Link>
+        </p>
+      </main>
+    );
+  }
   return (
     <main className="mx-auto flex min-h-dvh w-full max-w-md flex-col justify-center px-5 py-12">
       <div className="mb-8 flex items-center gap-2.5">
@@ -100,12 +119,14 @@ export function AuthForm({ mode }: { mode: "login" | "signup" }) {
         </Button>
       </form>
 
-      <p className="mt-5 text-small text-ink-2">
-        {signup ? "Already have an account? " : "New here? "}
-        <Link href={signup ? "/login" : "/signup"} className="font-medium text-accent-text hover:underline">
-          {signup ? "Sign in" : "Create an account"}
-        </Link>
-      </p>
+      {(signup || open) && (
+        <p className="mt-5 text-small text-ink-2">
+          {signup ? "Already have an account? " : "New here? "}
+          <Link href={signup ? "/login" : "/signup"} className="font-medium text-accent-text hover:underline">
+            {signup ? "Sign in" : "Create an account"}
+          </Link>
+        </p>
+      )}
     </main>
   );
 }

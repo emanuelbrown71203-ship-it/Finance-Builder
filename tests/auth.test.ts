@@ -21,12 +21,13 @@ import { POST as connectorRoute } from "@/app/api/connector/route";
 import { DELETE as deleteAccountRoute, GET as meRoute } from "@/app/api/me/route";
 import { getDb, type DB } from "@/db";
 import { connectorTokens, items, passkeys, rateLimits, sessions, users } from "@/db/schema";
-import { databaseNeedsTls, databaseTls, databaseUrl, liveConfigProblem } from "@/lib/config";
+import { SESSION_COOKIE, databaseNeedsTls, databaseTls, databaseUrl, liveConfigProblem } from "@/lib/config";
 import { contextForKey } from "@/server/connector";
 import { decryptSecret, encryptSecret, hashPassword, passwordNeedsUpgrade, sha256, verifyPassword } from "@/server/crypto";
 import { describeError } from "@/server/errors";
 import { removeItem } from "@/server/plaid";
 import { assertUnderLimit, clientAddress, limitKey } from "@/server/rate-limit";
+import { signUp } from "@/server/auth";
 
 const SITE = "https://passbook.test";
 const none = { params: Promise.resolve({}) };
@@ -317,6 +318,31 @@ describe("rate limits", () => {
     } finally {
       delete process.env.VERCEL;
     }
+  });
+
+  it("once refused, refuse again from memory without counting each attempt in the database", async () => {
+    const key = `memory-bucket:${sha256("flooder").slice(0, 32)}`;
+    const counted = async () => (await db.select({ count: rateLimits.count }).from(rateLimits).where(eq(rateLimits.key, key)))[0]?.count;
+    for (let i = 0; i < 2; i++) await limitKey("memory-bucket", "flooder", 2, 60_000);
+    await expect(limitKey("memory-bucket", "flooder", 2, 60_000)).rejects.toThrow("Too many attempts");
+    expect(await counted()).toBe(3);
+    for (let i = 0; i < 20; i++) await expect(limitKey("memory-bucket", "flooder", 2, 60_000)).rejects.toThrow("Too many attempts");
+    expect(await counted()).toBe(3);
+    // Someone else is unaffected.
+    await limitKey("memory-bucket", "someone else", 2, 60_000);
+  });
+
+  it("stop looking up made-up sign-in cookies from an address that keeps sending them", async () => {
+    const made = await signUp({ name: "Flo", email: `flo${Date.now()}@example.com`, password: "correct horse battery" });
+    if (!made.ok) throw new Error(made.error);
+    const real = made.cookie.split(";")[0];
+    const flooder = freshIp();
+    expect((await meRoute(req("/api/me", { method: "GET", cookie: real, ip: flooder }), none)).status).toBe(200);
+    for (let i = 0; i < 60; i++) expect((await meRoute(req("/api/me", { method: "GET", cookie: `${SESSION_COOKIE}=made-up-${i}`, ip: flooder }), none)).status).toBe(401);
+    // For the rest of the minute that address's cookies aren't looked up at all, even a real one…
+    expect((await meRoute(req("/api/me", { method: "GET", cookie: real, ip: flooder }), none)).status).toBe(401);
+    // …while the same sign-in from anywhere else works as usual.
+    expect((await meRoute(req("/api/me", { method: "GET", cookie: real, ip: freshIp() }), none)).status).toBe(200);
   });
 });
 

@@ -1,18 +1,19 @@
 import { connection } from "next/server";
 import { sql as q } from "drizzle-orm";
 import { getDb } from "@/db";
-import { databaseTls, databaseUrl, isDemoMode, liveConfigProblem } from "@/lib/config";
+import { databaseUrl, isDemoMode, liveConfigProblem } from "@/lib/config";
 import { describeError } from "@/server/errors";
 
 /*
  * "Is this site ready?" Says whether it is showing sample data or real data,
  * and whether the real database answers. It is how a new set-up is checked
  * before anyone signs in, and it tells a visitor nothing about anyone's
- * money: one of four words about the database, and at most an error code.
+ * money: one of four words about the database (any error code goes only to
+ * the server log).
  *
  * Each running copy of the server asks the database at most once a minute,
- * with one short-lived connection, so this address can't be used to keep it
- * busy beyond a handful of connections.
+ * through its own one connection, so this address can't be used to keep the
+ * database busy or use up its connections.
  */
 
 type Database = { database: "none" | "ok" | "not-installed" | "unreachable"; code?: string };
@@ -38,21 +39,20 @@ async function poolCheck(): Promise<Pool> {
 }
 
 async function probe(): Promise<Database> {
-  const url = databaseUrl();
-  if (!url) return { database: "none" };
-  const { default: postgres } = await import("postgres");
-  const sql = postgres(url, { prepare: false, max: 1, connect_timeout: 8, idle_timeout: 1, onnotice: () => {}, ...databaseTls(url) });
+  if (!databaseUrl()) return { database: "none" };
   try {
+    // Through the app's own connection, so a check never takes one more from the database's few.
     // Reading a count proves the address, the login and its permissions in one go.
-    await sql`select count(*) from users`;
+    const db = await getDb();
+    await db.execute(q`select count(*) from users`);
     return { database: "ok" };
   } catch (error) {
-    const code = typeof (error as { code?: unknown })?.code === "string" ? (error as { code: string }).code.slice(0, 40) : undefined;
+    const raw = (error as { cause?: { code?: unknown }; code?: unknown }) ?? {};
+    const found = typeof raw.code === "string" ? raw.code : typeof raw.cause?.code === "string" ? raw.cause.code : undefined;
+    const code = found?.slice(0, 40);
     if (code === "42P01") return { database: "not-installed", code };
-    console.error("Health check:", describeError(error));
+    console.error("Health check:", describeError(error), code ?? "");
     return { database: "unreachable", code };
-  } finally {
-    await sql.end({ timeout: 2 }).catch(() => {});
   }
 }
 

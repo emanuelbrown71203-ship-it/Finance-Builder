@@ -6,7 +6,7 @@ import { isValidTimeZone, todayIn, type ISODate } from "@/lib/dates";
 import { hashPassword, passwordNeedsUpgrade, randomToken, sha256, verifyPassword } from "./crypto";
 import { demoToday, ensureDemo } from "./demo";
 import { HttpError } from "./errors";
-import { limitKey } from "./rate-limit";
+import { clientAddress, limitKey, strike, struckOut } from "./rate-limit";
 
 /** A session ends 30 days after sign-in at the latest, or after 14 days without being used. */
 const SESSION_DAYS = 30;
@@ -50,6 +50,10 @@ export async function getContext(request: Request): Promise<Ctx | null> {
 
   const token = readCookie(request, SESSION_COOKIE);
   if (!token) return null;
+  // An address sending cookie after cookie that matches no sign-in is making up cookies: for the rest
+  // of the minute its cookies aren't looked up. (A real phone with an old cookie sends a few, then signs in.)
+  const from = clientAddress(request);
+  if (struckOut(db, "bad-session", from, 60, 60_000)) return null;
   const now = new Date();
   const [row] = await db
     .select({ id: users.id, name: users.name, email: users.email, sessionId: sessions.id, lastSeenAt: sessions.lastSeenAt, authAt: sessions.authAt })
@@ -57,7 +61,10 @@ export async function getContext(request: Request): Promise<Ctx | null> {
     .innerJoin(users, eq(users.id, sessions.userId))
     .where(and(eq(sessions.id, sha256(token)), gt(sessions.expiresAt, now), gt(sessions.lastSeenAt, new Date(now.getTime() - IDLE_DAYS * 86_400_000))))
     .limit(1);
-  if (!row) return null;
+  if (!row) {
+    strike(db, "bad-session", from, 60_000);
+    return null;
+  }
   // Note that it's in use, at most once every ten minutes.
   if (now.getTime() - row.lastSeenAt.getTime() > 10 * 60_000) await db.update(sessions).set({ lastSeenAt: now }).where(eq(sessions.id, row.sessionId));
 

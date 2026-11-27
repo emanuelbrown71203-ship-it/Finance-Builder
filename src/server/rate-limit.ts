@@ -17,6 +17,15 @@ export async function limitKey(bucket: string, subject: string, max: number, win
   const db = await getDb();
   const key = keyFor(bucket, subject);
   const now = new Date();
+  // Already refused in this window: refused again here, without asking the database, so a flood of
+  // refused requests can't keep it busy.
+  // (For a minute at a time, then the database is asked again, in case its counters were cleared.)
+  const known = refusedIn(db);
+  const hit = known.get(key);
+  if (hit) {
+    if (hit.since + windowMs > now.getTime() && hit.until > now.getTime()) throw new HttpError(429, "Too many attempts. Wait a few minutes and try again.");
+    known.delete(key);
+  }
   // Dates inside hand-written SQL are bound through the column, so they are sent the way the column expects.
   const cutoff = sql.param(new Date(now.getTime() - windowMs), rateLimits.windowStart);
   const start = sql.param(now, rateLimits.windowStart);
@@ -31,10 +40,65 @@ export async function limitKey(bucket: string, subject: string, max: number, win
         windowStart: sql`case when ${rateLimits.windowStart} < ${cutoff} then ${start} else ${rateLimits.windowStart} end`,
       },
     })
-    .returning({ count: rateLimits.count });
+    .returning({ count: rateLimits.count, windowStart: rateLimits.windowStart });
   // Now and then, clear out counters nobody has touched for a day.
   if (Math.random() < 0.02) await db.delete(rateLimits).where(lt(rateLimits.windowStart, new Date(now.getTime() - 86_400_000)));
-  if (row.count > max) throw new HttpError(429, "Too many attempts. Wait a few minutes and try again.");
+  if (row.count > max) {
+    remember(known, key, new Date(row.windowStart).getTime());
+    throw new HttpError(429, "Too many attempts. Wait a few minutes and try again.");
+  }
+}
+
+/*
+ * In memory, for this running copy of the server only (each copy keeps its own). Cheap enough to check
+ * before the database is asked anything. Kept per database, so a fresh one (in tests) starts clean.
+ */
+const refused = new WeakMap<object, Map<string, { since: number; until: number }>>();
+const strikes = new WeakMap<object, Map<string, { count: number; since: number }>>();
+const MEMORY = 10_000;
+
+function refusedIn(db: object): Map<string, { since: number; until: number }> {
+  let map = refused.get(db);
+  if (!map) refused.set(db, (map = new Map()));
+  return map;
+}
+
+/** When a key's window started, once the database has refused it. */
+function remember(map: Map<string, { since: number; until: number }>, key: string, since: number) {
+  const now = Date.now();
+  if (map.size >= MEMORY) {
+    for (const [k, hit] of map) if (hit.until <= now) map.delete(k);
+    if (map.size >= MEMORY) map.clear();
+  }
+  map.set(key, { since, until: now + 60_000 });
+}
+
+function strikesIn(db: object) {
+  let map = strikes.get(db);
+  if (!map) strikes.set(db, (map = new Map()));
+  return map;
+}
+
+/**
+ * Something that needs no limit of its own, but costs a look in the database each time (a sign-in cookie
+ * that turns out to be no good). Counted here in memory: `struckOut` says a subject has had `max` in the
+ * window, and `strike` counts one more.
+ */
+export function struckOut(db: object, bucket: string, subject: string, max: number, windowMs: number): boolean {
+  const hit = strikesIn(db).get(keyFor(bucket, subject));
+  return !!hit && hit.since + windowMs > Date.now() && hit.count >= max;
+}
+
+export function strike(db: object, bucket: string, subject: string, windowMs: number): void {
+  const map = strikesIn(db);
+  const key = keyFor(bucket, subject);
+  const now = Date.now();
+  const hit = map.get(key);
+  if (hit && hit.since + windowMs > now) hit.count++;
+  else {
+    if (map.size >= MEMORY) map.clear();
+    map.set(key, { count: 1, since: now });
+  }
 }
 
 /** Refuses when a limit has already been reached, without counting this request towards it. */

@@ -164,7 +164,11 @@ Demo mode ends when Plaid keys are present. You need three things:
    `openssl rand -base64 32`) and `APP_URL` (where the app is hosted: sign-in, passkeys and
    the same-site check are tied to it, and Plaid calls `/api/plaid/webhook` on it).
 4. **An invite code.** `SIGNUP_CODE`: new accounts need it. With none set, sign-up is closed.
-   Make it long, and remove it once everyone in the household has an account.
+   Make it long, and remove it once everyone in the household has an account (then redeploy:
+   the sign-in pages read it when the site is built).
+5. **No login wall in front of the site.** Plaid's webhook (`/api/plaid/webhook`), the Apple Card
+   tap link and the Claude connector must reach the app, so the host's own login protection
+   (Vercel Authentication) can cover previews but not the live address.
 
 A deployed site with Plaid keys refuses to answer until the database, the address and the
 encryption key are all in place, so real data can never land in the in-memory database.
@@ -258,7 +262,7 @@ Conventions worth knowing before changing things:
 - Passwords are hashed with scrypt at OWASP's recommended strength; common ones and ones built
   from your name or email are refused. Passkeys store only the public half of the key and
   always check it's you (face, fingerprint or PIN).
-- New accounts are by invite code only.
+- New accounts are by invite code only, and with no code set sign-up is closed.
 - Sessions are random tokens stored hashed, in an HttpOnly, SameSite=Lax cookie (Secure and
   `__Host-` prefixed in production). They end after 30 days, or 14 days unused. You can change
   your password (which signs out every other device) or sign out of every device at once

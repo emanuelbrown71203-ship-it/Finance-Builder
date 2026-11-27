@@ -234,12 +234,22 @@ for it to be remembered and used whenever an app is built.
 - **Never `console.error(error)`.** Log `describeError(error)` (`src/server/errors.ts`). A raw Plaid
   error carries the Plaid secret and a bank token; a raw database error carries the query's values.
   Every Plaid call goes through `call()` in `src/server/plaid.ts`, which strips them.
-- New sign-in or key-guessing surfaces get a rate limit (`src/server/rate-limit.ts`). Dates inside
+- New sign-in or key-guessing surfaces get a rate limit (`src/server/rate-limit.ts`). Once the database
+  refuses a key, that server copy refuses it again from memory for a minute, and an address sending
+  cookies that match no sign-in (60 a minute) isn't looked up for the rest of the minute, so a flood
+  can't use up the database's few connections. Dates inside
   hand-written `sql` are bound with `sql.param(date, column)`: the in-memory database accepts a bare
   Date, real Postgres does not.
 - Anything that adds a way into the account (a passkey, a connector key) or destroys it uses
   `withUser(handler, { fresh: true })`, which asks the person to confirm it’s them.
-- New accounts need the invite code (`SIGNUP_CODE`). Don’t reopen sign-up.
+- **Sign-up is closed**: there's no `SIGNUP_CODE` on the live site (the owner will say if someone should
+  get an account; then set it, redeploy, and remove it again after). The sign-in pages read it when
+  the site is built. Don't reopen sign-up any other way.
+- **Vercel Authentication stays off for the live address** (the project's protection covers only
+  previews and per-deployment URLs). Plaid's webhook, the Apple Card tap link and the Claude connector
+  have to reach the app from outside, and with the wall on, bank updates (and so notifications) only
+  arrived when the owner opened the app. The app's own sign-in, the closed sign-up and the checks above
+  are what keep it private.
 - With real data the site’s address is `APP_URL` and nothing else: never read it from a request header.
 - On Supabase, `DATABASE_URL` uses the **session** pooler (port 5432). The transaction pooler (6543)
   hangs on the driver's pipelined queries, which takes the whole live site down. The session pooler

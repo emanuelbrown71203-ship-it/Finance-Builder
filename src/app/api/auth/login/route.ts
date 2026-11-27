@@ -13,8 +13,9 @@ export const POST = publicRoute(async (request) => {
   // The tight limit is per account and per address together, so a stranger hammering
   // someone's email from elsewhere can't lock the real owner out of their own account.
   await limitKey("login-pair", `${email}|${clientAddress(request)}`, 10, 15 * 60_000);
-  // A far higher ceiling across all addresses still slows guesses spread over many of them.
-  await limitKey("login-account", email, 300, 60 * 60_000);
+  // A higher ceiling across all addresses slows guesses spread over many of them: 30 an hour is
+  // more than a person mistyping, and far too few to guess a password. (Face ID still signs in.)
+  await limitKey("login-account", email, 30, 60 * 60_000);
   const result = await signIn(parsed.data, request);
   if (!result.ok) throw new HttpError(401, result.error);
   return json({ ok: true }, { headers: { "set-cookie": result.cookie } });

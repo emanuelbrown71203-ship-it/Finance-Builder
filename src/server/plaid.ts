@@ -520,10 +520,19 @@ const keyCache = new Map<string, { jwk: JWK | null; until: number }>();
 const KEY_TTL = 3_600_000;
 const MISS_TTL = 5 * 60_000;
 const MAX_KEYS = 100;
+/** Plaid is asked about at most this many key ids it hasn't told us about yet, per minute. */
+const MAX_LOOKUPS = 10;
+let lookups: number[] = [];
 
 async function signingKey(kid: string): Promise<JWK | null> {
   const hit = keyCache.get(kid);
   if (hit && hit.until > Date.now()) return hit.jwk;
+  // Made-up key ids could otherwise send Plaid a request each, until Plaid starts refusing ours, real
+  // webhooks included. Plaid uses one key for months, and sends a webhook again when one is turned away.
+  const now = Date.now();
+  lookups = lookups.filter((at) => at > now - 60_000);
+  if (lookups.length >= MAX_LOOKUPS) return null;
+  lookups.push(now);
   let jwk: JWK | null = null;
   try {
     const response = await call(() => plaidClient().webhookVerificationKeyGet({ key_id: kid }));
@@ -535,7 +544,11 @@ async function signingKey(kid: string): Promise<JWK | null> {
     // rate limiting us is not the same thing, and remembering it would turn real webhooks away.
     if (!(error instanceof PlaidFailure) || error.status !== 400) throw error;
   }
-  if (keyCache.size >= MAX_KEYS) keyCache.clear();
+  if (keyCache.size >= MAX_KEYS) {
+    // Ids Plaid didn't know go first, so a flood of made-up ones never pushes out the real key.
+    for (const [id, entry] of keyCache) if (!entry.jwk || entry.until <= Date.now()) keyCache.delete(id);
+    if (keyCache.size >= MAX_KEYS) keyCache.clear();
+  }
   keyCache.set(kid, { jwk, until: Date.now() + (jwk ? KEY_TTL : MISS_TTL) });
   return jwk;
 }
@@ -548,7 +561,7 @@ export async function verifyWebhook(rawBody: string, signedJwt: string | null): 
   if (!signedJwt || signedJwt.length > 4000) return false;
   try {
     const header = decodeProtectedHeader(signedJwt);
-    if (header.alg !== "ES256" || !header.kid || header.kid.length > 200) return false;
+    if (header.alg !== "ES256" || !header.kid || !/^[A-Za-z0-9_-]{1,64}$/.test(header.kid)) return false;
     const jwk = await signingKey(header.kid);
     if (!jwk) return false;
     const { payload } = await jwtVerify(signedJwt, await importJWK(jwk, "ES256"), { algorithms: ["ES256"], maxTokenAge: "5 min" });

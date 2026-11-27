@@ -32,6 +32,9 @@ export const POST = publicRoute(async (request) => {
   await limit(request, "client-error", 30, 10 * 60_000);
   const body = await readBody(request, Body);
   const path = body.path.split("?")[0].split("#")[0];
-  console.error(`Client ${body.kind} on ${path} (build ${body.build ?? "?"}; ${body.agent ?? "unknown browser"}): ${body.message}${body.digest ? ` [digest ${body.digest}]` : ""}${body.stack ? `\n${body.stack}` : ""}`);
+  // Only the stack keeps its line breaks, each line indented, so nothing sent can pass for a line of the server's own.
+  const oneLine = (s: string) => s.replace(/\n/g, " ");
+  const stack = body.stack ? `\n${body.stack.split("\n").map((line) => `    | ${line}`).join("\n")}` : "";
+  console.error(`Client ${body.kind} on ${oneLine(path)} (build ${oneLine(body.build ?? "?")}; ${oneLine(body.agent ?? "unknown browser")}): ${oneLine(body.message)}${body.digest ? ` [digest ${oneLine(body.digest)}]` : ""}${stack}`);
   return json({ ok: true });
 });
