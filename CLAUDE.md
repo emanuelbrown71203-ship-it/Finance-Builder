@@ -242,8 +242,8 @@ for it to be remembered and used whenever an app is built.
   Date, real Postgres does not.
 - Anything that adds a way into the account (a passkey, a connector key) or destroys it uses
   `withUser(handler, { fresh: true })`, which asks the person to confirm it’s them.
-- **Sign-up is closed**: there's no `SIGNUP_CODE` on the live site (the owner will say if someone should
-  get an account; then set it, redeploy, and remove it again after). The sign-in pages read it when
+- **Sign-up is closed**: `SIGNUP_CODE` is empty on the live site (the owner will say if someone should
+  get an account; then give it a new long code, redeploy, and empty it again after). The sign-in pages read it when
   the site is built. Don't reopen sign-up any other way.
 - **Vercel Authentication stays off for the live address** (the project's protection covers only
   previews and per-deployment URLs). Plaid's webhook, the Apple Card tap link and the Claude connector

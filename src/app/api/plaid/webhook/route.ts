@@ -4,7 +4,7 @@ import { liveConfigProblem, plaidConfig } from "@/lib/config";
 import { describeError } from "@/server/errors";
 import { HttpError, json } from "@/server/http";
 import { handleWebhook, verifyWebhook } from "@/server/plaid";
-import { limit } from "@/server/rate-limit";
+import { clientAddress, limit } from "@/server/rate-limit";
 
 /**
  * Plaid calls this when a bank has new data. We check the signature, answer
@@ -21,7 +21,7 @@ export async function POST(request: Request) {
     return json({ error: "Try again." }, { status: 500 });
   }
   const raw = await request.text();
-  if (raw.length > 100_000 || !(await verifyWebhook(raw, request.headers.get("plaid-verification")))) {
+  if (raw.length > 100_000 || !(await verifyWebhook(raw, request.headers.get("plaid-verification"), clientAddress(request)))) {
     return json({ error: "Invalid signature." }, { status: 401 });
   }
   const body = JSON.parse(raw);

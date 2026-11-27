@@ -63,5 +63,6 @@ export async function GET() {
   const [database, pool] = await last.result;
   const sample = isDemoMode();
   const ready = sample ? pool === "ok" : liveConfigProblem() === null && database.database === "ok" && pool === "ok";
-  return Response.json({ mode: sample ? "sample" : "live", ready, ...database, pool, build: process.env.NEXT_PUBLIC_BUILD_ID ?? null }, { headers: { "cache-control": "no-store" } });
+  // The database's error code goes to the server log (above), not to whoever asked.
+  return Response.json({ mode: sample ? "sample" : "live", ready, database: database.database, pool, build: process.env.NEXT_PUBLIC_BUILD_ID ?? null }, { headers: { "cache-control": "no-store" } });
 }

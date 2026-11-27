@@ -520,19 +520,36 @@ const keyCache = new Map<string, { jwk: JWK | null; until: number }>();
 const KEY_TTL = 3_600_000;
 const MISS_TTL = 5 * 60_000;
 const MAX_KEYS = 100;
-/** Plaid is asked about at most this many key ids it hasn't told us about yet, per minute. */
-const MAX_LOOKUPS = 10;
-let lookups: number[] = [];
+/**
+ * Plaid is asked about key ids it hasn't told us about yet at most 3 times a minute for each sender, and
+ * 30 times a minute in all. Plaid sends from a few addresses of its own, so made-up webhooks from
+ * elsewhere can't use up its share.
+ */
+const LOOKUPS_EACH = 3;
+const LOOKUPS_ALL = 30;
+const lookups = new Map<string, number[]>();
 
-async function signingKey(kid: string): Promise<JWK | null> {
+function mayLookUp(from: string): boolean {
+  const now = Date.now();
+  let all = 0;
+  for (const [sender, times] of lookups) {
+    const recent = times.filter((at) => at > now - 60_000);
+    if (recent.length === 0) lookups.delete(sender);
+    else lookups.set(sender, recent);
+    all += recent.length;
+  }
+  const mine = lookups.get(from) ?? [];
+  if (mine.length >= LOOKUPS_EACH || all >= LOOKUPS_ALL) return false;
+  lookups.set(from, [...mine, now]);
+  return true;
+}
+
+async function signingKey(kid: string, from: string): Promise<JWK | null> {
   const hit = keyCache.get(kid);
   if (hit && hit.until > Date.now()) return hit.jwk;
   // Made-up key ids could otherwise send Plaid a request each, until Plaid starts refusing ours, real
   // webhooks included. Plaid uses one key for months, and sends a webhook again when one is turned away.
-  const now = Date.now();
-  lookups = lookups.filter((at) => at > now - 60_000);
-  if (lookups.length >= MAX_LOOKUPS) return null;
-  lookups.push(now);
+  if (!mayLookUp(from)) return null;
   let jwk: JWK | null = null;
   try {
     const response = await call(() => plaidClient().webhookVerificationKeyGet({ key_id: kid }));
@@ -557,12 +574,12 @@ async function signingKey(kid: string): Promise<JWK | null> {
  * Confirms a webhook really came from Plaid.
  * https://plaid.com/docs/api/webhooks/webhook-verification/
  */
-export async function verifyWebhook(rawBody: string, signedJwt: string | null): Promise<boolean> {
+export async function verifyWebhook(rawBody: string, signedJwt: string | null, from = "unknown"): Promise<boolean> {
   if (!signedJwt || signedJwt.length > 4000) return false;
   try {
     const header = decodeProtectedHeader(signedJwt);
     if (header.alg !== "ES256" || !header.kid || !/^[A-Za-z0-9_-]{1,64}$/.test(header.kid)) return false;
-    const jwk = await signingKey(header.kid);
+    const jwk = await signingKey(header.kid, from);
     if (!jwk) return false;
     const { payload } = await jwtVerify(signedJwt, await importJWK(jwk, "ES256"), { algorithms: ["ES256"], maxTokenAge: "5 min" });
     const claimed = Buffer.from(String(payload.request_body_sha256 ?? ""), "hex");
